@@ -202,19 +202,28 @@ The two questions this plan was asked to answer, in order.
 
 ### Can nix install a package from a local folder?
 
-Yes, three ways, and only the third belongs in a committed config.
+Yes, three ways - but they are not three candidates for one job. Each answers a different question,
+two are in routine use, one is rejected outright, and exactly one carries a rule about where it may
+appear. Together with the dev symlink from the next section:
+
+| Want | Reach for | Verdict |
+| --- | --- | --- |
+| an edit live on the next hook fire | `just link`, which is not nix at all - next section | **the everyday loop** |
+| "does the packaging build and run?" | `nix build` / `nix run` on the checkout | **use freely** |
+| the real config, built once from a local checkout | `--override-input` at switch time | **use when it matters, never committed** |
+| a local checkout wired into the config permanently | a `path:` flake input | **rejected** |
 
 **1. A `path:` flake input.** `inputs.tmux-agent-status.url = "path:/home/you/src/tmux-agent-status"`.
-It works and it is the obvious thing to reach for, and it is wrong for a config shared by two
-machines: the URL is an absolute machine-local path, so committing it breaks the other machine, and
-the lock file records a `narHash` of the directory that changes on **every edit**, so each rebuild
-needs a `nix flake lock --update-input` first. Rejected for the tracked config; fine in a scratch
-flake.
+The obvious thing to reach for, and wrong for a config shared by two machines: the URL is an
+absolute machine-local path, so committing it breaks the other machine, and the lock records a
+`narHash` of the directory that changes on **every edit**, so each rebuild needs a
+`nix flake lock --update-input` first. **Rejected** for the tracked config. Fine in a throwaway
+flake, where neither problem exists.
 
 **2. `nix run` / `nix build` against the checkout.** `nix run ~/src/tmux-agent-status -- --version`
-builds and runs the local flake with the real derivation and touches no config at all. This is the
-right way to answer "does my packaging work" and it is what `just nix-build` wraps. It does not
-install anything.
+builds and runs the local flake with the real derivation and touches no config at all. **Use
+freely** - it installs nothing, so there is nothing to clean up or forget. This is how "does my
+packaging work" gets answered, and it is what `just nix-build` wraps.
 
 **3. `--override-input` at switch time.** The dotfiles flake pins the GitHub input as normal, and a
 local checkout is swapped in for one rebuild:
@@ -224,9 +233,11 @@ sudo darwin-rebuild switch --flake "$HOME/.dotfiles#mac" \
   --override-input tmux-agent-status path:$HOME/src/tmux-agent-status
 ```
 
-Nothing is committed, the lock is untouched, and dropping the flag reverts. This is the mechanism
-for "build my working copy into the real config for real", and the one to document in the dotfiles
-repo. It costs a full rebuild per iteration, which is why it is not the everyday loop.
+**Use when it matters, never committed.** This is the only way to see a local build inside the real
+config - the installed binary, on the real PATH, under the real hooks - so it is what a change gets
+verified with before it is tagged. Nothing is committed, the lock is untouched, and dropping the
+flag reverts. It costs a full rebuild per iteration, which is why it is not the everyday loop and
+why option 1 is not worth the persistence it would buy.
 
 ### Can it be installed editable?
 
@@ -313,10 +324,10 @@ install.
 
 | Deferred | Until |
 | --- | --- |
-| config file (icons, `nerdfont`, which states ring) | defaults are shipped as constants; a config file is the first real dependency (`serde`/`toml`) and should wait for a second opinion about the defaults |
+| config file (`nerdfont`, the `status_icons` overrides, which states ring) | the defaults are settled in 001 and ship as constants; the file that makes them overridable is the first real dependency (`serde`/`toml`) and can wait |
 | agents other than Claude Code | the per-agent tables are data; adding the second agent is what shows whether the shape is right, and it is not what the skeleton is proving |
 | the optional `error` recolour snippet | documented in the README as opt-in, shipped as a comment in the tmux snippet - no code |
-| `working` decay to `Unknown` | open in 001, and it needs a clock the status bar does not have |
+| the `stale` 💤 state | decided in 001 and explicitly not first-version: it needs a stored timestamp and age arithmetic in the format string |
 | man page, Homebrew formula, CHANGELOG | README first, one shared tap later, generated changelog at the second release |
 | the process-ancestry fallback for pane resolution | `$TMUX_PANE` is present in every hook environment that matters; the fallback is for cases none of which have been observed |
 
