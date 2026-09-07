@@ -258,7 +258,7 @@ Four changes, each small and each reviewable in a diff. This is the whole instal
 **1. A flake input and its package.** In `flake.nix`:
 
 ```nix
-tmux-agent-status.url = "github:<owner>/tmux-agent-status";
+tmux-agent-status.url = "github:gerbenoostra/tmux-agent-status";
 tmux-agent-status.inputs.nixpkgs.follows = "nixpkgs";
 ```
 
@@ -336,9 +336,8 @@ Steps 1-5 are the tool, 6-8 are the delivery path, 9 is what makes it walking ra
 
 ## Open
 
-- **The GitHub owner is a placeholder.** `<owner>` appears in the install lines above and in the
-  README; it is the one value that must be filled in before anything is pushed. No remote is
-  configured yet.
+- **No remote is configured yet.** The repo will live at
+  `github.com/gerbenoostra/tmux-agent-status`; nothing has been pushed.
 - Whether the sibling tools share a `.github` workflow through a template repo or copy it. Copying
   is right at one repo; the question becomes real at the third.
 - Whether the release workflow should also publish to crates.io. `cargo install agent-status` is a
