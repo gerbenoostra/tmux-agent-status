@@ -1,8 +1,6 @@
 # 002 - Walking skeleton: layout, build, CI/CD and install
 
 Status: todo - plan written, nothing implemented
-Sessions:
-- https://claude.ai/code/session_01HjZAZvsVCBggTJdxqpAiFm
 
 Covers *how the project is built and shipped*. What it does and why is 001, which is normative;
 this file never restates a behavioural decision, only the machinery around it.
@@ -11,7 +9,7 @@ this file never restates a behavioural decision, only the machinery around it.
 
 A **walking** skeleton, in Cockburn's sense: a thin slice through every layer the finished tool will
 have, including build and deployment, running end to end. Not a scaffold. When it is done, a real
-Claude Code `Stop` hook must put a real ✅ on a real tmux window entry, from a binary that came out
+agent `Stop` hook must put a real ✅ on a real tmux window entry, from a binary that came out
 of the packaging path the tool ships to everybody else - not from a `cargo run` in a checkout.
 
 Concretely, the skeleton is done when all six are true:
@@ -21,7 +19,7 @@ Concretely, the skeleton is done when all six are true:
 3. The documented format term renders the glyph, and renders nothing when no agent is present.
 4. `cargo test` passes, including an integration test driving a throwaway `tmux -L` server.
 5. CI is green on push, and a `v0.0.1` tag produces a GitHub release with binaries.
-6. The Mac has it installed through the dotfiles flake input, not through a dev symlink.
+6. It is installable on macOS through the dotfiles flake input, not through a dev symlink.
 
 Everything else in 001 is deliberately out: see [Skeleton scope](#skeleton-scope).
 
@@ -36,7 +34,7 @@ Everything else in 001 is deliberately out: see [Skeleton scope](#skeleton-scope
 | Dependencies | **none** in the skeleton, std only | the whole tool is argument dispatch plus three `tmux` invocations; a hook that runs on every `PostToolUse` should not carry a dependency tree. Revisit when the config file lands - that is the first honest reason for `serde`/`toml`, and possibly `clap`. |
 | Licence | MIT | shortest thing that makes it reusable; no CLA, no contributor friction |
 | Nix | `rustPlatform.buildRustPackage` with `cargoLock.lockFile` | in nixpkgs, no extra flake input, no vendor hash to regenerate on every dependency change |
-| Toolchain source | the flake devShell | there is no `cargo` on this machine outside nix, and no rustup; CI uses a released toolchain action instead, so both paths are exercised |
+| Toolchain source | the flake devShell | local development uses the flake's Rust toolchain; CI uses a released toolchain action, so both paths are exercised |
 
 ## Repository layout
 
@@ -100,8 +98,8 @@ is then thin enough to be checked by the handful of integration tests that do ne
 
 | Command | Called by | Behaviour |
 | --- | --- | --- |
-| `agent-status set <state>` | agent hooks | write the pane option, recompute the rollup, ring the BEL if configured for that state |
-| `agent-status clear-window` | `pane-focus-in` | clear `@agent_pane_status` on every pane of the window, recompute |
+| `agent-status set <state>` | agent hooks | write the pane option, recompute the rollup, ring the BEL for the hard-coded default states (`waiting`, `error`, `done`; not `working`); making the list configurable is deferred |
+| `agent-status clear-window` | `pane-focus-in` | read `$TMUX_PANE`, derive the window, clear `@agent_pane_status` on every pane of that window, recompute |
 | `agent-status --version` | humans | version **and `std::env::current_exe()`** |
 | `agent-status --help` | humans | the two commands, the four states |
 
@@ -115,7 +113,7 @@ afternoon.
 `$TMUX_PANE` is unset, when the server is gone, or when `tmux` is not on `PATH` - silently, writing
 nothing to stdout. It exits non-zero only for a genuinely wrong invocation (an unknown state name),
 which is a bug in the user's hook config and should be loud. Anything written for humans goes to
-stderr, because Claude Code captures a hook's stdout.
+stderr, because agents that capture hook stdout would swallow it otherwise.
 
 ## Build tooling
 
@@ -135,8 +133,8 @@ the same recipes so the two cannot drift.
 | `just harness` | bring up the throwaway two-server tmux harness from 001 for manual inspection |
 
 The devShell provides `cargo`, `rustc`, `clippy`, `rustfmt`, `rust-analyzer`, `tmux` and `just`.
-There is no `rust-toolchain.toml`: it would only be read by rustup, which is not how this machine
-gets a toolchain, and a pin that nothing enforces is worse than no pin. The MSRV lives in
+There is no `rust-toolchain.toml`: it would only be read by rustup, which is not how the flake
+devShell delivers a toolchain, and a pin that nothing enforces is worse than no pin. The MSRV lives in
 `Cargo.toml`'s `rust-version` and is enforced by a CI job that builds with exactly that toolchain.
 
 `.envrc` with `use flake` is left to the user rather than committed, since not every contributor has
@@ -229,7 +227,7 @@ packaging work" gets answered, and it is what `just nix-build` wraps.
 local checkout is swapped in for one rebuild:
 
 ```sh
-sudo darwin-rebuild switch --flake "$HOME/.dotfiles#mac" \
+sudo darwin-rebuild switch --flake "$HOME/.dotfiles#hostname" \
   --override-input tmux-agent-status path:$HOME/src/tmux-agent-status
 ```
 
@@ -245,8 +243,9 @@ Not in the `pip install -e` sense, and no packaging trick changes that: the arti
 binary and a nix store path is immutable by design. What "editable" has to mean here is *an edit is
 live on the next hook fire without a rebuild and without sudo*, and `PATH` already provides it.
 
-Verified on this machine: `~/.local/bin` sits ahead of `/etc/profiles/per-user/$USER/bin`, which is
-where home-manager puts packages. So:
+On a typical home-manager + nix-darwin setup, `~/.local/bin` sits ahead of the profile path where
+home-manager installs packages, so a symlink there shadows the installed binary. Adjust if your
+`PATH` ordering differs. So:
 
 ```sh
 just link     # ~/.local/bin/agent-status -> <checkout>/target/debug/agent-status
@@ -283,11 +282,11 @@ a fixed location instead:
 
 ```nix
 home.file.".tmux/agent-status.conf".source =
-  "${inputs.tmux-agent-status.packages.${pkgs.system}.default}/share/tmux/agent-status.conf";
+  "${inputs.tmux-agent-status.packages.${pkgs.system}.agent-status}/share/tmux/agent-status.conf";
 ```
 
 and `.tmux.conf` gains one line, `source-file ~/.tmux/agent-status.conf`, which brings the
-`pane-focus-in` hook with it. Same shape as the window-labelling script already symlinked there.
+`pane-focus-in` hook with it. This is the same pattern used for other out-of-store tmux includes.
 
 **3. The format term, pasted by hand.** Deliberately *not* automated - 001's hardest decision is
 that the tool does string surgery on nobody's format. It is one insertion into each of
@@ -298,15 +297,14 @@ truncation and `#{?window_flags,...}`:
 #{?@agent_status, #{@agent_status},}
 ```
 
-**4. The agent hooks, pasted by hand.** The seven entries from 001's hook table go into the tracked
-`~/.claude/settings.json`, calling `agent-status` from `PATH`. The four standalone `printf '\a'`
-entries are **replaced**, not kept alongside: the setter rings the bell itself.
+**4. The agent hooks, pasted by hand.** The entries from 001's hook table call `agent-status` from
+`PATH`. The setter rings the bell itself, so any separate `printf '\a'` hooks for the same events
+should be removed rather than kept alongside.
 
-One thing to verify rather than assume during step 4: that Claude Code hooks run with a `PATH` that
-includes the home-manager profile. The existing statusline script suggests they do, but a hook that
-silently exits 0 when it cannot find `agent-status` - which is the correct failure policy - is also
-a hook that fails invisibly. The first `set done` must be confirmed by reading `@agent_status` back,
-not by looking at the status bar and believing it.
+One thing to verify rather than assume during step 4: that agent hooks run with a `PATH` that
+includes the home-manager profile. A hook that silently exits 0 when it cannot find `agent-status`
+- which is the correct failure policy - is also a hook that fails invisibly. The first `set done`
+must be confirmed by reading `@agent_status` back, not by looking at the status bar and believing it.
 
 ### Order of installation
 
@@ -325,7 +323,7 @@ install.
 | Deferred | Until |
 | --- | --- |
 | config file (`nerdfont`, the `status_icons` overrides, which states ring) | the defaults are settled in 001 and ship as constants; the file that makes them overridable is the first real dependency (`serde`/`toml`) and can wait |
-| agents other than Claude Code | the per-agent tables are data; adding the second agent is what shows whether the shape is right, and it is not what the skeleton is proving |
+| agents beyond the first supported one | the per-agent tables are data; adding a second agent is what shows whether the shape is right, and it is not what the skeleton is proving |
 | the optional `error` recolour snippet | documented in the README as opt-in, shipped as a comment in the tmux snippet - no code |
 | the `stale` 💤 state | decided in 001 and explicitly not first-version: it needs a stored timestamp and age arithmetic in the format string |
 | man page, Homebrew formula, CHANGELOG | README first, one shared tap later, generated changelog at the second release |
@@ -349,8 +347,6 @@ Steps 1-5 are the tool, 6-8 are the delivery path, 9 is what makes it walking ra
 
 - **No remote is configured yet.** The repo will live at
   `github.com/gerbenoostra/tmux-agent-status`; nothing has been pushed.
-- Whether the sibling tools share a `.github` workflow through a template repo or copy it. Copying
-  is right at one repo; the question becomes real at the third.
 - Whether the release workflow should also publish to crates.io. `cargo install agent-status` is a
   cheap extra install route, but it claims a name on a shared registry and the binary is useless
   without tmux config, so the README has to carry the rest anyway.

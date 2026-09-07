@@ -6,8 +6,7 @@ cloned it.
 
 `tasks/todo/` holds ideas and bug reports not being worked on; `tasks/plans/` holds the plan
 currently being executed plus every plan already executed, kept as the audit trail. Status lives in
-the `Status:` line inside each file, not in the folder, and every agentic session that touches a
-plan appends its own session URL to that file's `Sessions:` list.
+the `Status:` line inside each file, not in the folder.
 
 ## What this tool is
 
