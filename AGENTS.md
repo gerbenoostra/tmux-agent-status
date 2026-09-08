@@ -17,9 +17,10 @@ design is in `tasks/plans/001-agent-window-status.md`; read it before changing b
 
 ## Rules that are easy to break
 
-- The status format is documented for the user to paste. **Never** read, rewrite or splice
-  `window-status-format` from code. Writing a spliced copy to a window-local option freezes that
-  window's format forever; see 001.
+- The status format is documented for the user to paste. **Never** write, rewrite or splice
+  `window-status-format`. Writing a spliced copy to a window-local option freezes that
+  window's format forever; see 001. Reading it is fine, and is how a setup check tells the user
+  whether the term is present: `show-options` yes, `set-option` never.
 - `@agent_pane_status` (per pane) and `@agent_status` (per window rollup) are two names on purpose.
   tmux option inheritance makes a pane with no status read back as the window's value, so they can
   never be merged into one.
