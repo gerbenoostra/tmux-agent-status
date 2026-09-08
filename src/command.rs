@@ -1,4 +1,8 @@
 //! What each command does: the policy that joins the pure rollup to the tmux calls.
+//!
+//! Every command returns `io::Result<()>` so tmux I/O failures can be handled by
+//! the caller. The CLI's `hook()` wrapper turns those failures into a silent exit
+//! 0, because a hook must never break the agent that called it.
 
 use std::io;
 

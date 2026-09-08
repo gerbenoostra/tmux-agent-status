@@ -164,4 +164,21 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn ranks_are_unique_and_ordered() {
+        let ranks: Vec<u8> = State::ALL.iter().map(|state| state.rank()).collect();
+        let mut deduped = ranks.clone();
+        deduped.sort();
+        deduped.dedup();
+        assert_eq!(
+            deduped.len(),
+            ranks.len(),
+            "each state must have a unique rank for Ord to agree with Eq"
+        );
+        assert!(
+            ranks.windows(2).all(|w| w[0] < w[1]),
+            "State::ALL must be ordered by increasing rank"
+        );
+    }
 }

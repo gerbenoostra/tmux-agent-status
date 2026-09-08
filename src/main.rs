@@ -11,26 +11,23 @@ use agent_status::state::State;
 const USAGE_ERROR: u8 = 2;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = env::args_os()
-        .skip(1)
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let args: Vec<String> = env::args().skip(1).collect();
 
     match args.as_slice() {
-        ["set", state] => match state.parse::<State>() {
+        [cmd, state] if cmd == "set" => match state.parse::<State>() {
             Ok(state) => hook(command::set(state)),
             Err(err) => usage_error(&err.to_string()),
         },
-        ["clear-window"] => hook(command::clear_window(None)),
-        ["clear-window", pane] => hook(command::clear_window(Some(pane))),
+        [cmd, ..] if cmd == "set" => usage_error("set requires a state"),
+        [cmd] if cmd == "clear-window" => hook(command::clear_window(None)),
+        [cmd, pane] if cmd == "clear-window" => hook(command::clear_window(Some(pane.as_str()))),
         // Written for humans on stdout, so `--help | less` works. The hook
         // commands themselves never write to stdout at all.
-        ["--help" | "-h"] => {
+        [cmd] if cmd == "--help" || cmd == "-h" => {
             print!("{}", help());
             ExitCode::SUCCESS
         }
-        ["--version" | "-V"] => {
+        [cmd] if cmd == "--version" || cmd == "-V" => {
             println!("{}", version());
             ExitCode::SUCCESS
         }
@@ -44,6 +41,11 @@ fn main() -> ExitCode {
 /// No tmux in the environment, a server that has exited, a tmux that is not on
 /// `PATH`: all of them exit 0 and write nothing. The invocation was right; the
 /// world simply had no tmux in it.
+///
+/// This is the intentional boundary between `command.rs` (which propagates tmux
+/// I/O failures as `io::Result`) and the CLI (which decides that hook commands
+/// are allowed to fail silently). Any future command that is not a hook should
+/// route its errors differently rather than passing through `hook()`.
 fn hook(result: io::Result<()>) -> ExitCode {
     let _ = result;
     ExitCode::SUCCESS
