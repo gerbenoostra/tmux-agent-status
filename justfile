@@ -40,3 +40,29 @@ link:
 # Remove the dev shadow.
 unlink:
     rm -f ~/.local/bin/agent-status
+
+# A throwaway tmux server showing all four states, for looking at.
+harness:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    cargo build
+    export PATH="$PWD/target/debug:$PATH"
+    socket=agent-status-harness
+    tmux -L "$socket" kill-server 2>/dev/null || true
+    tmux -L "$socket" -f /dev/null new-session -d -s harness -x 200 -y 50 -n no-agent 'sleep 3000'
+    tmux -L "$socket" source-file share/tmux/agent-status.conf
+    format='#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@agent_status},}#{?window_flags,#{window_flags}, }'
+    tmux -L "$socket" set -g window-status-format "$format"
+    tmux -L "$socket" set -g window-status-current-format "$format"
+    tmux -L "$socket" set -g monitor-bell on
+    tmux -L "$socket" set -g bell-action other
+    export TMUX="$(tmux -L "$socket" display-message -p '#{socket_path}'),0,0"
+    for state in working done error waiting; do
+        pane=$(tmux -L "$socket" new-window -d -a -t 'harness:{end}' -n "$state" -P -F '#{pane_id}' \
+            'bash -c "exec -a claude sleep 3000"')
+        TMUX_PANE="$pane" agent-status set "$state"
+    done
+    echo "Attaching. Switch windows to watch the non-sticky states clear on focus." >&2
+    echo "Kill it with: tmux -L $socket kill-server" >&2
+    exec env -u TMUX tmux -L "$socket" attach -t harness

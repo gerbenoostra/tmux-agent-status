@@ -23,14 +23,23 @@ pub fn set(state: State) -> io::Result<()> {
     recompute(&pane)
 }
 
-/// `agent-status clear-window`: drop the non-sticky states of every pane of this
-/// window, then recompute.
+/// `agent-status clear-window [<pane>]`: drop the non-sticky states of every
+/// pane of that pane's window, then recompute.
 ///
 /// Every pane, not just the focused one: all panes of a window are on screen
 /// together, so seeing the window is seeing them.
-pub fn clear_window() -> io::Result<()> {
-    let Some(pane) = tmux::current_pane() else {
-        return Ok(());
+///
+/// The pane is an argument because tmux's `run-shell` does not put `TMUX_PANE`
+/// in a hook's environment - it does expand formats in the command, so the
+/// shipped hook passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which
+/// is what a hand invocation from a pane has.
+pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
+    let pane = match pane {
+        Some(pane) => pane.to_owned(),
+        None => match tmux::current_pane() {
+            Some(pane) => pane,
+            None => return Ok(()),
+        },
     };
     for pane_status in tmux::pane_statuses(&pane)? {
         // Anything unset, sticky or unrecognised is left exactly as it is.

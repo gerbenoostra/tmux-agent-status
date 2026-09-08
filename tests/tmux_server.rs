@@ -70,6 +70,9 @@ impl Server {
             .arg("-L")
             .arg(&self.socket)
             .args(args)
+            // The server inherits this, so the shipped hook finds the binary
+            // under test rather than an installed one, or nothing at all.
+            .env("PATH", bin_dir_first_on_path())
             .stdin(Stdio::null())
             .output()
             .expect("tmux is on PATH")
@@ -153,6 +156,20 @@ impl Server {
             .to_owned()
     }
 
+    /// A second server whose only pane is a client attached to this one.
+    ///
+    /// Nothing draws and no pane ever gains focus without an attached client,
+    /// so the rendering and focus tests need this sandwich; option-value tests
+    /// do not.
+    fn attach(&self) -> Server {
+        let host = Server::start_running(&format!("tmux -L {} attach -t t", self.socket));
+        wait_for(
+            || self.tmux(&["list-clients", "-F", "#{client_name}"]),
+            |clients| !clients.trim().is_empty(),
+        );
+        host
+    }
+
     /// The documented format term, expanded for `target`.
     fn format_term(&self, target: &str) -> String {
         let expanded = self.tmux(&[
@@ -173,6 +190,15 @@ impl Drop for Server {
         let _ = self.try_tmux(&["kill-server"]);
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+/// `PATH` with the binary under test in front.
+fn bin_dir_first_on_path() -> String {
+    let dir = std::path::Path::new(BIN)
+        .parent()
+        .expect("the test binary has a directory");
+    let inherited = std::env::var("PATH").unwrap_or_default();
+    format!("{}:{inherited}", dir.display())
 }
 
 fn assert_ok(out: &Output) {
@@ -319,7 +345,7 @@ fn the_status_bar_renders_the_glyph_after_a_truncated_name() {
     assert_ok(&test.agent_status(&current, &["set", "done"]));
     assert_ok(&test.agent_status(&other, &["set", "waiting"]));
 
-    let host = Server::start_running(&format!("tmux -L {} attach -t t", test.socket));
+    let host = test.attach();
     let status_bar = wait_for(
         || {
             host.tmux(&["capture-pane", "-p", "-t", "t"])
@@ -340,8 +366,64 @@ fn the_status_bar_renders_the_glyph_after_a_truncated_name() {
 }
 
 #[test]
+fn the_shipped_hooks_clear_a_window_when_it_is_looked_at() {
+    let server = Server::start();
+    let agent = server.first_pane();
+    let elsewhere = server.new_window("elsewhere");
+    server.tmux(&["source-file", "share/tmux/agent-status.conf"]);
+    assert_ok(&server.agent_status(&agent, &["set", "done"]));
+    assert_ok(&server.agent_status(&elsewhere, &["set", "waiting"]));
+
+    // Switching windows: session-window-changed, carrying the new pane.
+    server.tmux(&["select-window", "-t", "t:1"]);
+
+    // The hooks run in the background, so the effect arrives a moment later.
+    wait_for(
+        || server.window_status(&elsewhere),
+        |status| status.is_empty(),
+    );
+    // Only the window looked at; the one left behind keeps its glyph.
+    assert_eq!(server.window_status(&agent), "✅");
+
+    server.tmux(&["select-window", "-t", "t:0"]);
+
+    wait_for(|| server.window_status(&agent), |status| status.is_empty());
+}
+
+#[test]
+fn the_shipped_hooks_clear_a_window_when_another_pane_of_it_is_selected() {
+    let server = Server::start();
+    let first = server.first_pane();
+    let second = server.split(&first);
+    server.tmux(&["source-file", "share/tmux/agent-status.conf"]);
+    assert_ok(&server.agent_status(&first, &["set", "error"]));
+
+    // Switching panes inside the window: window-pane-changed.
+    server.tmux(&["select-pane", "-t", &second]);
+
+    wait_for(|| server.window_status(&first), |status| status.is_empty());
+}
+
+#[test]
+fn clear_window_takes_the_pane_as_an_argument() {
+    let server = Server::start();
+    let pane = server.first_pane();
+    let elsewhere = server.new_window("elsewhere");
+    assert_ok(&server.agent_status(&pane, &["set", "done"]));
+
+    // Addressed from a different pane entirely, the way a hook does it.
+    assert_ok(&server.agent_status(&elsewhere, &["clear-window", &pane]));
+
+    assert_eq!(server.window_status(&pane), "");
+}
+
+#[test]
 fn a_hook_outside_tmux_exits_zero_and_says_nothing() {
-    for args in [["set", "done"].as_slice(), ["clear-window"].as_slice()] {
+    for args in [
+        ["set", "done"].as_slice(),
+        ["clear-window"].as_slice(),
+        ["clear-window", "%0"].as_slice(),
+    ] {
         let out = Command::new(BIN)
             .args(args)
             .env_remove("TMUX")

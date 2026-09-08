@@ -15,7 +15,8 @@ of the packaging path the tool ships to everybody else - not from a `cargo run` 
 Concretely, the skeleton is done when all six are true:
 
 1. `agent-status set done` writes `@agent_pane_status` and recomputes `@agent_status`.
-2. `agent-status clear-window`, bound to `pane-focus-in`, clears the non-sticky states window-wide.
+2. `agent-status clear-window`, bound to the clear-on-focus hooks, clears the non-sticky states
+   window-wide.
 3. The documented format term renders the glyph, and renders nothing when no agent is present.
 4. `cargo test` passes, including an integration test driving a throwaway `tmux -L` server.
 5. CI is green on push, and a `v0.0.1` tag produces a GitHub release with binaries.
@@ -99,7 +100,7 @@ is then thin enough to be checked by the handful of integration tests that do ne
 | Command | Called by | Behaviour |
 | --- | --- | --- |
 | `agent-status set <state>` | agent hooks | write the pane option, recompute the rollup, ring the BEL for the hard-coded default states (`waiting`, `error`, `done`; not `working`); making the list configurable is deferred |
-| `agent-status clear-window` | `pane-focus-in` | read `$TMUX_PANE`, derive the window, clear `@agent_pane_status` on every pane of that window, recompute |
+| `agent-status clear-window [<pane>]` | the clear-on-focus hooks | derive the window from the pane (`$TMUX_PANE` when no argument), clear `@agent_pane_status` on every pane of that window, recompute |
 | `agent-status --version` | humans | version **and `std::env::current_exe()`** |
 | `agent-status --help` | humans | the two commands, the four states |
 
@@ -314,8 +315,8 @@ a real turn sets it), and doing them in this order means no step is ever debugge
 
 ## Skeleton scope
 
-**In:** `set` and `clear-window`, the four states, the rank, the rollup, the pane-focus-in hook, the
-BEL, the format term, the two test tiers, the flake package, CI, one tagged release, the dotfiles
+**In:** `set` and `clear-window`, the four states, the rank, the rollup, the clear-on-focus hooks,
+the BEL, the format term, the two test tiers, the flake package, CI, one tagged release, the dotfiles
 install.
 
 **Out, and each for a reason:**

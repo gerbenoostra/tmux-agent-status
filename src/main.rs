@@ -22,7 +22,8 @@ fn main() -> ExitCode {
             Ok(state) => hook(command::set(state)),
             Err(err) => usage_error(&err.to_string()),
         },
-        ["clear-window"] => hook(command::clear_window()),
+        ["clear-window"] => hook(command::clear_window(None)),
+        ["clear-window", pane] => hook(command::clear_window(Some(pane))),
         // Written for humans on stdout, so `--help | less` works. The hook
         // commands themselves never write to stdout at all.
         ["--help" | "-h"] => {
@@ -62,7 +63,9 @@ agent-status - agent lifecycle events as one glyph on the tmux window entry
 
 usage:
   agent-status set <state>    write this pane's state and recompute the window
-  agent-status clear-window   clear the non-sticky states of every pane of this window
+  agent-status clear-window [<pane>]
+                              clear the non-sticky states of every pane of that
+                              pane's window, defaulting to $TMUX_PANE
   agent-status --version      version, and the executable that is actually running
   agent-status --help         this text
 
