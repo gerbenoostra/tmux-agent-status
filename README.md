@@ -1,28 +1,33 @@
 # tmux-agent-status
 
-One glyph on the tmux window entry, telling you which agent wants you.
+A lightweigh tool that adds a glyph to tmux window names, such that you know in which window an agent needs you, and why.
 
+Example result:
 ```
  0:notes  1:api ✅  2:refactor 🤖  3:migration 💬- 4:build*
 ```
 
-`agent-status` is called from your coding agent's lifecycle hooks. It writes one tmux option per
-pane, reduces the panes of a window to a single glyph, and rings the terminal bell. That is all it
-does: it never touches a window name, never shells out to git, never writes a state file, never
-edits your config files and never spawns a daemon.
+The internal `agent-status` executable is called from your coding agent's lifecycle hooks. It writes
+a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window,
+and rings the terminal bell.
+
+To not interfere with your formatting, window naming scripts, or monitor-bell, this script deliberately
+does not change, color, nor format window names. It just enables the bell and adds a glyph.
 
 ## The four states
 
+The following states are distinguished:
+
 | State | Glyph | Means | Clears when |
 | --- | --- | --- | --- |
-| `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, the idle nag | you look at the window |
-| `error` | ❗ | the turn aborted: API error, context overflow, unparseable tool call | you look at the window |
-| `done` | ✅ | the turn ended cleanly | you look at the window |
 | `working` | 🤖 | a turn is in flight | the next event on that pane |
+| `done` | ✅ | the turn ended cleanly | you look at the window |
+| `error` | ❗ | the turn aborted: API error, context overflow, unparseable tool call | you look at the window |
+| `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, the idle nag | you look at the window |
 
-A window showing two agents shows the one that wants you most, in that order - `working` ranks
-lowest, because a pane that finished wants a look and one still grinding does not. A window with no
-agent in it renders exactly as it did before you installed this.
+A window with multiple agents will show the status that wants you most. Thus `waiting` > `error` > `done` > `working`.
+
+For windows with no agent this tool is a no-op.
 
 The glyphs are emoji, so they survive a font change. They need a tmux client in UTF-8 mode; a client
 without it renders them as underscores.
@@ -32,24 +37,25 @@ without it renders them as underscores.
 See [docs/install.md](docs/install.md) for the nix flake input, `nix profile`, a prebuilt binary,
 `cargo`, and building from source.
 
+fter installing the command line tool, you'll need to include it in your tmux's window status format, and include it in your agent hooks.
+
 ## Set up, in this order
 
-Each step is verifiable on its own, so no step is ever debugged through another.
-
-**1. Check the binary.** `agent-status --version` prints the version and the executable that is
+**1. Check the binary.**
+After installing, verify the binary is available: `agent-status --version` should print the version and the executable that is
 actually running.
 
-**2. Source the tmux snippet.** It ships at `share/tmux/agent-status.conf` in the package. Add to
-`~/.tmux.conf`:
-
+**2. Source the tmux snippet.**
+It ships at `share/tmux/agent-status.conf` in the package [here](./share/tmux/agent-status.conf).
+Import the agent-status conf in `~/.tmux.conf` by adding:
 ```tmux
 source-file ~/.tmux/agent-status.conf
 ```
 
-It sets two hooks and nothing else. Confirm with `tmux show-hooks -g | grep agent-status`.
+It only adds two tmux hooks. Confirm with `tmux show-hooks -g | grep agent-status`.
 
-**3. Paste the format term.** Into **both** `window-status-format` and
-`window-status-current-format`, after the name segment (outside any truncation you have) and before
+**3. Paste the format term.**
+Into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before
 the window flags:
 
 ```tmux
@@ -62,11 +68,21 @@ For example:
 set -g window-status-format '#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@agent_status},}#{?window_flags,#{window_flags}, }'
 ```
 
-The name segment stays whatever you already had - this tool does string surgery on nobody's format.
-Confirm it renders by setting a glyph by hand:
+The name segment stays whatever you already had. Confirm it renders by setting a glyph by hand:
 `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.
 
-**4. Paste the agent hooks.** For Claude Code, in `~/.claude/settings.json`:
+If you want to highlight/color the window title when the bell has rang, you can to `~/.tmux.conf`:
+```tmux
+setw -g monitor-bell on
+set -g bell-action other
+setw -g window-status-bell-style 'fg=magenta,bold,nodim'
+```
+
+**4. Paste the agent hooks.**
+
+To prevent unexpected scrambling of your config files, we ask you to manually edit your agents config.
+
+For Claude Code, we recommend to watch the following hooks in `~/.claude/settings.json`:
 
 | Event | Matcher | State |
 | --- | --- | --- |
@@ -77,6 +93,7 @@ Confirm it renders by setting a glyph by hand:
 | `Stop` | all | `done` |
 | `StopFailure` | all | `error` |
 
+Which can be done as follows:
 ```json
 {
   "hooks": {
@@ -101,78 +118,66 @@ Confirm it renders by setting a glyph by hand:
 }
 ```
 
-You paste this yourself: a tool that rewrites a hand-maintained settings file it did not write can
-corrupt it, and this one will not go near it.
-
 Two things to know here. `Notification` must **not** be narrowed to permission prompts: the idle nag
-is precisely the event meaning "still blocked, and has been for a while". And the setter rings the
-bell itself, so any standalone `printf '\a'` hooks for the same events should be removed rather than
-kept alongside.
+is precisely the event meaning "still blocked, and has been for a while".
 
-Confirm the first turn by reading the option back, not by looking at the status bar:
+As the tool rings the bell itself, no standalone `printf '\a'` hooks for the same events are needed.
 
+Instead of relying on the hooks for the bell (and thus highlight), you can also use Claude's s own `\a` bell events, by configuring them as follows:
+```json
+{
+  "preferredNotifChannel": "terminal_bell",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true
+}
+```
+
+The agent hook will not raise errors if the `agent-status` command cannot be found. You'll only notice it as
+no `agent_status` being available in the window. If you don't get glyphs, and want to diagnose whether the
+hook is failing or the glyph printing fails, you can manually inspect the `agent_status` by running the following:
 ```sh
 tmux display-message -p '#{@agent_status}'
 ```
 
-An agent hook that cannot find `agent-status` exits 0 and says nothing - that is the failure policy,
-and it means a wrong `PATH` fails invisibly.
 
 ## How it works
 
-Two tmux options, and they cannot be merged into one:
+We use two tmux options, separating status from final glyph:
 
 - **`@agent_pane_status`**, per pane, holds the state name. Written from `$TMUX_PANE` by `set`.
 - **`@agent_status`**, per window, holds the glyph. The maximum by rank over that window's panes,
   recomputed after every write. The only thing the format string reads.
 
-They have different names because tmux option inheritance makes an unset pane option read back as
-the window's value, so a rollup stored under the name it reduces could no longer tell a pane with no
-state from a pane inheriting the rollup.
-
-Each event costs three tmux invocations and no file writes, because `set` runs on every tool call.
+They have different names because tmux option inheritance returns the window's value when reading a
+pane without a value.
 
 ## The bell, and colour
 
-The bell is the highlight channel. `waiting`, `error` and `done` ring; `working` does not, because
-it fires on every tool call and a bell per tool call is not a signal. With `monitor-bell on`, tmux
-gives you the window highlight for free and paints the glyph along with it, which is why this tool
-emits no colour of its own.
+For the end states (`waiting`, `error` and `done`, thus not `working`) a terminal bell (`\a\`) is printed;
+With `monitor-bell on`, tmux gives you the window highlight, in whatever way you configure it.
+To not interfere with your own highlight format, this tool deliberately does not color or name windows.
 
-If you want `error` to stand out further, the shipped snippet carries an opt-in one-liner for it, as
-a comment.
+If you want `error` to stand out further, the shipped snippet carries an opt-in one-liner for it.
 
 ## Interoperability
 
 `@agent_pane_status` and `@agent_status` are this tool's entire tmux footprint, so anything owning a
-different option prefix can stay installed alongside it. The one shared resource is the format
-string, and this tool only ever appends one term to it - which you paste, so nothing surprises you.
+different option prefix can stay installed alongside it.
+The one shared resource is the format string specifying the window name, where this tool appends one
+term to.
 
 ## Known limits
 
-- An agent that dies without firing `Stop` leaves a permanent 🤖. A `stale` 💤 state that decays
-  from `working` after a timeout is designed but deliberately not in the first version.
-- A **zoomed** pane's siblings are genuinely hidden, and looking at the window still clears them.
+- An agent that dies without firing `Stop` leaves a permanent 🤖. We're planning a future `stale` 💤 state
+  that decays from `working` after a timeout.
+- A **zoomed** pane's siblings are hidden, but are still cleared when looking at the tmux window.
 - Creating or splitting a pane counts as looking at that window, so it clears the window's
-  non-sticky states. You are looking at the window when you split it, so this is right more often
-  than not - but a state set in the same breath as a new pane can lose the race and be cleared.
-- Only agents that can push lifecycle events get a glyph at all. An absent glyph means "no signal",
-  which is different from a wrong one.
+  non-sticky states.
+- Only agents that can push lifecycle events get a glyph at all. An absent glyph means "no signal".
 
 ## Development
 
-```sh
-nix develop          # cargo, clippy, rustfmt, rust-analyzer, tmux, just
-just check           # fmt-check + lint + test, exactly what CI runs
-just harness         # a throwaway tmux server showing all four states, to look at
-just link            # shadow the installed binary with this checkout's debug build
-```
-
-`just link` is the edit loop: a symlink in `~/.local/bin` shadows the installed binary, so every
-`cargo build` is live on the next hook fire, with no rebuild and no sudo. The shadow is invisible,
-which is what `--version` printing the resolved path is for. `just unlink` reverts it.
-
-The design lives in `tasks/plans/`. Read 001 before changing behaviour.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment, testing against your real config, and release checks.
 
 ## Licence
 
