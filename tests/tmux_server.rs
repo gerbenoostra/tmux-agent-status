@@ -136,6 +136,27 @@ impl Server {
         .to_owned()
     }
 
+    /// A new window whose pane runs the setter itself, the way an agent hook
+    /// does: `$TMUX` and `$TMUX_PANE` come from tmux, and the bell goes to that
+    /// pane's tty.
+    fn new_window_running_setter(&self, name: &str, state: &str) -> String {
+        self.tmux(&[
+            "new-window",
+            "-d",
+            "-a",
+            "-t",
+            "t:{end}",
+            "-n",
+            name,
+            "-P",
+            "-F",
+            "#{window_id}",
+            &format!("'{BIN}' set {state}; {IDLE}"),
+        ])
+        .trim_end()
+        .to_owned()
+    }
+
     fn first_pane(&self) -> String {
         self.tmux(&["list-panes", "-t", "t", "-F", "#{pane_id}"])
             .lines()
@@ -419,6 +440,50 @@ fn clear_window_takes_the_pane_as_an_argument() {
     assert_ok(&server.agent_status(&elsewhere, &["clear-window", &pane]));
 
     assert_eq!(server.window_status(&pane), "");
+}
+
+#[test]
+fn a_turn_ending_state_rings_the_bell_of_its_window() {
+    let server = Server::start();
+    server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
+    server.tmux(&["set-option", "-g", "bell-action", "other"]);
+
+    let window = server.new_window_running_setter("ringer", "done");
+
+    wait_for(
+        || {
+            server.tmux(&[
+                "display-message",
+                "-p",
+                "-t",
+                &window,
+                "#{window_bell_flag}",
+            ])
+        },
+        |flag| flag.trim() == "1",
+    );
+}
+
+#[test]
+fn working_does_not_ring() {
+    // A bell on every PostToolUse is not a signal.
+    let server = Server::start();
+    server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
+    server.tmux(&["set-option", "-g", "bell-action", "other"]);
+
+    let window = server.new_window_running_setter("quiet", "working");
+
+    // The state landing is proof the setter ran, and proof enough that no bell
+    // is coming: the setter rings before it touches tmux at all.
+    wait_for(|| server.window_status(&window), |status| status == "🤖");
+    let flag = server.tmux(&[
+        "display-message",
+        "-p",
+        "-t",
+        &window,
+        "#{window_bell_flag}",
+    ]);
+    assert_eq!(flag.trim(), "0");
 }
 
 #[test]
