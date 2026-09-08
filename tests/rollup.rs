@@ -1,7 +1,7 @@
 //! The rollup, exhaustively, with no tmux anywhere near it.
 
-use agent_status::rollup::rollup;
-use agent_status::state::State::{self, Done, Error, Waiting, Working};
+use tmux_agent_status::rollup::rollup;
+use tmux_agent_status::state::State::{self, Done, Error, Waiting, Working};
 
 #[test]
 fn no_panes_and_no_states_roll_up_to_nothing() {

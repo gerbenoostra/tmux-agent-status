@@ -4,8 +4,8 @@ use std::env;
 use std::io;
 use std::process::ExitCode;
 
-use agent_status::command;
-use agent_status::state::State;
+use tmux_agent_status::command;
+use tmux_agent_status::state::State;
 
 /// A wrong invocation: a bug in the caller's hook config, and so a loud one.
 const USAGE_ERROR: u8 = 2;
@@ -52,7 +52,7 @@ fn hook(result: io::Result<()>) -> ExitCode {
 }
 
 fn usage_error(message: &str) -> ExitCode {
-    eprintln!("agent-status: {message}");
+    eprintln!("tmux-agent-status: {message}");
     eprint!("{}", help());
     ExitCode::from(USAGE_ERROR)
 }
@@ -61,15 +61,15 @@ fn help() -> String {
     let states: Vec<&str> = State::ALL.iter().map(|state| state.name()).collect();
     format!(
         "\
-agent-status - agent lifecycle events as one glyph on the tmux window entry
+tmux-agent-status - agent lifecycle events as one glyph on the tmux window entry
 
 usage:
-  agent-status set <state>    write this pane's state and recompute the window
-  agent-status clear-window [<pane>]
+  tmux-agent-status set <state>    write this pane's state and recompute the window
+  tmux-agent-status clear-window [<pane>]
                               clear the non-sticky states of every pane of that
                               pane's window, defaulting to $TMUX_PANE
-  agent-status --version      version, and the executable that is actually running
-  agent-status --help         this text
+  tmux-agent-status --version      version, and the executable that is actually running
+  tmux-agent-status --help         this text
 
 states: {}
 ",

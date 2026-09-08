@@ -5,7 +5,7 @@
 
 use std::process::{Command, Output, Stdio};
 
-const BIN: &str = env!("CARGO_BIN_EXE_agent-status");
+const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
 
 fn run(args: &[&str]) -> Output {
     Command::new(BIN)
@@ -32,7 +32,10 @@ fn help_flag_prints_usage() {
         assert!(out.status.success(), "{flag} should exit 0");
         assert!(out.stderr.is_empty(), "help must not write to stderr");
         let text = stdout(&out);
-        assert!(text.contains("agent-status"), "{flag} missing program name");
+        assert!(
+            text.contains("tmux-agent-status"),
+            "{flag} missing program name"
+        );
         assert!(text.contains("usage:"), "{flag} missing usage");
         assert!(text.contains("set <state>"), "{flag} missing set command");
         assert!(
@@ -50,7 +53,10 @@ fn version_flag_prints_name_version_and_path() {
         assert!(out.status.success(), "{flag} should exit 0");
         assert!(out.stderr.is_empty(), "version must not write to stderr");
         let text = stdout(&out);
-        assert!(text.contains("agent-status"), "{flag} missing package name");
+        assert!(
+            text.contains("tmux-agent-status"),
+            "{flag} missing package name"
+        );
         assert!(
             text.contains(env!("CARGO_PKG_VERSION")),
             "{flag} missing version"

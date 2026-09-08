@@ -10,7 +10,7 @@ the `Status:` line inside each file.
 
 ## What this tool is
 
-`agent-status` turns agent lifecycle events into one glyph on the tmux window entry. It writes two
+`tmux-agent-status` turns agent lifecycle events into one glyph on the tmux window entry. It writes two
 tmux options and rings the terminal bell. It never touches a window name, never shells out to git,
 never writes a state file, never edits the user's config files, and never spawns a daemon. The full
 design is in `tasks/plans/001-agent-window-status.md`; read it before changing behaviour.

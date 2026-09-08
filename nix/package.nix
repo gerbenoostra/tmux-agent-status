@@ -5,7 +5,7 @@
 }:
 
 rustPlatform.buildRustPackage {
-  pname = "agent-status";
+  pname = "tmux-agent-status";
   version = (lib.importTOML ../Cargo.toml).package.version;
 
   src = lib.cleanSource ../.;
@@ -18,15 +18,15 @@ rustPlatform.buildRustPackage {
   nativeCheckInputs = [ tmux ];
 
   postInstall = ''
-    install -Dm644 share/tmux/agent-status.conf \
-      $out/share/tmux/agent-status.conf
+    install -Dm644 share/tmux/tmux-agent-status.conf \
+      $out/share/tmux/tmux-agent-status.conf
   '';
 
   meta = {
     description = "Agent lifecycle events as one glyph on the tmux window entry";
     homepage = "https://github.com/gerbenoostra/tmux-agent-status";
     license = lib.licenses.mit;
-    mainProgram = "agent-status";
+    mainProgram = "tmux-agent-status";
     platforms = lib.platforms.unix;
   };
 }

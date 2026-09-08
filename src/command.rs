@@ -11,7 +11,7 @@ use crate::rollup::rollup;
 use crate::state::State;
 use crate::tmux;
 
-/// `agent-status set <state>`: write the pane's state and recompute the window.
+/// `tmux-agent-status set <state>`: write the pane's state and recompute the window.
 ///
 /// The bell is rung whether or not there is a tmux to write to, because it is a
 /// separate channel: it reaches the human through the terminal, which a tmux
@@ -27,7 +27,7 @@ pub fn set(state: State) -> io::Result<()> {
     recompute(&pane)
 }
 
-/// `agent-status clear-window [<pane>]`: drop the non-sticky states of every
+/// `tmux-agent-status clear-window [<pane>]`: drop the non-sticky states of every
 /// pane of that pane's window, then recompute.
 ///
 /// Every pane, not just the focused one: all panes of a window are on screen

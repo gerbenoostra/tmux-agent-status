@@ -16,8 +16,8 @@ of the packaging path the tool ships to everybody else - not from a `cargo run` 
 
 Concretely, the skeleton is done when all six are true:
 
-1. `agent-status set done` writes `@agent_pane_status` and recomputes `@agent_status`.
-2. `agent-status clear-window`, bound to the clear-on-focus hooks, clears the non-sticky states
+1. `tmux-agent-status set done` writes `@agent_pane_status` and recomputes `@agent_status`.
+2. `tmux-agent-status clear-window`, bound to the clear-on-focus hooks, clears the non-sticky states
    window-wide.
 3. The documented format term renders the glyph, and renders nothing when no agent is present.
 4. `cargo test` passes, including an integration test driving a throwaway `tmux -L` server.
@@ -31,8 +31,8 @@ Everything else in 001 is deliberately out: see [Skeleton scope](#skeleton-scope
 | Decision | Choice | Why |
 | --- | --- | --- |
 | Language | Rust | typed state and rank, a real test harness for the rollup, one static binary with no runtime deps beyond tmux |
-| Repo name | `tmux-agent-status` | says what it is and where it lives; discoverable; `agent-status` alone is generic and probably taken |
-| Executable | `agent-status` | what the hook lines and the docs say; the tmux option prefix `@agent_*` follows it |
+| Repo name | `tmux-agent-status` | says what it is and where it lives; discoverable |
+| Executable | `tmux-agent-status` | matches the repository and avoids two names for the same tool; the tmux option prefix `@agent_*` remains concise |
 | Edition / MSRV | 2024 / 1.85 | MSRV asserted in `Cargo.toml` and verified by a CI job |
 | Dependencies | **none** in the skeleton, std only | the whole tool is argument dispatch plus three `tmux` invocations; a hook that runs on every `PostToolUse` should not carry a dependency tree. Revisit when the config file lands - that is the first honest reason for `serde`/`toml`, and possibly `clap`. |
 | Licence | MIT | shortest thing that makes it reusable; no CLA, no contributor friction |
@@ -68,7 +68,7 @@ tmux-agent-status/
 │   ├── rollup.rs           # table-driven, no tmux
 │   └── tmux_server.rs      # throwaway `tmux -L` server, serialised
 ├── share/tmux/
-│   └── agent-status.conf   # the pane-focus-in hook, plus the format term as a comment
+│   └── tmux-agent-status.conf   # the pane-focus-in hook, plus the format term as a comment
 ├── docs/
 │   └── install.md          # nix flake, nix profile, cargo, prebuilt binary, from source
 ├── tasks/
@@ -81,7 +81,7 @@ tmux-agent-status/
         └── release.yml
 ```
 
-Deferred until they have a reason to exist: `man/agent-status.1` (README first), a Homebrew formula
+Deferred until they have a reason to exist: `man/tmux-agent-status.1` (README first), a Homebrew formula
 (after demand demonstrates that it is worth maintaining), and `CHANGELOG.md` (generated from
 conventional commits when there is a second release, never hand-edited).
 
@@ -101,10 +101,10 @@ is then thin enough to be checked by the handful of integration tests that do ne
 
 | Command | Called by | Behaviour |
 | --- | --- | --- |
-| `agent-status set <state>` | agent hooks | write the pane option, recompute the rollup, ring the BEL for the hard-coded default states (`waiting`, `error`, `done`; not `working`); making the list configurable is deferred |
-| `agent-status clear-window [<pane>]` | the clear-on-focus hooks | derive the window from the pane (`$TMUX_PANE` when no argument), clear `@agent_pane_status` on every pane of that window, recompute |
-| `agent-status --version` | humans | version **and `std::env::current_exe()`** |
-| `agent-status --help` | humans | the two commands, the four states |
+| `tmux-agent-status set <state>` | agent hooks | write the pane option, recompute the rollup, ring the BEL for the hard-coded default states (`waiting`, `error`, `done`; not `working`); making the list configurable is deferred |
+| `tmux-agent-status clear-window [<pane>]` | the clear-on-focus hooks | derive the window from the pane (`$TMUX_PANE` when no argument), clear `@agent_pane_status` on every pane of that window, recompute |
+| `tmux-agent-status --version` | humans | version **and `std::env::current_exe()`** |
+| `tmux-agent-status --help` | humans | the two commands, the four states |
 
 `--version` printing the resolved executable path is not decoration. The dev loop below deliberately
 shadows the installed binary via `PATH`, and a shadow you cannot see is a shadow that wastes an
@@ -130,9 +130,9 @@ the same recipes so the two cannot drift.
 | `just test` | `cargo test` |
 | `just check` | fmt-check + lint + test - what CI runs |
 | `just build` | `cargo build --release` |
-| `just link` | symlink `target/debug/agent-status` into `${AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}` (dev shadow) |
+| `just link` | symlink `target/debug/tmux-agent-status` into `${TMUX_AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}` (dev shadow) |
 | `just unlink` | remove it |
-| `just nix-build` | `nix build .#agent-status` |
+| `just nix-build` | `nix build .#tmux-agent-status` |
 | `just harness` | bring up the throwaway two-server tmux harness from 001 for manual inspection |
 
 The devShell provides `cargo`, `rustc`, `clippy`, `rustfmt`, `rust-analyzer`, `tmux` and `just`.
@@ -181,7 +181,7 @@ test.
 | `check` | ubuntu | `just fmt-check`, `just lint` |
 | `test` | ubuntu + macos | install tmux (`apt-get` / preinstalled on macOS runners; assert `tmux -V` rather than assuming), `just test` |
 | `msrv` | ubuntu | build with the exact `rust-version` toolchain |
-| `nix` | ubuntu + macos | `nix flake check`, `nix build .#agent-status`, then run the built binary's `--version` |
+| `nix` | ubuntu + macos | `nix flake check`, `nix build .#tmux-agent-status`, then run the built binary's `--version` |
 
 macOS is not optional. The tool's entire job is talking to tmux, and tmux behaves differently
 enough across supported platforms to require coverage on both macOS and Linux.
@@ -208,21 +208,21 @@ The repository supports three distinct workflows:
 | verify a packaged installation end to end | install through a documented route, then exercise it through tmux and real agent hooks |
 
 `just link` defaults to `~/.local/bin`, but that path and its precedence are not universal.
-`AGENT_STATUS_BIN_DIR` selects any other writable directory already on `PATH`. `just unlink` must be
-called with the same value. `agent-status --version` prints the resolved executable so an unexpected
+`TMUX_AGENT_STATUS_BIN_DIR` selects any other writable directory already on `PATH`. `just unlink` must be
+called with the same value. `tmux-agent-status --version` prints the resolved executable so an unexpected
 shadow is visible.
 
 `cargo install --path .` is also available, but copies the binary into Cargo's configured binary
 directory and must be rerun after every edit. The symlink is therefore the faster development loop.
 
-A Nix build can consume the checkout directly with `nix build path:.#agent-status` or
-`nix run path:.#agent-status -- --version`. A separate Nix configuration may temporarily override a
+A Nix build can consume the checkout directly with `nix build path:.#tmux-agent-status` or
+`nix run path:.#tmux-agent-status -- --version`. A separate Nix configuration may temporarily override a
 pinned `tmux-agent-status` input with an absolute `path:` URL for end-to-end testing. Such a URL must
 not be committed because it is machine-local and its lock entry changes with the checkout contents.
 
 Installation has four independently verifiable parts:
 
-1. Install the package and confirm `agent-status --version` resolves to it.
+1. Install the package and confirm `tmux-agent-status --version` resolves to it.
 2. Source the shipped tmux snippet from whichever stable path the selected installation method provides.
 3. Add the documented term to both window status formats and verify a manually set glyph renders.
 4. Add the agent hooks, exercise a real turn, and read `@agent_status` back to confirm the hook's
@@ -269,9 +269,9 @@ end-to-end installation verification.
 
 1. `cargo init`, `Cargo.toml`, `rustfmt.toml`, `.editorconfig`, `.gitignore`, LICENSE, `justfile`.
 2. `state.rs` + `rollup.rs` + `tests/rollup.rs`. Pure, complete, table-driven. No tmux yet.
-3. `tmux.rs` + `main.rs` + the failure policy. `agent-status set` works by hand under a real server.
+3. `tmux.rs` + `main.rs` + the failure policy. `tmux-agent-status set` works by hand under a real server.
 4. `tests/tmux_server.rs`, including the inheritance assertion.
-5. `share/tmux/agent-status.conf`, `clear-window`, the focus behaviour.
+5. `share/tmux/tmux-agent-status.conf`, `clear-window`, the focus behaviour.
 6. `flake.nix` + `nix/package.nix` + `default.nix`; `nix build` produces a working binary.
 7. CI, then README and `docs/install.md`.
 8. Tag `v0.0.1`, confirm the release workflow.
@@ -284,6 +284,6 @@ Steps 1-5 are the tool, 6-8 are the delivery path, 9 is what makes it walking ra
 - **No remote is configured yet.** The repo will live at
   `github.com/gerbenoostra/tmux-agent-status`; nothing has been pushed, so steps 8 and 9 of the
   order of work are untouched and CI has never run.
-- Whether the release workflow should also publish to crates.io. `cargo install agent-status` is a
+- Whether the release workflow should also publish to crates.io. `cargo install tmux-agent-status` is a
   cheap extra install route, but it claims a name on a shared registry and the binary is useless
   without tmux config, so the README has to carry the rest anyway.

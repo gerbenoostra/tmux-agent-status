@@ -1,4 +1,4 @@
-# Installing agent-status
+# Installing tmux-agent-status
 
 Five routes. After installing you need to finish with the four configuration setup steps in the [README](../README.md):
 the binary on its own does nothing until tmux and your agent know about it.
@@ -40,20 +40,20 @@ inputs.tmux-agent-status.inputs.nixpkgs.follows = "nixpkgs";
 and add it to the home-manager module:
 
 ```nix
-home.packages = [ inputs.tmux-agent-status.packages.${pkgs.system}.agent-status ];
+home.packages = [ inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status ];
 ```
 
 **2. The tmux snippet, at a stable path.**
 
-Place the agent-status configuration at a deliberate path such that it can be imported from `.tmux.conf`:
+Place the tmux-agent-status configuration at a deliberate path such that it can be imported from `.tmux.conf`:
 ```nix
-home.file.".tmux/agent-status.conf".source =
-  "${inputs.tmux-agent-status.packages.${pkgs.system}.agent-status}/share/tmux/agent-status.conf";
+home.file.".tmux/tmux-agent-status.conf".source =
+  "${inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status}/share/tmux/tmux-agent-status.conf";
 ```
 
 Then add the following line to `.tmux.conf`:
 ```tmux
-source-file ~/.tmux/agent-status.conf
+source-file ~/.tmux/tmux-agent-status.conf
 ```
 
 **Steps 3 and 4.**
@@ -62,11 +62,11 @@ Define a format term and configure agent hooks manually, as described in the [RE
 Verify the tool and hooks are installed:
 
 ```sh
-agent-status --version
-tmux show-hooks -g | grep agent-status
+tmux-agent-status --version
+tmux show-hooks -g | grep tmux-agent-status
 ```
 
-Note that if your agent's hook cannot find `agent-status` on `PATH`, it will silently fail.
+Note that if your agent's hook cannot find `tmux-agent-status` on `PATH`, it will silently fail.
 
 ## nix profile
 
@@ -75,7 +75,7 @@ nix profile install github:gerbenoostra/tmux-agent-status
 ```
 
 The snippet is then at
-`~/.nix-profile/share/tmux/agent-status.conf`, which `source-file` can read directly.
+`~/.nix-profile/share/tmux/tmux-agent-status.conf`, which `source-file` can read directly.
 
 ## Prebuilt binary
 
@@ -85,17 +85,17 @@ Every tagged release publishes a tarball per platform with a `.sha256` checksum 
 tag=v0.0.1
 target=aarch64-apple-darwin      # or x86_64-apple-darwin, {x86_64,aarch64}-unknown-linux-gnu
 base="https://github.com/gerbenoostra/tmux-agent-status/releases/download/$tag"
-curl -fsSLO "$base/agent-status-$tag-$target.tar.gz"
-curl -fsSLO "$base/agent-status-$tag-$target.tar.gz.sha256"
-shasum -a 256 -c "agent-status-$tag-$target.tar.gz.sha256"
-tar xzf "agent-status-$tag-$target.tar.gz"
+curl -fsSLO "$base/tmux-agent-status-$tag-$target.tar.gz"
+curl -fsSLO "$base/tmux-agent-status-$tag-$target.tar.gz.sha256"
+shasum -a 256 -c "tmux-agent-status-$tag-$target.tar.gz.sha256"
+tar xzf "tmux-agent-status-$tag-$target.tar.gz"
 bin_dir="$HOME/.local/bin"
 tmux_conf_dir="$HOME/.tmux"
 mkdir -p "$bin_dir" "$tmux_conf_dir"
-cp "agent-status-$tag-$target/agent-status" "$bin_dir/agent-status"
-chmod 755 "$bin_dir/agent-status"
-cp "agent-status-$tag-$target/share/tmux/agent-status.conf" "$tmux_conf_dir/agent-status.conf"
-chmod 644 "$tmux_conf_dir/agent-status.conf"
+cp "tmux-agent-status-$tag-$target/tmux-agent-status" "$bin_dir/tmux-agent-status"
+chmod 755 "$bin_dir/tmux-agent-status"
+cp "tmux-agent-status-$tag-$target/share/tmux/tmux-agent-status.conf" "$tmux_conf_dir/tmux-agent-status.conf"
+chmod 644 "$tmux_conf_dir/tmux-agent-status.conf"
 ```
 
 ## cargo
@@ -117,8 +117,8 @@ just build
 bin_dir="$HOME/.local/bin"
 tmux_conf_dir="$HOME/.tmux"
 mkdir -p "$bin_dir" "$tmux_conf_dir"
-cp target/release/agent-status "$bin_dir/agent-status"
-chmod 755 "$bin_dir/agent-status"
-cp share/tmux/agent-status.conf "$tmux_conf_dir/agent-status.conf"
-chmod 644 "$tmux_conf_dir/agent-status.conf"
+cp target/release/tmux-agent-status "$bin_dir/tmux-agent-status"
+chmod 755 "$bin_dir/tmux-agent-status"
+cp share/tmux/tmux-agent-status.conf "$tmux_conf_dir/tmux-agent-status.conf"
+chmod 644 "$tmux_conf_dir/tmux-agent-status.conf"
 ```

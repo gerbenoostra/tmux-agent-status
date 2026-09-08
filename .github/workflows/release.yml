@@ -36,11 +36,11 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          name="agent-status-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="tmux-agent-status-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name/share/tmux"
-          cp "target/${{ matrix.target }}/release/agent-status" "dist/$name/"
+          cp "target/${{ matrix.target }}/release/tmux-agent-status" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
-          cp share/tmux/agent-status.conf "dist/$name/share/tmux/"
+          cp share/tmux/tmux-agent-status.conf "dist/$name/share/tmux/"
           tar -C dist -czf "$name.tar.gz" "$name"
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

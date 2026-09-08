@@ -1,5 +1,5 @@
 {
-  description = "agent-status: agent lifecycle events as one glyph on the tmux window entry";
+  description = "tmux-agent-status: agent lifecycle events as one glyph on the tmux window entry";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -16,12 +16,12 @@
     in
     {
       packages = forAllSystems (pkgs: rec {
-        agent-status = pkgs.callPackage ./nix/package.nix { };
-        default = agent-status;
+        tmux-agent-status = pkgs.callPackage ./nix/package.nix { };
+        default = tmux-agent-status;
       });
 
       checks = forAllSystems (pkgs: {
-        agent-status = self.packages.${pkgs.system}.agent-status;
+        tmux-agent-status = self.packages.${pkgs.system}.tmux-agent-status;
       });
 
       devShells = forAllSystems (pkgs: {

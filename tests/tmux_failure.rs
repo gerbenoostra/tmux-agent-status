@@ -11,15 +11,15 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const BIN: &str = env!("CARGO_BIN_EXE_agent-status");
+const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
 const TMUX_PANE: &str = "%0";
-const TMUX: &str = "/tmp/agent-status-test";
+const TMUX: &str = "/tmp/tmux-agent-status-test";
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn fake_tmux_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "agent-status-fake-tmux-{}-{}",
+        "tmux-agent-status-fake-tmux-{}-{}",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));

@@ -17,7 +17,7 @@ To apply live edits to your system, symlink the built artifact from the checkout
 directory that appears on `PATH` before any installed copy. The recipes default to `~/.local/bin`:
 
 ```sh
-just link      # ~/.local/bin/agent-status -> <checkout>/target/debug/agent-status
+just link      # ~/.local/bin/tmux-agent-status -> <checkout>/target/debug/tmux-agent-status
 cargo build    # every rebuild is live on the next hook fire
 just unlink    # back to the installed binary
 ```
@@ -26,12 +26,12 @@ just unlink    # back to the installed binary
 same destination for both commands:
 
 ```sh
-AGENT_STATUS_BIN_DIR="$HOME/bin" just link
-AGENT_STATUS_BIN_DIR="$HOME/bin" just unlink
+TMUX_AGENT_STATUS_BIN_DIR="$HOME/bin" just link
+TMUX_AGENT_STATUS_BIN_DIR="$HOME/bin" just unlink
 ```
 
 Use any writable directory already on your `PATH`, or add one to `PATH` first. Check precedence with
-`command -v agent-status` or `which -a agent-status`; `agent-status --version` prints the executable
+`command -v tmux-agent-status` or `which -a tmux-agent-status`; `tmux-agent-status --version` prints the executable
 that actually ran.
 
 Alternatively, `cargo install --path .` copies the local version into Cargo's configured binary
@@ -55,15 +55,15 @@ symlink:
 
 1. Run `just check` and `just nix-build`.
 2. Install the resulting package or release binary using one of the documented installation routes.
-3. Confirm `agent-status --version` resolves to that installed binary.
+3. Confirm `tmux-agent-status --version` resolves to that installed binary.
 4. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
 5. Confirm each state reaches `@agent_status` and that focusing its window clears non-sticky states.
 
 For Nix, the checkout itself can be tested without changing another configuration:
 
 ```sh
-nix build path:.#agent-status
-./result/bin/agent-status --version
+nix build path:.#tmux-agent-status
+./result/bin/tmux-agent-status --version
 ```
 
 If testing through a separate system or home-manager flake, temporarily override its

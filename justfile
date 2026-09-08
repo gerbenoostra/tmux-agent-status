@@ -43,23 +43,23 @@ build:
 link:
     #!/usr/bin/env bash
     set -euo pipefail
-    bin_dir="${AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}"
+    bin_dir="${TMUX_AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}"
     mkdir -p "$bin_dir"
-    ln -sf "{{justfile_directory()}}/target/release/agent-status" "$bin_dir/agent-status"
-    echo "$bin_dir/agent-status now shadows any installed agent-status." >&2
-    echo "The shadow is invisible: 'agent-status --version' prints the resolved path." >&2
+    ln -sf "{{justfile_directory()}}/target/release/tmux-agent-status" "$bin_dir/tmux-agent-status"
+    echo "$bin_dir/tmux-agent-status now shadows any installed tmux-agent-status." >&2
+    echo "The shadow is invisible: 'tmux-agent-status --version' prints the resolved path." >&2
     echo "'just unlink' removes it." >&2
 
 # Remove the dev shadow.
 unlink:
     #!/usr/bin/env bash
     set -euo pipefail
-    bin_dir="${AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}"
-    rm -f "$bin_dir/agent-status"
+    bin_dir="${TMUX_AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}"
+    rm -f "$bin_dir/tmux-agent-status"
 
 # Build the nix package from this checkout.
 nix-build:
-    nix build .#agent-status
+    nix build .#tmux-agent-status
 
 # A throwaway tmux server showing all four states, for looking at.
 harness:
@@ -68,7 +68,7 @@ harness:
     cd "{{justfile_directory()}}"
     cargo build
     export PATH="$PWD/target/debug:$PATH"
-    socket=agent-status-harness
+    socket=tmux-agent-status-harness
     tmux -L "$socket" kill-server 2>/dev/null || true
     tmux -L "$socket" -f /dev/null new-session -d -s harness -x 200 -y 50 -n no-agent 'sleep 3000'
     format='#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@agent_status},}#{?window_flags,#{window_flags}, }'
@@ -83,11 +83,11 @@ harness:
         panes+=("$(tmux -L "$socket" new-window -d -a -t 'harness:{end}' -n "$state" -P -F '#{pane_id}' 'sleep 3000')")
     done
     for i in "${!states[@]}"; do
-        TMUX_PANE="${panes[$i]}" agent-status set "${states[$i]}"
+        TMUX_PANE="${panes[$i]}" tmux-agent-status set "${states[$i]}"
     done
     # The hooks go on last: creating a window is itself a pane change, so they
     # would clear the states this harness exists to show before you saw them.
-    tmux -L "$socket" source-file share/tmux/agent-status.conf
+    tmux -L "$socket" source-file share/tmux/tmux-agent-status.conf
     echo "Attaching. Switch windows to watch the non-sticky states clear on focus." >&2
     echo "Kill it with: tmux -L $socket kill-server" >&2
     exec env -u TMUX tmux -L "$socket" attach -t harness

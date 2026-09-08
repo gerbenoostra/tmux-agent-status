@@ -7,7 +7,7 @@ Example result:
  0:notes  1:api ✅  2:refactor 🤖  3:migration 💬- 4:build*
 ```
 
-The internal `agent-status` executable is called from your coding agent's lifecycle hooks. It writes
+The internal `tmux-agent-status` executable is called from your coding agent's lifecycle hooks. It writes
 a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window,
 and rings the terminal bell.
 
@@ -42,21 +42,21 @@ After installing the command line tool, you'll need to include it in your tmux's
 ## Set up, in this order
 
 **1. Check the binary.**
-After installing, verify the binary is available: `agent-status --version` should print the version and the executable that is
+After installing, verify the binary is available: `tmux-agent-status --version` should print the version and the executable that is
 actually running.
 
 **2. Source the tmux snippet.**
-It ships at `share/tmux/agent-status.conf` in the package [here](./share/tmux/agent-status.conf).
+It ships at `share/tmux/tmux-agent-status.conf` in the package [here](./share/tmux/tmux-agent-status.conf).
 Import it from your tmux configuration using the path where you installed it. For example, if you
 placed it in `~/.tmux`:
 
 ```tmux
-source-file ~/.tmux/agent-status.conf
+source-file ~/.tmux/tmux-agent-status.conf
 ```
 
 The snippet may live elsewhere; see the [installation path guidance](docs/install.md#choose-installation-paths).
 
-It only adds two tmux hooks. Confirm with `tmux show-hooks -g | grep agent-status`.
+It only adds two tmux hooks. Confirm with `tmux show-hooks -g | grep tmux-agent-status`.
 
 **3. Paste the format term.**
 Into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before
@@ -102,22 +102,22 @@ Which can be done as follows:
 {
   "hooks": {
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "agent-status set working" }] }
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
     ],
     "PostToolUse": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "agent-status set working" }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
     ],
     "PreToolUse": [
       {
         "matcher": "AskUserQuestion|ExitPlanMode",
-        "hooks": [{ "type": "command", "command": "agent-status set waiting" }]
+        "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }]
       }
     ],
     "Notification": [
-      { "hooks": [{ "type": "command", "command": "agent-status set waiting" }] }
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }] }
     ],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "agent-status set done" }] }],
-    "StopFailure": [{ "hooks": [{ "type": "command", "command": "agent-status set error" }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set error" }] }]
   }
 }
 ```
@@ -136,7 +136,7 @@ Instead of relying on the hooks for the bell (and thus highlight), you can also 
 }
 ```
 
-The agent hook will not raise errors if the `agent-status` command cannot be found. You'll only notice it as
+The agent hook will not raise errors if the `tmux-agent-status` command cannot be found. You'll only notice it as
 no `@agent_status` value being available in the window. If you don't get glyphs and want to diagnose whether the
 hook is failing or the glyph printing fails, you can manually inspect the status by running:
 ```sh

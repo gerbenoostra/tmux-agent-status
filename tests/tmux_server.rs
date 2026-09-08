@@ -8,7 +8,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-const BIN: &str = env!("CARGO_BIN_EXE_agent-status");
+const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
 
 /// What an idle pane runs. The tool resolves panes from `$TMUX_PANE` and never
 /// inspects processes, so a pane does not have to look like an agent.
@@ -28,7 +28,7 @@ impl Server {
     fn start_running(command: &str) -> Server {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let socket = format!(
-            "agent-status-test-{}-{}",
+            "tmux-agent-status-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         );
@@ -229,7 +229,7 @@ fn bin_dir_first_on_path() -> String {
 fn assert_ok(out: &Output) {
     assert!(
         out.status.success(),
-        "agent-status exited with {}: {}",
+        "tmux-agent-status exited with {}: {}",
         out.status,
         String::from_utf8_lossy(&out.stderr)
     );
@@ -395,7 +395,7 @@ fn the_shipped_hooks_clear_a_window_when_it_is_looked_at() {
     let server = Server::start();
     let agent = server.first_pane();
     let elsewhere = server.new_window("elsewhere");
-    server.tmux(&["source-file", "share/tmux/agent-status.conf"]);
+    server.tmux(&["source-file", "share/tmux/tmux-agent-status.conf"]);
     assert_ok(&server.agent_status(&agent, &["set", "done"]));
     assert_ok(&server.agent_status(&elsewhere, &["set", "waiting"]));
 
@@ -420,7 +420,7 @@ fn the_shipped_hooks_clear_a_window_when_another_pane_of_it_is_selected() {
     let server = Server::start();
     let first = server.first_pane();
     let second = server.split(&first);
-    server.tmux(&["source-file", "share/tmux/agent-status.conf"]);
+    server.tmux(&["source-file", "share/tmux/tmux-agent-status.conf"]);
     assert_ok(&server.agent_status(&first, &["set", "error"]));
 
     // Switching panes inside the window: window-pane-changed.

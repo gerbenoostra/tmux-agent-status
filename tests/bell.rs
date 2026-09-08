@@ -5,7 +5,7 @@
 
 use std::process::{Command, Output, Stdio};
 
-const BIN: &str = env!("CARGO_BIN_EXE_agent-status");
+const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
 
 /// Run the binary in a new session so there is no controlling terminal.
 /// This exercises the `Err(_)` branch of `bell::ring()`.
