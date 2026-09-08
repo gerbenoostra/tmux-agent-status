@@ -1,6 +1,8 @@
 # 002 - Walking skeleton: layout, build, CI/CD and install
 
-Status: todo - plan written, nothing implemented
+Status: done for steps 1-7 - the tool, its tests, the nix package, CI and the docs are
+implemented and green. Steps 8 (tag `v0.0.1`, confirm the release workflow) and 9 (the four
+dotfiles changes) are open: no remote exists yet.
 
 Covers *how the project is built and shipped*. What it does and why is 001, which is normative;
 this file never restates a behavioural decision, only the machinery around it.
@@ -313,6 +315,23 @@ Package first, snippet second, format term third, hooks last. Each step is verif
 (`agent-status --version`; `tmux show-hooks -g | grep focus`; a hand-set `@agent_status` renders;
 a real turn sets it), and doing them in this order means no step is ever debugged through another.
 
+## What implementing it corrected
+
+Each of these was verified on a throwaway server and changed something this plan or 001 had
+assumed. They are recorded here rather than silently applied.
+
+| Assumed | Actually | Consequence |
+| --- | --- | --- |
+| `pane-focus-in` clears on focus | it fires only with `focus-events on` *and* a client attached | ship `session-window-changed` + `window-pane-changed`, which fire in every setup |
+| the hook can read `$TMUX_PANE` | tmux's `run-shell` sets `$TMUX` but no `$TMUX_PANE`; it *does* expand `#{...}` in the command | `clear-window [<pane>]` takes the pane as an argument, defaulting to `$TMUX_PANE` |
+| `@agent_status` holds - unstated | it must hold the **glyph**, since the documented term renders it directly | `@agent_pane_status` holds the state name; the opt-in recolour compares the glyph, not `error` |
+| `#{=/25/…:#W}` truncates the name | `#W` does not expand inside a modifier (tmux 3.6); it yields empty | the documented example format uses `#{window_name}` |
+| emoji render anywhere | a tmux **client** with no UTF-8 locale renders them as underscores | the stored option is unaffected; the harness forces `tmux -u`, and the README says so |
+
+Two files exist that the layout above does not list, both to keep the one crate rule intact:
+`src/lib.rs`, so the pure tier can be an integration test rather than a `#[cfg(test)]` module, and
+`src/command.rs`, so `main.rs` stays argument dispatch and `tmux.rs` stays free of policy.
+
 ## Skeleton scope
 
 **In:** `set` and `clear-window`, the four states, the rank, the rollup, the clear-on-focus hooks,
@@ -347,7 +366,8 @@ Steps 1-5 are the tool, 6-8 are the delivery path, 9 is what makes it walking ra
 ## Open
 
 - **No remote is configured yet.** The repo will live at
-  `github.com/gerbenoostra/tmux-agent-status`; nothing has been pushed.
+  `github.com/gerbenoostra/tmux-agent-status`; nothing has been pushed, so steps 8 and 9 of the
+  order of work are untouched and CI has never run.
 - Whether the release workflow should also publish to crates.io. `cargo install agent-status` is a
   cheap extra install route, but it claims a name on a shared registry and the binary is useless
   without tmux config, so the README has to carry the rest anyway.
