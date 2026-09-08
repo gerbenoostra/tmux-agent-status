@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Exercising the error paths of the tmux subprocess calls.
 //!
 //! These tests run the binary with a fake or missing `tmux` on `PATH` so the
@@ -81,13 +83,29 @@ fn set_is_silent_when_list_panes_fails() {
 }
 
 #[test]
+fn set_is_silent_when_setting_the_pane_fails() {
+    let dir = fake_tmux_dir();
+    write_fake_tmux(
+        &dir,
+        "#!/bin/sh\n\
+if [ \"$1\" = \"list-panes\" ]; then\n\
+    printf '%s\\t%s\\t%s\\t%s\\n' '%0' '' '0' '0'\n\
+    exit 0\n\
+fi\n\
+exit 1\n",
+    );
+    let out = run(&["set", "working"], &format!("{}:", dir.display()));
+    assert_ok_and_silent(&out);
+}
+
+#[test]
 fn clear_window_is_silent_when_clearing_a_pane_fails() {
     let dir = fake_tmux_dir();
     write_fake_tmux(
         &dir,
         "#!/bin/sh\n\
 if [ \"$1\" = \"list-panes\" ]; then\n\
-    printf '%s\t%s\n' '%0' 'done'\n\
+    printf '%s\t%s\t%s\t%s\n' '%0' 'done' '0' '0'\n\
     exit 0\n\
 fi\n\
 if [ \"$1\" = \"set-option\" ] && [ \"$2\" = \"-p\" ] && [ \"$3\" = \"-u\" ]; then\n\

@@ -17,6 +17,12 @@ const WINDOW_OPTION: &str = "@agent_status";
 pub struct PaneStatus {
     pub pane: String,
     pub status: String,
+    /// Whether this pane's window is on screen: the current window of a session
+    /// a client is attached to. tmux calls a detached session's current window
+    /// active, but nobody is looking at it, so the client count is part of the
+    /// answer - otherwise a turn that ends while you are detached is cleared
+    /// before you ever get to see it.
+    pub window_watched: bool,
 }
 
 /// The pane the caller is running in, or `None` when there is no tmux to talk to.
@@ -40,7 +46,7 @@ pub fn pane_statuses(target: &str) -> io::Result<Vec<PaneStatus>> {
         "-t",
         target,
         "-F",
-        &format!("#{{pane_id}}\t#{{{PANE_OPTION}}}"),
+        &format!("#{{pane_id}}\t#{{{PANE_OPTION}}}\t#{{window_active}}\t#{{session_attached}}"),
     ])?;
     out.lines().map(parse_pane_status).collect()
 }
@@ -66,14 +72,32 @@ pub fn clear_window_status(target: &str) -> io::Result<()> {
 }
 
 fn parse_pane_status(line: &str) -> io::Result<PaneStatus> {
-    let (pane, status) = line.split_once('\t').ok_or_else(|| {
+    parse_fields(line).ok_or_else(|| {
         io::Error::other(format!(
             "tmux list-panes printed an unexpected line: {line}"
         ))
-    })?;
-    Ok(PaneStatus {
+    })
+}
+
+/// `pane<TAB>status<TAB>window_active<TAB>session_attached`.
+///
+/// The status is whatever the user's option holds and may contain tabs itself,
+/// so the pane is taken from the left and the two flags from the right.
+fn parse_fields(line: &str) -> Option<PaneStatus> {
+    let (pane, rest) = line.split_once('\t')?;
+    let (rest, attached) = rest.rsplit_once('\t')?;
+    let (status, active) = rest.rsplit_once('\t')?;
+    let active = match active {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
+    // `session_attached` counts clients; it is not a flag.
+    let attached: u32 = attached.parse().ok()?;
+    Some(PaneStatus {
         pane: pane.to_owned(),
         status: status.to_owned(),
+        window_watched: active && attached > 0,
     })
 }
 
@@ -99,28 +123,57 @@ mod tests {
 
     #[test]
     fn parse_pane_status_splits_on_tab() {
-        let status = parse_pane_status("%0\tdone").unwrap();
+        let status = parse_pane_status("%0\tdone\t1\t1").unwrap();
         assert_eq!(status.pane, "%0");
         assert_eq!(status.status, "done");
+        assert!(status.window_watched);
     }
 
     #[test]
     fn parse_pane_status_allows_empty_status() {
-        let status = parse_pane_status("%0\t").unwrap();
+        let status = parse_pane_status("%0\t\t0\t1").unwrap();
         assert_eq!(status.pane, "%0");
         assert_eq!(status.status, "");
+        assert!(!status.window_watched);
     }
 
     #[test]
     fn parse_pane_status_keeps_extra_tabs_in_status() {
-        let status = parse_pane_status("%0\twaiting\textra").unwrap();
+        let status = parse_pane_status("%0\twaiting\textra\t0\t1").unwrap();
         assert_eq!(status.pane, "%0");
         assert_eq!(status.status, "waiting\textra");
+    }
+
+    #[test]
+    fn the_current_window_of_a_detached_session_is_not_watched() {
+        let status = parse_pane_status("%0\tdone\t1\t0").unwrap();
+        assert!(!status.window_watched);
+    }
+
+    #[test]
+    fn more_than_one_client_still_counts_as_watched() {
+        // `session_attached` is a client count, so a second client must not
+        // parse as "not a flag" and take the window off screen.
+        let status = parse_pane_status("%0\tdone\t1\t2").unwrap();
+        assert!(status.window_watched);
     }
 
     #[test]
     fn parse_pane_status_errors_without_tab() {
         let err = parse_pane_status("badline").unwrap_err();
         assert!(err.to_string().contains("badline"));
+    }
+
+    #[test]
+    fn parse_pane_status_errors_on_unreadable_flags() {
+        for line in [
+            "%0\tdone\tyes\t1",
+            "%0\tdone\t1\tmany",
+            "%0\tdone\t1",
+            "%0\tdone",
+        ] {
+            let err = parse_pane_status(line).unwrap_err();
+            assert!(err.to_string().contains(line), "line {line:?}");
+        }
     }
 }

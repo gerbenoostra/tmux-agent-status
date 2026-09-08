@@ -7,7 +7,7 @@ Example result:
  0:notes  1:api ✅  2:refactor 🤖  3:migration 💬- 4:build*
 ```
 
-The internal `tmux-agent-status` executable is called from your coding agent's lifecycle hooks. It writes
+The `tmux-agent-status` executable is called from your coding agent's lifecycle hooks. It writes
 a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window,
 and rings the terminal bell.
 
@@ -56,7 +56,7 @@ source-file ~/.tmux/tmux-agent-status.conf
 
 The snippet may live elsewhere; see the [installation path guidance](docs/install.md#choose-installation-paths).
 
-It only adds two tmux hooks. Confirm with `tmux show-hooks -g | grep tmux-agent-status`.
+It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls. Confirm with `tmux show-hooks -g | grep tmux-agent-status`.
 
 **3. Paste the format term.**
 Into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before

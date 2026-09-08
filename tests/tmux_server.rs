@@ -174,6 +174,27 @@ impl Server {
             .collect()
     }
 
+    /// Whether tmux considers `target`'s window the session's current one.
+    fn window_active(&self, target: &str) -> String {
+        self.tmux(&["display-message", "-p", "-t", target, "#{window_active}"])
+            .trim_end()
+            .to_owned()
+    }
+
+    /// The two facts that together mean "on screen": current window, and a
+    /// client attached to look at it.
+    fn window_active_and_attached(&self, target: &str) -> String {
+        self.tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{window_active} #{?session_attached,1,0}",
+        ])
+        .trim_end()
+        .to_owned()
+    }
+
     /// The window rollup, empty when the option is unset.
     fn window_status(&self, target: &str) -> String {
         self.tmux(&["display-message", "-p", "-t", target, "#{@agent_status}"])
@@ -249,6 +270,66 @@ fn set_writes_the_pane_state_and_the_window_glyph() {
 
     assert_eq!(server.pane_statuses(&pane), ["done"]);
     assert_eq!(server.window_status(&pane), "✅");
+}
+
+#[test]
+fn a_detached_session_is_not_being_watched() {
+    // tmux calls a detached session's current window active, but nobody is
+    // looking at it, so the state must survive to be seen on the next attach.
+    // Every other test on this server relies on the same rule.
+    let server = Server::start();
+    let pane = server.first_pane();
+    assert_eq!(server.window_active(&pane), "1");
+
+    assert_ok(&server.agent_status(&pane, &["set", "done"]));
+
+    assert_eq!(server.pane_statuses(&pane), ["done"]);
+    assert_eq!(server.window_status(&pane), "\u{2705}");
+}
+
+#[test]
+fn a_non_sticky_state_on_a_watched_window_never_renders() {
+    // "A `done` on the window you are already watching never renders at all."
+    let server = Server::start();
+    let pane = server.first_pane();
+    let _client = server.attach();
+    wait_for(
+        || server.window_active_and_attached(&pane),
+        |seen| seen == "1 1",
+    );
+
+    assert_ok(&server.agent_status(&pane, &["set", "done"]));
+
+    assert_eq!(server.pane_statuses(&pane), [""]);
+    assert_eq!(server.window_status(&pane), "");
+}
+
+#[test]
+fn a_watched_window_supersedes_the_reporting_pane_and_clears_its_siblings() {
+    let server = Server::start();
+    let reporter = server.first_pane();
+    let finished = server.split(&reporter);
+    let busy = server.split(&reporter);
+    // Arranged while detached, so these are the states a real window carries
+    // by the time you look at it.
+    assert_ok(&server.agent_status(&reporter, &["set", "working"]));
+    assert_ok(&server.agent_status(&finished, &["set", "done"]));
+    assert_ok(&server.agent_status(&busy, &["set", "working"]));
+    let _client = server.attach();
+    wait_for(
+        || server.window_active_and_attached(&reporter),
+        |seen| seen == "1 1",
+    );
+
+    assert_ok(&server.agent_status(&reporter, &["set", "waiting"]));
+
+    // The reporting pane's own `working` is over - the event supersedes it,
+    // sticky or not, or a turn that ends while you watch strands a 🤖 that no
+    // later focus event clears. Its siblings follow the ordinary focus rule.
+    let mut statuses = server.pane_statuses(&reporter);
+    statuses.sort();
+    assert_eq!(statuses, ["", "", "working"]);
+    assert_eq!(server.window_status(&reporter), "\u{1f916}");
 }
 
 #[test]
@@ -503,6 +584,20 @@ fn a_hook_outside_tmux_exits_zero_and_says_nothing() {
         assert_ok(&out);
         assert!(out.stderr.is_empty(), "{args:?} wrote to stderr");
     }
+}
+
+#[test]
+fn a_hook_with_only_tmux_pane_exits_zero_and_says_nothing() {
+    let out = Command::new(BIN)
+        .args(["set", "done"])
+        .env_remove("TMUX")
+        .env("TMUX_PANE", "%0")
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+
+    assert_ok(&out);
+    assert!(out.stderr.is_empty());
 }
 
 #[test]

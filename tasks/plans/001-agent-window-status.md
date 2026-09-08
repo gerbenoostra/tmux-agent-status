@@ -1,8 +1,8 @@
 # 001 - agent-window-status: agent events as a tmux window icon and highlight
 
-Status: partly implemented - 002's skeleton ships the four states, the rank, the rollup, the
-clear-on-focus hooks, the bell and the format term. Still to come: the config file, `stale`, agents
-beyond Claude Code, and the immediate clear when the pane is already focused.
+Status: partly implemented - 002's skeleton and 003's follow-ups ship the four states, the rank,
+the rollup, immediate and hook-driven clear-on-focus behavior, the bell and the format term. Still
+to come: the config file, `stale`, and agents beyond Claude Code.
 
 ## Purpose
 
@@ -60,7 +60,10 @@ broke" and "it stopped because it needs an answer" call for different reactions.
 `working` is deliberately **sticky** - it must not clear on focus, or an agent you glance at goes
 blank while still running. The other three auto-clear via a clear-on-focus hook, and clear
 immediately if the pane is already focused, so a `done` on the window you are already watching
-never renders at all.
+never renders at all. **Focused means a client is attached.** tmux calls a detached session's
+current window active, but nobody is looking at it, so a turn that ends while you are away must
+leave its glyph to be seen on the next attach. An attached client whose terminal window is hidden
+is a further case, and is 006.
 
 **A fifth state, `stale` 💤, comes later - not in the first version.** Sticky `working` has one
 failure mode: an agent that dies without firing `Stop` or `StopFailure` leaves a permanent 🤖.
