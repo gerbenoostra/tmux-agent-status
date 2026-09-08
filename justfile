@@ -39,13 +39,13 @@ check: fmt-check lint test
 build:
     cargo build --release
 
-# Shadow the installed binary with this checkout's debug build (dev loop).
+# Shadow the installed binary with this checkout's release build.
 link:
     #!/usr/bin/env bash
     set -euo pipefail
     bin_dir="${AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}"
     mkdir -p "$bin_dir"
-    ln -sf "{{justfile_directory()}}/target/debug/agent-status" "$bin_dir/agent-status"
+    ln -sf "{{justfile_directory()}}/target/release/agent-status" "$bin_dir/agent-status"
     echo "$bin_dir/agent-status now shadows any installed agent-status." >&2
     echo "The shadow is invisible: 'agent-status --version' prints the resolved path." >&2
     echo "'just unlink' removes it." >&2
