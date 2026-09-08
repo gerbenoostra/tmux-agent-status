@@ -55,18 +55,23 @@ harness:
     socket=agent-status-harness
     tmux -L "$socket" kill-server 2>/dev/null || true
     tmux -L "$socket" -f /dev/null new-session -d -s harness -x 200 -y 50 -n no-agent 'sleep 3000'
-    tmux -L "$socket" source-file share/tmux/agent-status.conf
     format='#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@agent_status},}#{?window_flags,#{window_flags}, }'
     tmux -L "$socket" set -g window-status-format "$format"
     tmux -L "$socket" set -g window-status-current-format "$format"
     tmux -L "$socket" set -g monitor-bell on
     tmux -L "$socket" set -g bell-action other
     export TMUX="$(tmux -L "$socket" display-message -p '#{socket_path}'),0,0"
-    for state in working done error waiting; do
-        pane=$(tmux -L "$socket" new-window -d -a -t 'harness:{end}' -n "$state" -P -F '#{pane_id}' \
-            'bash -c "exec -a claude sleep 3000"')
-        TMUX_PANE="$pane" agent-status set "$state"
+    states=(working done error waiting)
+    panes=()
+    for state in "${states[@]}"; do
+        panes+=("$(tmux -L "$socket" new-window -d -a -t 'harness:{end}' -n "$state" -P -F '#{pane_id}' 'sleep 3000')")
     done
+    for i in "${!states[@]}"; do
+        TMUX_PANE="${panes[$i]}" agent-status set "${states[$i]}"
+    done
+    # The hooks go on last: creating a window is itself a pane change, so they
+    # would clear the states this harness exists to show before you saw them.
+    tmux -L "$socket" source-file share/tmux/agent-status.conf
     echo "Attaching. Switch windows to watch the non-sticky states clear on focus." >&2
     echo "Kill it with: tmux -L $socket kill-server" >&2
     exec env -u TMUX tmux -L "$socket" attach -t harness
