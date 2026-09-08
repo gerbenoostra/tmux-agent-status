@@ -1,6 +1,6 @@
 # tmux-agent-status
 
-A lightweigh tool that adds a glyph to tmux window names, such that you know in which window an agent needs you, and why.
+A lightweight tool that adds a glyph to the tmux window status, so you know in which window an agent needs you, and why.
 
 Example result:
 ```
@@ -11,8 +11,8 @@ The internal `agent-status` executable is called from your coding agent's lifecy
 a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window,
 and rings the terminal bell.
 
-To not interfere with your formatting, window naming scripts, or monitor-bell, this script deliberately
-does not change, color, nor format window names. It just enables the bell and adds a glyph.
+To not interfere with your formatting, window naming scripts, or monitor-bell, this tool deliberately
+does not change, colour, or format window names. It just enables the bell and adds a glyph.
 
 ## The four states
 
@@ -37,7 +37,7 @@ without it renders them as underscores.
 See [docs/install.md](docs/install.md) for the nix flake input, `nix profile`, a prebuilt binary,
 `cargo`, and building from source.
 
-fter installing the command line tool, you'll need to include it in your tmux's window status format, and include it in your agent hooks.
+After installing the command line tool, you'll need to include it in your tmux's window status format, and include it in your agent hooks.
 
 ## Set up, in this order
 
@@ -71,7 +71,7 @@ set -g window-status-format '#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@a
 The name segment stays whatever you already had. Confirm it renders by setting a glyph by hand:
 `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.
 
-If you want to highlight/color the window title when the bell has rang, you can to `~/.tmux.conf`:
+If you want to highlight or colour the window title when the bell has rung, add this to `~/.tmux.conf`:
 ```tmux
 setw -g monitor-bell on
 set -g bell-action other
@@ -80,9 +80,9 @@ setw -g window-status-bell-style 'fg=magenta,bold,nodim'
 
 **4. Paste the agent hooks.**
 
-To prevent unexpected scrambling of your config files, we ask you to manually edit your agents config.
+To prevent unexpected scrambling of your config files, we ask you to manually edit your agent config.
 
-For Claude Code, we recommend to watch the following hooks in `~/.claude/settings.json`:
+For Claude Code, we recommend watching the following hooks in `~/.claude/settings.json`:
 
 | Event | Matcher | State |
 | --- | --- | --- |
@@ -123,7 +123,7 @@ is precisely the event meaning "still blocked, and has been for a while".
 
 As the tool rings the bell itself, no standalone `printf '\a'` hooks for the same events are needed.
 
-Instead of relying on the hooks for the bell (and thus highlight), you can also use Claude's s own `\a` bell events, by configuring them as follows:
+Instead of relying on the hooks for the bell (and thus highlight), you can also use Claude's own `\a` bell events by configuring them as follows:
 ```json
 {
   "preferredNotifChannel": "terminal_bell",
@@ -133,8 +133,8 @@ Instead of relying on the hooks for the bell (and thus highlight), you can also 
 ```
 
 The agent hook will not raise errors if the `agent-status` command cannot be found. You'll only notice it as
-no `agent_status` being available in the window. If you don't get glyphs, and want to diagnose whether the
-hook is failing or the glyph printing fails, you can manually inspect the `agent_status` by running the following:
+no `@agent_status` value being available in the window. If you don't get glyphs and want to diagnose whether the
+hook is failing or the glyph printing fails, you can manually inspect the status by running:
 ```sh
 tmux display-message -p '#{@agent_status}'
 ```
@@ -153,9 +153,9 @@ pane without a value.
 
 ## The bell, and colour
 
-For the end states (`waiting`, `error` and `done`, thus not `working`) a terminal bell (`\a\`) is printed;
+For the end states (`waiting`, `error` and `done`, thus not `working`) a terminal bell (`\a`) is printed.
 With `monitor-bell on`, tmux gives you the window highlight, in whatever way you configure it.
-To not interfere with your own highlight format, this tool deliberately does not color or name windows.
+To not interfere with your own highlight format, this tool deliberately does not colour or name windows.
 
 If you want `error` to stand out further, the shipped snippet carries an opt-in one-liner for it.
 

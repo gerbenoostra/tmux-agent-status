@@ -32,11 +32,15 @@ Then add the following line to `.tmux.conf`:
 source-file ~/.tmux/agent-status.conf
 ```
 
-**3 and 4.**
-Define a format term and configure agent hooks manually, as described in the [README](../README.md)
+**Steps 3 and 4.**
+Define a format term and configure agent hooks manually, as described in the [README](../README.md).
 
-Verify the tool is installed with: `agent-status --version`;
-Verify the tmux hooks are installed with: `tmux show-hooks -g | grep agent-status`;
+Verify the tool and hooks are installed:
+
+```sh
+agent-status --version
+tmux show-hooks -g | grep agent-status
+```
 
 Note that if your agent's hook cannot find `agent-status` on `PATH`, it will silently fail.
 
@@ -51,7 +55,7 @@ The snippet is then at
 
 ## Prebuilt binary
 
-Every tagged release publishes a tarball per platform with a `.sha256` beside it:
+Every tagged release publishes a tarball per platform with a `.sha256` checksum file beside it:
 
 ```sh
 tag=v0.0.1
@@ -61,8 +65,11 @@ curl -fsSLO "$base/agent-status-$tag-$target.tar.gz"
 curl -fsSLO "$base/agent-status-$tag-$target.tar.gz.sha256"
 shasum -a 256 -c "agent-status-$tag-$target.tar.gz.sha256"
 tar xzf "agent-status-$tag-$target.tar.gz"
-install -Dm755 "agent-status-$tag-$target/agent-status" ~/.local/bin/agent-status
-install -Dm644 "agent-status-$tag-$target/share/tmux/agent-status.conf" ~/.tmux/agent-status.conf
+mkdir -p ~/.local/bin ~/.tmux
+cp "agent-status-$tag-$target/agent-status" ~/.local/bin/agent-status
+chmod 755 ~/.local/bin/agent-status
+cp "agent-status-$tag-$target/share/tmux/agent-status.conf" ~/.tmux/agent-status.conf
+chmod 644 ~/.tmux/agent-status.conf
 ```
 
 ## cargo
@@ -81,6 +88,9 @@ cd tmux-agent-status
 nix develop            # or bring your own Rust >= the rust-version in Cargo.toml
 just check
 just build
-install -Dm755 target/release/agent-status ~/.local/bin/agent-status
-install -Dm644 share/tmux/agent-status.conf ~/.tmux/agent-status.conf
+mkdir -p ~/.local/bin ~/.tmux
+cp target/release/agent-status ~/.local/bin/agent-status
+chmod 755 ~/.local/bin/agent-status
+cp share/tmux/agent-status.conf ~/.tmux/agent-status.conf
+chmod 644 ~/.tmux/agent-status.conf
 ```

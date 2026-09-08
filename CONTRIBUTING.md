@@ -30,7 +30,7 @@ re-running on every edit. This still shadows any other installs.
 ## Packaging
 
 **Does my packaging work?**
-To verify packaging work, build the local flake; it installs nothing.
+To verify packaging works, build the local flake; it installs nothing.
 
 ```sh
 nix run . -- --version
@@ -41,11 +41,9 @@ just nix-build
 
 A local build inside the real config, on the real `PATH`, under the real hooks:
 
-```sh
-darwin-rebuild switch --flake "$HOME/.dotfiles#hostname" \
-  --override-input tmux-agent-status "path:$HOME/src/tmux-agent-status"
-```
+Install the local checkout into your real environment using your package manager (for example,
+override a flake input to `path:$PWD`). Exercise the binary through a real agent turn.
 
-Nothing is committed and the lock is untouched; dropping the flag reverts. Do not commit a `path:`
+Nothing is committed and the lock is untouched; dropping the override reverts. Do not commit a `path:`
 input instead: it is an absolute machine-local path, and its lock entry records a hash of the
 directory that changes on every edit.
