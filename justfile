@@ -20,16 +20,16 @@ lint:
 test:
     cargo test
 
-# Run the test suite with 100% line coverage.
+# Run the test suite with 100% line and region coverage.
 # The bell path writes to /dev/tty, so the runner needs a controlling terminal;
 # `script` creates one and is available on both Linux (util-linux) and macOS.
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "{{os()}}" == "macos" ]]; then
-        script -q /dev/null cargo llvm-cov --summary-only --fail-under-lines 100
+        script -q /dev/null cargo llvm-cov --summary-only --fail-under-lines 100 --fail-under-regions 100
     else
-        script -q /dev/null -c 'cargo llvm-cov --summary-only --fail-under-lines 100'
+        script -q /dev/null -c 'cargo llvm-cov --summary-only --fail-under-lines 100 --fail-under-regions 100'
     fi
 
 # What CI runs.

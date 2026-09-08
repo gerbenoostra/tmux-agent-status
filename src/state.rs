@@ -102,11 +102,12 @@ pub struct UnknownState(pub String);
 
 impl fmt::Display for UnknownState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unknown state '{}', expected one of:", self.0)?;
-        for state in State::ALL {
-            write!(f, " {state}")?;
-        }
-        Ok(())
+        let states = State::ALL
+            .iter()
+            .map(|state| state.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        write!(f, "unknown state '{}', expected one of: {states}", self.0)
     }
 }
 
@@ -126,6 +127,14 @@ impl FromStr for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FailWriter;
+
+    impl fmt::Write for FailWriter {
+        fn write_str(&mut self, _s: &str) -> fmt::Result {
+            Err(fmt::Error)
+        }
+    }
 
     #[test]
     fn every_name_parses_back_to_its_state() {
@@ -180,5 +189,12 @@ mod tests {
             ranks.windows(2).all(|w| w[0] < w[1]),
             "State::ALL must be ordered by increasing rank"
         );
+    }
+
+    #[test]
+    fn unknown_state_display_propagates_write_errors() {
+        let mut writer = FailWriter;
+        let result = fmt::write(&mut writer, format_args!("{}", UnknownState("busy".into())));
+        assert!(result.is_err());
     }
 }

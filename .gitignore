@@ -3,5 +3,5 @@
 /result-*
 .direnv/
 .envrc
-coverage.json
+coverage*.json
 coverage.lcov

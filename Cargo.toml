@@ -14,3 +14,6 @@ categories = ["command-line-utilities"]
 
 [profile.release]
 strip = true
+
+[dev-dependencies]
+libc = "0.2"
