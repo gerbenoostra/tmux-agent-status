@@ -67,6 +67,10 @@ impl Server {
 
     fn try_tmux(&self, args: &[&str]) -> Output {
         Command::new("tmux")
+            // -u: a client with no UTF-8 locale renders the glyphs as
+            // underscores, and a build sandbox has no locale at all. The stored
+            // option is unaffected; this is only about what a client sees.
+            .arg("-u")
             .arg("-L")
             .arg(&self.socket)
             .args(args)

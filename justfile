@@ -41,6 +41,10 @@ link:
 unlink:
     rm -f ~/.local/bin/agent-status
 
+# Build the nix package from this checkout.
+nix-build:
+    nix build .#agent-status
+
 # A throwaway tmux server showing all four states, for looking at.
 harness:
     #!/usr/bin/env bash

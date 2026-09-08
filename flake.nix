@@ -15,6 +15,15 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
+      packages = forAllSystems (pkgs: rec {
+        agent-status = pkgs.callPackage ./nix/package.nix { };
+        default = agent-status;
+      });
+
+      checks = forAllSystems (pkgs: {
+        agent-status = self.packages.${pkgs.system}.agent-status;
+      });
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
