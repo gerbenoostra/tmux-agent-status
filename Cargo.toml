@@ -1,0 +1,16 @@
+[package]
+name = "agent-status"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+description = "Agent lifecycle events as one glyph on the tmux window entry"
+repository = "https://github.com/gerbenoostra/tmux-agent-status"
+license = "MIT"
+readme = "README.md"
+keywords = ["tmux", "agent", "status", "hook"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+
+[profile.release]
+strip = true
