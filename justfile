@@ -35,15 +35,19 @@ build:
 link:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p ~/.local/bin
-    ln -sf "{{justfile_directory()}}/target/debug/agent-status" ~/.local/bin/agent-status
-    echo "~/.local/bin/agent-status now shadows any installed agent-status." >&2
+    bin_dir="${AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}"
+    mkdir -p "$bin_dir"
+    ln -sf "{{justfile_directory()}}/target/debug/agent-status" "$bin_dir/agent-status"
+    echo "$bin_dir/agent-status now shadows any installed agent-status." >&2
     echo "The shadow is invisible: 'agent-status --version' prints the resolved path." >&2
     echo "'just unlink' removes it." >&2
 
 # Remove the dev shadow.
 unlink:
-    rm -f ~/.local/bin/agent-status
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin_dir="${AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}"
+    rm -f "$bin_dir/agent-status"
 
 # Build the nix package from this checkout.
 nix-build:
