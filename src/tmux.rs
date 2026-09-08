@@ -92,3 +92,35 @@ fn tmux(args: &[&str]) -> io::Result<String> {
     }
     String::from_utf8(out.stdout).map_err(io::Error::other)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pane_status_splits_on_tab() {
+        let status = parse_pane_status("%0\tdone").unwrap();
+        assert_eq!(status.pane, "%0");
+        assert_eq!(status.status, "done");
+    }
+
+    #[test]
+    fn parse_pane_status_allows_empty_status() {
+        let status = parse_pane_status("%0\t").unwrap();
+        assert_eq!(status.pane, "%0");
+        assert_eq!(status.status, "");
+    }
+
+    #[test]
+    fn parse_pane_status_keeps_extra_tabs_in_status() {
+        let status = parse_pane_status("%0\twaiting\textra").unwrap();
+        assert_eq!(status.pane, "%0");
+        assert_eq!(status.status, "waiting\textra");
+    }
+
+    #[test]
+    fn parse_pane_status_errors_without_tab() {
+        let err = parse_pane_status("badline").unwrap_err();
+        assert!(err.to_string().contains("badline"));
+    }
+}

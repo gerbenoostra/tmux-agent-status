@@ -82,7 +82,7 @@ fn version() -> String {
     // a shadow you cannot see is a shadow that wastes an afternoon.
     let exe = env::current_exe()
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "<unknown>".to_owned());
+        .unwrap_or("<unknown>".to_owned());
     format!(
         "{} {}\nrunning from {}",
         env!("CARGO_PKG_NAME"),
