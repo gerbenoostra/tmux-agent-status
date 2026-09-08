@@ -47,10 +47,14 @@ actually running.
 
 **2. Source the tmux snippet.**
 It ships at `share/tmux/agent-status.conf` in the package [here](./share/tmux/agent-status.conf).
-Import the agent-status conf in `~/.tmux.conf` by adding:
+Import it from your tmux configuration using the path where you installed it. For example, if you
+placed it in `~/.tmux`:
+
 ```tmux
 source-file ~/.tmux/agent-status.conf
 ```
+
+The snippet may live elsewhere; see the [installation path guidance](docs/install.md#choose-installation-paths).
 
 It only adds two tmux hooks. Confirm with `tmux show-hooks -g | grep agent-status`.
 

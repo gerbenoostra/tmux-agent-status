@@ -1,8 +1,8 @@
 # 002 - Walking skeleton: layout, build, CI/CD and install
 
 Status: done for steps 1-7 - the tool, its tests, the nix package, CI and the docs are
-implemented and green. Steps 8 (tag `v0.0.1`, confirm the release workflow) and 9 (the four
-dotfiles changes) are open: no remote exists yet.
+implemented and green. Steps 8 (tag `v0.0.1` and confirm the release workflow) and 9 (verify an
+installed package end to end) are open: no remote exists yet.
 
 Covers *how the project is built and shipped*. What it does and why is 001, which is normative;
 this file never restates a behavioural decision, only the machinery around it.
@@ -22,7 +22,7 @@ Concretely, the skeleton is done when all six are true:
 3. The documented format term renders the glyph, and renders nothing when no agent is present.
 4. `cargo test` passes, including an integration test driving a throwaway `tmux -L` server.
 5. CI is green on push, and a `v0.0.1` tag produces a GitHub release with binaries.
-6. It is installable on macOS through the dotfiles flake input, not through a dev symlink.
+6. A packaged build can be installed and exercised on a supported system without a development symlink.
 
 Everything else in 001 is deliberately out: see [Skeleton scope](#skeleton-scope).
 
@@ -82,7 +82,7 @@ tmux-agent-status/
 ```
 
 Deferred until they have a reason to exist: `man/agent-status.1` (README first), a Homebrew formula
-(one shared tap across the sibling tools, not a tap per tool), `CHANGELOG.md` (generated from
+(after demand demonstrates that it is worth maintaining), and `CHANGELOG.md` (generated from
 conventional commits when there is a second release, never hand-edited).
 
 ## Crate structure: one rule
@@ -130,7 +130,7 @@ the same recipes so the two cannot drift.
 | `just test` | `cargo test` |
 | `just check` | fmt-check + lint + test - what CI runs |
 | `just build` | `cargo build --release` |
-| `just link` | symlink `~/.local/bin/agent-status` at `target/debug/agent-status` (dev shadow) |
+| `just link` | symlink `target/debug/agent-status` into `${AGENT_STATUS_BIN_DIR:-$HOME/.local/bin}` (dev shadow) |
 | `just unlink` | remove it |
 | `just nix-build` | `nix build .#agent-status` |
 | `just harness` | bring up the throwaway two-server tmux harness from 001 for manual inspection |
@@ -183,8 +183,8 @@ test.
 | `msrv` | ubuntu | build with the exact `rust-version` toolchain |
 | `nix` | ubuntu + macos | `nix flake check`, `nix build .#agent-status`, then run the built binary's `--version` |
 
-macOS is not optional. The tool's entire job is talking to tmux, tmux behaves differently enough
-across platforms to matter, and this tool is used on both.
+macOS is not optional. The tool's entire job is talking to tmux, and tmux behaves differently
+enough across supported platforms to require coverage on both macOS and Linux.
 
 `.github/workflows/release.yml`, on `push: tags: v*`, `permissions: contents: write`: build
 `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` and
@@ -197,123 +197,39 @@ the standard supply-chain posture for a public repo and it costs one comment per
 A CI matrix is not a substitute for the manual harness - `just harness` stays, because the things
 that actually look wrong (a glyph one column off, a dim quiet window) are seen, not asserted.
 
-## Installing it the dotfiles way
+## Local development and installation verification
 
-The two questions this plan was asked to answer, in order.
+The repository supports three distinct workflows:
 
-### Can nix install a package from a local folder?
+| Goal | Method |
+| --- | --- |
+| make each rebuild live on the next hook event | symlink the debug binary into an early `PATH` directory with `just link` |
+| verify the Nix package without installing it | run `nix build` or `nix run` against the checkout |
+| verify a packaged installation end to end | install through a documented route, then exercise it through tmux and real agent hooks |
 
-Yes, three ways - but they are not three candidates for one job. Each answers a different question,
-two are in routine use, one is rejected outright, and exactly one carries a rule about where it may
-appear. Together with the dev symlink from the next section:
+`just link` defaults to `~/.local/bin`, but that path and its precedence are not universal.
+`AGENT_STATUS_BIN_DIR` selects any other writable directory already on `PATH`. `just unlink` must be
+called with the same value. `agent-status --version` prints the resolved executable so an unexpected
+shadow is visible.
 
-| Want | Reach for | Verdict |
-| --- | --- | --- |
-| an edit live on the next hook fire | `just link`, which is not nix at all - next section | **the everyday loop** |
-| "does the packaging build and run?" | `nix build` / `nix run` on the checkout | **use freely** |
-| the real config, built once from a local checkout | `--override-input` at switch time | **use when it matters, never committed** |
-| a local checkout wired into the config permanently | a `path:` flake input | **rejected** |
+`cargo install --path .` is also available, but copies the binary into Cargo's configured binary
+directory and must be rerun after every edit. The symlink is therefore the faster development loop.
 
-**1. A `path:` flake input.** `inputs.tmux-agent-status.url = "path:/home/you/src/tmux-agent-status"`.
-The obvious thing to reach for, and wrong for a config shared by two machines: the URL is an
-absolute machine-local path, so committing it breaks the other machine, and the lock records a
-`narHash` of the directory that changes on **every edit**, so each rebuild needs a
-`nix flake lock --update-input` first. **Rejected** for the tracked config. Fine in a throwaway
-flake, where neither problem exists.
+A Nix build can consume the checkout directly with `nix build path:.#agent-status` or
+`nix run path:.#agent-status -- --version`. A separate Nix configuration may temporarily override a
+pinned `tmux-agent-status` input with an absolute `path:` URL for end-to-end testing. Such a URL must
+not be committed because it is machine-local and its lock entry changes with the checkout contents.
 
-**2. `nix run` / `nix build` against the checkout.** `nix run ~/src/tmux-agent-status -- --version`
-builds and runs the local flake with the real derivation and touches no config at all. **Use
-freely** - it installs nothing, so there is nothing to clean up or forget. This is how "does my
-packaging work" gets answered, and it is what `just nix-build` wraps.
+Installation has four independently verifiable parts:
 
-**3. `--override-input` at switch time.** The dotfiles flake pins the GitHub input as normal, and a
-local checkout is swapped in for one rebuild:
+1. Install the package and confirm `agent-status --version` resolves to it.
+2. Source the shipped tmux snippet from whichever stable path the selected installation method provides.
+3. Add the documented term to both window status formats and verify a manually set glyph renders.
+4. Add the agent hooks, exercise a real turn, and read `@agent_status` back to confirm the hook's
+   environment can find the command on `PATH`.
 
-```sh
-sudo darwin-rebuild switch --flake "$HOME/.dotfiles#hostname" \
-  --override-input tmux-agent-status path:$HOME/src/tmux-agent-status
-```
-
-**Use when it matters, never committed.** This is the only way to see a local build inside the real
-config - the installed binary, on the real PATH, under the real hooks - so it is what a change gets
-verified with before it is tagged. Nothing is committed, the lock is untouched, and dropping the
-flag reverts. It costs a full rebuild per iteration, which is why it is not the everyday loop and
-why option 1 is not worth the persistence it would buy.
-
-### Can it be installed editable?
-
-Not in the `pip install -e` sense, and no packaging trick changes that: the artifact is a compiled
-binary and a nix store path is immutable by design. What "editable" has to mean here is *an edit is
-live on the next hook fire without a rebuild and without sudo*, and `PATH` already provides it.
-
-On a typical home-manager + nix-darwin setup, `~/.local/bin` sits ahead of the profile path where
-home-manager installs packages, so a symlink there shadows the installed binary. Adjust if your
-`PATH` ordering differs. So:
-
-```sh
-just link     # ~/.local/bin/agent-status -> <checkout>/target/debug/agent-status
-cargo build   # every rebuild is live for the next hook fire
-just unlink   # back to the installed binary
-```
-
-No rebuild, no sudo, instantly reversible, and it shadows the installed binary rather than replacing
-it. The one hazard is that the shadow is invisible, which is exactly what `--version` printing
-`current_exe()` is for. `just link` prints the same warning.
-
-Rejected: `cargo install --path .` into `~/.cargo/bin`. Same shadowing effect but it copies rather
-than symlinks, so it needs re-running on every edit - strictly worse than the symlink, for the same
-risk.
-
-### What the dotfiles repo has to add
-
-Four changes, each small and each reviewable in a diff. This is the whole install surface.
-
-**1. A flake input and its package.** In `flake.nix`:
-
-```nix
-tmux-agent-status.url = "github:gerbenoostra/tmux-agent-status";
-tmux-agent-status.inputs.nixpkgs.follows = "nixpkgs";
-```
-
-and in the shared home-manager file, the package added to `home.packages`. The input is pinned and
-updated on its own, so a bad bump here never blocks an unrelated change - the argument for one repo
-per tool, paying off at the first update.
-
-**2. The tmux snippet, at a stable path.** `~/.tmux.conf` is an out-of-store symlink into the
-dotfiles repo, so it cannot interpolate a nix store path. Home-manager places the shipped snippet at
-a fixed location instead:
-
-```nix
-home.file.".tmux/agent-status.conf".source =
-  "${inputs.tmux-agent-status.packages.${pkgs.system}.agent-status}/share/tmux/agent-status.conf";
-```
-
-and `.tmux.conf` gains one line, `source-file ~/.tmux/agent-status.conf`, which brings the
-`pane-focus-in` hook with it. This is the same pattern used for other out-of-store tmux includes.
-
-**3. The format term, pasted by hand.** Deliberately *not* automated - 001's hardest decision is
-that the tool does string surgery on nobody's format. It is one insertion into each of
-`window-status-format` and `window-status-current-format`, between the closing `}}` of the
-truncation and `#{?window_flags,...}`:
-
-```tmux
-#{?@agent_status, #{@agent_status},}
-```
-
-**4. The agent hooks, pasted by hand.** The entries from 001's hook table call `agent-status` from
-`PATH`. The setter rings the bell itself, so any separate `printf '\a'` hooks for the same events
-should be removed rather than kept alongside.
-
-One thing to verify rather than assume during step 4: that agent hooks run with a `PATH` that
-includes the home-manager profile. A hook that silently exits 0 when it cannot find `agent-status`
-- which is the correct failure policy - is also a hook that fails invisibly. The first `set done`
-must be confirmed by reading `@agent_status` back, not by looking at the status bar and believing it.
-
-### Order of installation
-
-Package first, snippet second, format term third, hooks last. Each step is verifiable on its own
-(`agent-status --version`; `tmux show-hooks -g | grep focus`; a hand-set `@agent_status` renders;
-a real turn sets it), and doing them in this order means no step is ever debugged through another.
+Package first, snippet second, format term third, and hooks last. This order keeps each failure
+isolated from the next integration layer.
 
 ## What implementing it corrected
 
@@ -335,8 +251,8 @@ Two files exist that the layout above does not list, both to keep the one crate 
 ## Skeleton scope
 
 **In:** `set` and `clear-window`, the four states, the rank, the rollup, the clear-on-focus hooks,
-the BEL, the format term, the two test tiers, the flake package, CI, one tagged release, the dotfiles
-install.
+the BEL, the format term, the two test tiers, the flake package, CI, one tagged release, and
+end-to-end installation verification.
 
 **Out, and each for a reason:**
 
@@ -359,7 +275,7 @@ install.
 6. `flake.nix` + `nix/package.nix` + `default.nix`; `nix build` produces a working binary.
 7. CI, then README and `docs/install.md`.
 8. Tag `v0.0.1`, confirm the release workflow.
-9. The four dotfiles changes, in the order above, and read `@agent_status` back.
+9. Install a packaged build through a documented route and read `@agent_status` back after a real hook event.
 
 Steps 1-5 are the tool, 6-8 are the delivery path, 9 is what makes it walking rather than standing.
 

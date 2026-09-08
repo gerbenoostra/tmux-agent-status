@@ -3,6 +3,30 @@
 Five routes. After installing you need to finish with the four configuration setup steps in the [README](../README.md):
 the binary on its own does nothing until tmux and your agent know about it.
 
+## Choose installation paths
+
+The examples below use `~/.local/bin` for the executable and `~/.tmux` for the tmux snippet. These
+are examples, not requirements:
+
+- Linux and other POSIX systems commonly use `~/.local/bin` or `~/bin` for user-installed commands.
+- macOS users can use the same directories. A Homebrew-managed command directory such as
+  `$(brew --prefix)/bin` is another possibility, but manually installing into a package manager's
+  prefix makes that file the user's responsibility.
+- Cargo normally installs commands into `~/.cargo/bin`.
+- Nix profiles provide their own command directories and should normally be used through the Nix
+  installation routes below.
+- `/usr/local/bin` is a common system-wide destination when all users need the command, but it
+  generally requires administrator permissions.
+
+Whichever directory you choose must be on the `PATH` inherited by the agent hooks. The tmux snippet
+can live anywhere readable by tmux; its `source-file` line must use the same path. The prebuilt and
+source examples use variables so either location can be changed:
+
+```sh
+bin_dir="$HOME/.local/bin"
+tmux_conf_dir="$HOME/.tmux"
+```
+
 ## Nix flake input (home-manager, nix)
 
 **1. The input and the package.**
@@ -65,11 +89,13 @@ curl -fsSLO "$base/agent-status-$tag-$target.tar.gz"
 curl -fsSLO "$base/agent-status-$tag-$target.tar.gz.sha256"
 shasum -a 256 -c "agent-status-$tag-$target.tar.gz.sha256"
 tar xzf "agent-status-$tag-$target.tar.gz"
-mkdir -p ~/.local/bin ~/.tmux
-cp "agent-status-$tag-$target/agent-status" ~/.local/bin/agent-status
-chmod 755 ~/.local/bin/agent-status
-cp "agent-status-$tag-$target/share/tmux/agent-status.conf" ~/.tmux/agent-status.conf
-chmod 644 ~/.tmux/agent-status.conf
+bin_dir="$HOME/.local/bin"
+tmux_conf_dir="$HOME/.tmux"
+mkdir -p "$bin_dir" "$tmux_conf_dir"
+cp "agent-status-$tag-$target/agent-status" "$bin_dir/agent-status"
+chmod 755 "$bin_dir/agent-status"
+cp "agent-status-$tag-$target/share/tmux/agent-status.conf" "$tmux_conf_dir/agent-status.conf"
+chmod 644 "$tmux_conf_dir/agent-status.conf"
 ```
 
 ## cargo
@@ -88,9 +114,11 @@ cd tmux-agent-status
 nix develop            # or bring your own Rust >= the rust-version in Cargo.toml
 just check
 just build
-mkdir -p ~/.local/bin ~/.tmux
-cp target/release/agent-status ~/.local/bin/agent-status
-chmod 755 ~/.local/bin/agent-status
-cp share/tmux/agent-status.conf ~/.tmux/agent-status.conf
-chmod 644 ~/.tmux/agent-status.conf
+bin_dir="$HOME/.local/bin"
+tmux_conf_dir="$HOME/.tmux"
+mkdir -p "$bin_dir" "$tmux_conf_dir"
+cp target/release/agent-status "$bin_dir/agent-status"
+chmod 755 "$bin_dir/agent-status"
+cp share/tmux/agent-status.conf "$tmux_conf_dir/agent-status.conf"
+chmod 644 "$tmux_conf_dir/agent-status.conf"
 ```

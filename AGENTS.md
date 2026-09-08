@@ -6,7 +6,7 @@ cloned it.
 
 `tasks/todo/` holds ideas and bug reports not being worked on; `tasks/plans/` holds the plan
 currently being executed plus every plan already executed, kept as the audit trail. Status lives in
-the `Status:` line inside each file, not in the folder.
+the `Status:` line inside each file.
 
 ## What this tool is
 
@@ -25,3 +25,7 @@ design is in `tasks/plans/001-agent-window-status.md`; read it before changing b
   never be merged into one.
 - Agent hook entries are documented, never written. The tool must not edit
   `~/.claude/settings.json` or any equivalent.
+
+## Development
+
+Run development tools within the shell `nix develop` creates, or use `. "$HOME/.cargo/env" && [cmd]`.
