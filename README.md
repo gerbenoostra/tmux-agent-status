@@ -153,6 +153,9 @@ string, and this tool only ever appends one term to it - which you paste, so not
 - An agent that dies without firing `Stop` leaves a permanent 🤖. A `stale` 💤 state that decays
   from `working` after a timeout is designed but deliberately not in the first version.
 - A **zoomed** pane's siblings are genuinely hidden, and looking at the window still clears them.
+- Creating or splitting a pane counts as looking at that window, so it clears the window's
+  non-sticky states. You are looking at the window when you split it, so this is right more often
+  than not - but a state set in the same breath as a new pane can lose the race and be cleared.
 - Only agents that can push lifecycle events get a glyph at all. An absent glyph means "no signal",
   which is different from a wrong one.
 
