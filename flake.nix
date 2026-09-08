@@ -32,9 +32,13 @@
             pkgs.clippy
             pkgs.rustfmt
             pkgs.rust-analyzer
+            pkgs.cargo-llvm-cov
+            pkgs.llvmPackages.llvm
             pkgs.tmux
             pkgs.just
           ];
+          LLVM_COV = pkgs.lib.getExe' pkgs.llvmPackages.llvm "llvm-cov";
+          LLVM_PROFDATA = pkgs.lib.getExe' pkgs.llvmPackages.llvm "llvm-profdata";
         };
       });
     };

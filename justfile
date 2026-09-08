@@ -20,6 +20,10 @@ lint:
 test:
     cargo test
 
+# Run the test suite with the current minimum line coverage.
+coverage:
+    cargo llvm-cov --summary-only --fail-under-lines 90.27
+
 # What CI runs.
 check: fmt-check lint test
 
