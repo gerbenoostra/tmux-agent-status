@@ -83,6 +83,11 @@ Then read `~/.claude/settings.json` and check whether its `hooks` section *also*
   show which keys to remove. Do not remove them yourself.
 - Absent: correct. Nothing to do.
 
+Report what the `hooks` section contains and nothing else about that file. Do not describe how it is
+managed - a symlink there may point into a dotfiles repo, a Nix store path, a home-manager
+generation or nothing at all, and each of those has different write semantics. Guessing produces a
+confident, wrong instruction about where the user should make changes.
+
 ## Reporting
 
 One line per step: the step, pass or fail, and the evidence you read. For the first failing step,
