@@ -19,6 +19,29 @@ pub struct PaneStatus {
     pub status: String,
 }
 
+/// A window's panes, and whether anyone is looking at it.
+///
+/// Being watched is a fact about the window, not about any one pane, which is
+/// why it is read once here rather than carried on every `PaneStatus`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Window {
+    /// Whether the window is on screen: the current window of a session a
+    /// client is attached to. tmux calls a detached session's current window
+    /// active, but nobody is looking at it, so the client count is part of the
+    /// answer - otherwise a turn that ends while you are detached is cleared
+    /// before you ever get to see it.
+    pub watched: bool,
+    pub panes: Vec<PaneStatus>,
+}
+
+/// One `list-panes` line: a pane's status, plus the window answer that every
+/// pane of the window repeats.
+#[derive(Debug)]
+struct PaneLine {
+    status: PaneStatus,
+    watched: bool,
+}
+
 /// The pane the caller is running in, or `None` when there is no tmux to talk to.
 ///
 /// The tmux server sets both variables for every process it starts, so their
@@ -30,19 +53,27 @@ pub fn current_pane() -> Option<String> {
         .filter(|pane| !pane.is_empty())
 }
 
-/// The status of every pane of `target`'s window.
+/// The status of every pane of `target`'s window, and whether it is watched.
 ///
 /// A pane target resolves to the window that holds it, which is how one
 /// `$TMUX_PANE` addresses all of its siblings.
-pub fn pane_statuses(target: &str) -> io::Result<Vec<PaneStatus>> {
+pub fn window(target: &str) -> io::Result<Window> {
     let out = tmux(&[
         "list-panes",
         "-t",
         target,
         "-F",
-        &format!("#{{pane_id}}\t#{{{PANE_OPTION}}}"),
+        &format!("#{{pane_id}}\t#{{{PANE_OPTION}}}\t#{{window_active}}\t#{{session_attached}}"),
     ])?;
-    out.lines().map(parse_pane_status).collect()
+    let lines: Vec<PaneLine> = out
+        .lines()
+        .map(parse_pane_line)
+        .collect::<io::Result<_>>()?;
+    // All panes of a window are on screen together, so they all answer the same
+    // and the first is the answer.
+    let watched = lines.first().is_some_and(|line| line.watched);
+    let panes = lines.into_iter().map(|line| line.status).collect();
+    Ok(Window { watched, panes })
 }
 
 /// Write a pane's status.
@@ -65,16 +96,41 @@ pub fn clear_window_status(target: &str) -> io::Result<()> {
     tmux(&["set-option", "-w", "-u", "-t", target, WINDOW_OPTION]).map(drop)
 }
 
-fn parse_pane_status(line: &str) -> io::Result<PaneStatus> {
-    let (pane, status) = line.split_once('\t').ok_or_else(|| {
+fn parse_pane_line(line: &str) -> io::Result<PaneLine> {
+    parse_fields(line).ok_or_else(|| {
         io::Error::other(format!(
             "tmux list-panes printed an unexpected line: {line}"
         ))
-    })?;
-    Ok(PaneStatus {
-        pane: pane.to_owned(),
-        status: status.to_owned(),
     })
+}
+
+/// `pane<TAB>status<TAB>window_active<TAB>session_attached`.
+///
+/// The status is whatever the user's option holds and may contain tabs itself,
+/// so the pane is taken from the left and the two flags from the right.
+fn parse_fields(line: &str) -> Option<PaneLine> {
+    let (pane, rest) = line.split_once('\t')?;
+    let (rest, attached) = rest.rsplit_once('\t')?;
+    let (status, active) = rest.rsplit_once('\t')?;
+    Some(PaneLine {
+        status: PaneStatus {
+            pane: pane.to_owned(),
+            status: status.to_owned(),
+        },
+        watched: is_watched(active, attached),
+    })
+}
+
+/// Whether tmux says the window is on screen, read leniently.
+///
+/// The tabs are ours, so a line missing one is a tmux that ignored the format
+/// and an error worth raising. The values are tmux's, and nothing reports the
+/// error to anyone - a hook exits 0 whatever happens - so a value this cannot
+/// read must not take the tool out of service. It means "not watched", which
+/// costs the immediate clear and nothing else: a glyph you clear by looking.
+fn is_watched(active: &str, attached: &str) -> bool {
+    // `session_attached` counts clients; it is not a flag.
+    active == "1" && attached.parse::<u32>().is_ok_and(|clients| clients > 0)
 }
 
 fn tmux(args: &[&str]) -> io::Result<String> {
@@ -98,29 +154,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_pane_status_splits_on_tab() {
-        let status = parse_pane_status("%0\tdone").unwrap();
-        assert_eq!(status.pane, "%0");
-        assert_eq!(status.status, "done");
+    fn parse_pane_line_splits_on_tab() {
+        let line = parse_pane_line("%0\tdone\t1\t1").unwrap();
+        assert_eq!(line.status.pane, "%0");
+        assert_eq!(line.status.status, "done");
+        assert!(line.watched);
     }
 
     #[test]
-    fn parse_pane_status_allows_empty_status() {
-        let status = parse_pane_status("%0\t").unwrap();
-        assert_eq!(status.pane, "%0");
-        assert_eq!(status.status, "");
+    fn parse_pane_line_allows_empty_status() {
+        let line = parse_pane_line("%0\t\t0\t1").unwrap();
+        assert_eq!(line.status.pane, "%0");
+        assert_eq!(line.status.status, "");
+        assert!(!line.watched);
     }
 
     #[test]
-    fn parse_pane_status_keeps_extra_tabs_in_status() {
-        let status = parse_pane_status("%0\twaiting\textra").unwrap();
-        assert_eq!(status.pane, "%0");
-        assert_eq!(status.status, "waiting\textra");
+    fn parse_pane_line_keeps_extra_tabs_in_status() {
+        let line = parse_pane_line("%0\twaiting\textra\t0\t1").unwrap();
+        assert_eq!(line.status.pane, "%0");
+        assert_eq!(line.status.status, "waiting\textra");
     }
 
     #[test]
-    fn parse_pane_status_errors_without_tab() {
-        let err = parse_pane_status("badline").unwrap_err();
-        assert!(err.to_string().contains("badline"));
+    fn the_current_window_of_a_detached_session_is_not_watched() {
+        assert!(!parse_pane_line("%0\tdone\t1\t0").unwrap().watched);
+    }
+
+    #[test]
+    fn more_than_one_client_still_counts_as_watched() {
+        // `session_attached` is a client count, so a second client must not
+        // parse as "not a flag" and take the window off screen.
+        assert!(parse_pane_line("%0\tdone\t1\t2").unwrap().watched);
+    }
+
+    #[test]
+    fn a_flag_that_cannot_be_read_means_not_watched() {
+        // A tmux whose flags this cannot read must still set states: nobody
+        // ever sees the error, so an unreadable flag costs the immediate clear
+        // and not the tool.
+        for line in ["%0\tdone\tyes\t1", "%0\tdone\t1\tmany", "%0\tdone\t\t"] {
+            let parsed = parse_pane_line(line).unwrap();
+            assert_eq!(parsed.status.status, "done", "line {line:?}");
+            assert!(!parsed.watched, "line {line:?}");
+        }
+    }
+
+    #[test]
+    fn parse_pane_line_errors_on_a_line_that_is_not_ours() {
+        // The tabs are ours; a line without them is not a line we asked for.
+        for line in ["badline", "%0\tdone", "%0\tdone\t1"] {
+            let err = parse_pane_line(line).unwrap_err();
+            assert!(err.to_string().contains(line), "line {line:?}");
+        }
     }
 }

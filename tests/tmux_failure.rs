@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Exercising the error paths of the tmux subprocess calls.
 //!
 //! These tests run the binary with a fake or missing `tmux` on `PATH` so the
@@ -81,13 +83,85 @@ fn set_is_silent_when_list_panes_fails() {
 }
 
 #[test]
+fn set_is_silent_when_list_panes_ignores_the_format() {
+    // The tabs in the format are ours, so a line without them is a tmux that
+    // did not answer the question asked. Unreadable *values* degrade to "not
+    // watched"; an unreadable *line* is an error, and a hook still exits 0.
+    let dir = fake_tmux_dir();
+    write_fake_tmux(
+        &dir,
+        "#!/bin/sh\n\
+if [ \"$1\" = \"list-panes\" ]; then\n\
+    echo badline\n\
+    exit 0\n\
+fi\n\
+exit 0\n",
+    );
+    let out = run(&["set", "done"], &format!("{}:", dir.display()));
+    assert_ok_and_silent(&out);
+}
+
+#[test]
+fn a_flag_that_cannot_be_read_still_sets_the_state() {
+    // The point of reading the flags leniently: a tmux whose `window_active` or
+    // `session_attached` this cannot parse loses the immediate clear, not the
+    // glyph. Nobody would ever see the error, so it must not cost the feature.
+    let dir = fake_tmux_dir();
+    let log = dir.join("calls");
+    write_fake_tmux(
+        &dir,
+        &format!(
+            "#!/bin/sh\n\
+if [ \"$1\" = \"list-panes\" ]; then\n\
+    printf '%s\\t%s\\t%s\\t%s\\n' '{TMUX_PANE}' '' 'yes' 'many'\n\
+    exit 0\n\
+fi\n\
+echo \"$@\" >> '{log}'\n\
+exit 0\n",
+            log = log.display()
+        ),
+    );
+
+    let out = run(&["set", "done"], &format!("{}:", dir.display()));
+
+    assert_ok_and_silent(&out);
+    let calls = fs::read_to_string(&log).expect("the fake tmux logged its calls");
+    assert!(
+        calls.contains(&format!(
+            "set-option -p -t {TMUX_PANE} @agent_pane_status done"
+        )),
+        "calls: {calls}"
+    );
+    assert!(
+        calls.contains(&format!("set-option -w -t {TMUX_PANE} @agent_status ✅")),
+        "calls: {calls}"
+    );
+}
+
+#[test]
+fn set_is_silent_when_setting_the_pane_fails() {
+    let dir = fake_tmux_dir();
+    write_fake_tmux(
+        &dir,
+        "#!/bin/sh\n\
+if [ \"$1\" = \"list-panes\" ]; then\n\
+    printf '%s\\t%s\\t%s\\t%s\\n' '%0' '' '0' '0'\n\
+    exit 0\n\
+fi\n\
+exit 1\n",
+    );
+    let out = run(&["set", "working"], &format!("{}:", dir.display()));
+    assert_ok_and_silent(&out);
+}
+
+#[test]
 fn clear_window_is_silent_when_clearing_a_pane_fails() {
     let dir = fake_tmux_dir();
     write_fake_tmux(
         &dir,
         "#!/bin/sh\n\
 if [ \"$1\" = \"list-panes\" ]; then\n\
-    printf '%s\t%s\n' '%0' 'done'\n\
+    printf '%s\t%s\t%s\t%s\n' '%0' 'done' '0' '0'\n\
     exit 0\n\
 fi\n\
 if [ \"$1\" = \"set-option\" ] && [ \"$2\" = \"-p\" ] && [ \"$3\" = \"-u\" ]; then\n\
