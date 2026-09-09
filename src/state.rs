@@ -98,7 +98,7 @@ impl fmt::Display for State {
 /// A state name that is not one of the four. A bug in the caller's hook config,
 /// and therefore loud.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UnknownState(pub String);
+pub struct UnknownState(String);
 
 impl fmt::Display for UnknownState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
