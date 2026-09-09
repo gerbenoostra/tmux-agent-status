@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      { "type": "command", "command": "tmux-agent-status reset" }
+    ],
+    "sessionEnd": [
+      { "type": "command", "command": "tmux-agent-status finish" }
+    ],
+    "userPromptSubmitted": [
+      { "type": "command", "command": "tmux-agent-status set working" }
+    ],
+    "notification": [
+      { "type": "command", "command": "tmux-agent-status set waiting" }
+    ],
+    "agentStop": [
+      { "type": "command", "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "errorOccurred": [
+      { "type": "command", "command": "tmux-agent-status set error >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "subagentStart": [
+      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "subagentStop": [
+      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+    ]
+  }
+}
