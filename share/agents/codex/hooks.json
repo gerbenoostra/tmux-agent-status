@@ -1,0 +1,45 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|fork",
+        "hooks": [{ "type": "command", "command": "tmux-agent-status reset" }]
+      }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+    ],
+    "PermissionRequest": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'"
+          }
+        ]
+      }
+    ]
+  }
+}
