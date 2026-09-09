@@ -84,7 +84,7 @@ Report both values, and whether `@agent_status` appears in **each**.
   ```
 
 **4. The agent hooks.**
-This plugin owns them: installing it is what registers the six Claude Code events. Say so.
+This plugin owns them: installing it is what registers the eight Claude Code events. Say so.
 
 Then read `~/.claude/settings.json` and check whether its `hooks` section *also* contains
 `tmux-agent-status` commands.

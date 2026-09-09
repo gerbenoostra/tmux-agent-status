@@ -113,7 +113,7 @@ There are two options, either the plugin or manually editing the hooks.
 /plugin install tmux-agent-status
 ```
 
-Restart the session and the six hooks below are live.
+Restart the session and the eight hooks below are live.
 
 You can uninstall/revert using:
 ```
@@ -130,23 +130,27 @@ The plugin also ships `/tmux-agent-status:doctor`, a read-only check of all four
 [`plugins/tmux-agent-status/hooks/hooks.json`](./plugins/tmux-agent-status/hooks/hooks.json) is the
 file the plugin itself uses, and it has the shape `settings.json` wants. **Merge its `hooks` object
 into** `~/.claude/settings.json`: if you have no `hooks` key, take the file whole; if you already
-have one, add these six events inside it. Do not append the file as a second top-level object, and
+have one, add these eight events inside it. Do not append the file as a second top-level object, and
 do not end up with two `hooks` keys - JSON's last one silently wins and the hooks you had are gone.
 
 **The watched events**
 These are the hooks being watched:
 
-| Event | Matcher | State |
+| Event | Matcher | Command |
 | --- | --- | --- |
-| `UserPromptSubmit` | all | `working` |
-| `PostToolUse` | all | `working` |
-| `PreToolUse` | `AskUserQuestion\|ExitPlanMode` | `waiting` |
-| `Notification` | all, **not** narrowed | `waiting` |
-| `Stop` | all | `done` |
-| `StopFailure` | all | `error` |
+| `SessionStart` | `startup\|resume\|clear\|fork` | `reset` |
+| `SessionEnd` | all | `finish` |
+| `UserPromptSubmit` | all | `set working` |
+| `PostToolUse` | all | `set working` |
+| `PreToolUse` | `AskUserQuestion\|ExitPlanMode` | `set waiting` |
+| `Notification` | all, **not** narrowed | `set waiting` |
+| `Stop` | all | `set done` |
+| `StopFailure` | all | `set error` |
 
-Two things to know here. `Notification` must **not** be narrowed to permission prompts, should also catch idle
-events that indicate "still blocked, and has been for a while".
+`SessionStart` and `SessionEnd` do not ring or report a turn. The former clears this pane's previous
+status, while the latter resolves the ending session. `Notification` must **not** be narrowed to
+permission prompts and should also catch idle events that indicate "still blocked, and has been for
+a while".
 
 As the tool rings the bell itself, no standalone `printf '\a'` hooks for the same events are needed.
 
@@ -202,9 +206,9 @@ term to.
 
 ## Known limits
 
-- An agent that dies without firing `Stop` leaves a permanent 🤖. We're planning a future `stale` 💤 state
-  that decays from `working` after a timeout. An agent with a session-lifecycle event, like devin's
-  `SessionStart`, can release it on the next run in that pane.
+- An agent that dies without firing `Stop` or a session-end event keeps 🤖 until the next agent
+  starts in that pane. We're planning a future `stale` 💤 state that decays from `working` after a
+  timeout.
 - A **zoomed** pane's siblings are hidden, but tmux still calls the whole window watched: their
   states clear when you look at the window, and a turn ending in a hidden sibling while you watch
   rings the bell and leaves no glyph.
