@@ -1,5 +1,12 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|fork",
+        "hooks": [{ "type": "command", "command": "tmux-agent-status reset" }]
+      }
+    ],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }],
     "PostToolUse": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }],
     "PreToolUse": [

@@ -23,22 +23,58 @@ pub fn set(state: State) -> io::Result<()> {
     let Some(pane) = tmux::current_pane() else {
         return Ok(());
     };
+    let window = tmux::window(&pane)?;
+    write_status(&pane, window, state)
+}
+
+/// `tmux-agent-status finish`: silently resolve this pane's session to done.
+pub fn finish() -> io::Result<()> {
+    let Some(pane) = tmux::current_pane() else {
+        return Ok(());
+    };
+    let window = tmux::window(&pane)?;
+    let has_error = window
+        .panes
+        .iter()
+        .any(|listed| listed.pane == pane && listed.status.parse::<State>() == Ok(State::Error));
+    if has_error {
+        return Ok(());
+    }
+    write_status(&pane, window, State::Done)
+}
+
+/// `tmux-agent-status reset`: unconditionally drop this pane's session status.
+pub fn reset() -> io::Result<()> {
+    let Some(pane) = tmux::current_pane() else {
+        return Ok(());
+    };
     let mut window = tmux::window(&pane)?;
+    for reporter in window.panes.iter_mut().filter(|listed| listed.pane == pane) {
+        if !reporter.status.is_empty() {
+            tmux::clear_pane_status(&pane)?;
+            reporter.status.clear();
+        }
+    }
+    recompute(&pane, &window.panes)
+}
+
+/// Write a pane state under the ordinary watched-window policy, then recompute.
+fn write_status(pane: &str, mut window: tmux::Window, state: State) -> io::Result<()> {
     if !state.is_sticky() && window.watched {
         // The window is already on screen, so writing the glyph would only be
         // read by the person who is looking at it anyway: clear instead, the
         // way focusing the window would. This pane is passed as superseded
         // because its own old state is over - a `done` that left `working` in
         // place would strand a 🤖 no later focus event ever clears.
-        return clear_statuses(&pane, &mut window.panes, Some(&pane));
+        return clear_statuses(pane, &mut window.panes, Some(pane));
     }
-    tmux::set_pane_status(&pane, state.name())?;
+    tmux::set_pane_status(pane, state.name())?;
     // The panes were read before that write, so this pane still carries the
     // state the write just replaced, and the rollup must not see the old one.
     for reporter in window.panes.iter_mut().filter(|listed| listed.pane == pane) {
         reporter.status = state.name().to_owned();
     }
-    recompute(&pane, &window.panes)
+    recompute(pane, &window.panes)
 }
 
 /// `tmux-agent-status clear-window [<pane>]`: drop the non-sticky states of every

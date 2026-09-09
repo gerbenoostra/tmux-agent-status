@@ -19,6 +19,8 @@ fn main() -> ExitCode {
             Err(err) => usage_error(&err.to_string()),
         },
         [cmd, ..] if cmd == "set" => usage_error("set requires a state"),
+        [cmd] if cmd == "reset" => hook(command::reset()),
+        [cmd] if cmd == "finish" => hook(command::finish()),
         [cmd] if cmd == "clear-window" => hook(command::clear_window(None)),
         [cmd, pane] if cmd == "clear-window" => hook(command::clear_window(Some(pane.as_str()))),
         // Written for humans on stdout, so `--help | less` works. The hook
@@ -65,6 +67,8 @@ tmux-agent-status - agent lifecycle events as one glyph on the tmux window entry
 
 usage:
   tmux-agent-status set <state>    write this pane's state and recompute the window
+  tmux-agent-status reset          clear this pane's state and recompute the window
+  tmux-agent-status finish         silently resolve this pane's session to done
   tmux-agent-status clear-window [<pane>]
                               clear the non-sticky states of every pane of that
                               pane's window, defaulting to $TMUX_PANE

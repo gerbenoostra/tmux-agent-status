@@ -32,7 +32,7 @@ fn normalise(mut entries: Vec<HookEntry>, source: &str) -> Vec<HookEntry> {
 }
 
 const STATES: [&str; 4] = ["working", "waiting", "done", "error"];
-const EXPECTED_EVENTS: usize = 6;
+const EXPECTED_EVENTS: usize = 8;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -46,20 +46,23 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
-/// The state a hook command sets, rejecting any command that is not exactly
-/// `tmux-agent-status set <state>`. This is what catches a typo'd binary name, which would
-/// otherwise fail silently on every user's machine.
-fn state_of(command: &str) -> String {
-    let rest = command
-        .strip_prefix("tmux-agent-status set ")
-        .unwrap_or_else(|| {
-            panic!("hook command is not `tmux-agent-status set <state>`: {command}")
-        });
-    assert!(
-        STATES.contains(&rest),
-        "hook command sets an unknown state: {command}"
-    );
-    rest.to_string()
+/// The arguments passed to the binary, rejecting anything outside the exact hook command surface.
+fn arguments_of(command: &str) -> String {
+    let arguments = command
+        .strip_prefix("tmux-agent-status ")
+        .unwrap_or_else(|| panic!("hook command does not invoke `tmux-agent-status`: {command}"));
+    if let Some(state) = arguments.strip_prefix("set ") {
+        assert!(
+            STATES.contains(&state),
+            "hook command sets an unknown state: {command}"
+        );
+    } else {
+        assert!(
+            ["reset", "finish"].contains(&arguments),
+            "hook command has unknown arguments: {command}"
+        );
+    }
+    arguments.to_string()
 }
 
 fn manifest_entries() -> Vec<HookEntry> {
@@ -93,7 +96,7 @@ fn manifest_entries() -> Vec<HookEntry> {
                 let command = hook["command"]
                     .as_str()
                     .unwrap_or_else(|| panic!("`{event}` has a hook with no command"));
-                entries.push((event.clone(), matcher.clone(), state_of(command)));
+                entries.push((event.clone(), matcher.clone(), arguments_of(command)));
             }
         }
     }
@@ -144,7 +147,7 @@ fn readme_entries() -> Vec<HookEntry> {
     let rows = table_after(&readme, "#### Claude Code");
     assert_eq!(
         rows[0],
-        ["Event", "Matcher", "State"],
+        ["Event", "Matcher", "Command"],
         "the Claude Code hook table's header changed"
     );
 

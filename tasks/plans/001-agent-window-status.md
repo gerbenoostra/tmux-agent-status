@@ -1,8 +1,9 @@
 # 001 - agent-window-status: agent events as a tmux window icon and highlight
 
-Status: partly implemented - 002's skeleton and 003's follow-ups ship the four states, the rank,
-the rollup, immediate and hook-driven clear-on-focus behavior, the bell and the format term. Still
-to come: the config file, `stale`, and agents beyond Claude Code.
+Status: partly implemented - 002's skeleton, 003's follow-ups and 007's session boundaries ship the
+four states, the rank, the rollup, immediate and hook-driven clear-on-focus behavior, recovery from
+stranded `working`, the bell and the format term. Still to come: the config file, `stale`, and agents
+beyond Claude Code.
 
 ## Purpose
 
@@ -259,7 +260,8 @@ than by separate `printf` entries, so each event is one hook entry; four standal
 
 | Event | Matcher | Bell | State |
 | --- | --- | --- | --- |
-| `SessionStart` | `startup\|resume\|clear\|fork` | - | register pane binding |
+| `SessionStart` | `startup\|resume\|clear\|fork` | - | `reset` |
+| `SessionEnd` | all | - | `finish` |
 | `UserPromptSubmit` | all | - | `working` |
 | `PostToolUse` | all | - | `working` |
 | `Notification` | all (**not** narrowed) | yes | `waiting` |
