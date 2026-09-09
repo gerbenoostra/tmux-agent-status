@@ -1,6 +1,7 @@
 # Installing tmux-agent-status
 
-Five routes. After installing you need to finish with the four configuration setup steps in the [README](../README.md):
+Below we list the different installation options.
+After installing you need to finish with the configuration setup steps in the [README](../README.md):
 the binary on its own does nothing until tmux and your agent know about it.
 
 ## Choose installation paths

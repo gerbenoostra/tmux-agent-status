@@ -25,7 +25,9 @@ design is in `tasks/plans/001-agent-window-status.md`; read it before changing b
   tmux option inheritance makes a pane with no status read back as the window's value, so they can
   never be merged into one.
 - Agent hook entries are documented, never written. The tool must not edit
-  `~/.claude/settings.json` or any equivalent.
+  `~/.claude/settings.json` or any equivalent. The Claude Code plugin in `plugins/` is not an
+  exception: it *ships* its hook config in its own directory, and Claude Code - not this tool -
+  records the install under `enabledPlugins`. See `tasks/plans/004-claude-code-plugin.md`.
 
 ## Development
 

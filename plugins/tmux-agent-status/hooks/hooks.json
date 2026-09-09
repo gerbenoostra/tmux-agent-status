@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion|ExitPlanMode",
+        "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }]
+      }
+    ],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set error" }] }]
+  }
+}

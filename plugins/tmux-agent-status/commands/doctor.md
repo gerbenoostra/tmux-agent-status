@@ -1,0 +1,88 @@
+---
+description: Read-only check of the tmux-agent-status setup - binary, tmux snippet, format term, hooks.
+allowed-tools: Bash(tmux-agent-status --version), Bash(command -v tmux-agent-status), Bash(tmux show-hooks:*), Bash(tmux show-options:*), Bash(tmux display-message:*), Read(~/.claude/settings.json)
+disable-model-invocation: true
+---
+
+Diagnose why `tmux-agent-status` is or is not putting a glyph on the tmux window entry.
+
+## This command is read-only. That is a hard constraint.
+
+Run **nothing** that writes. No `set-option`, no `setw`, no `set-hook`, no `set-window-option`, no
+edit of `~/.tmux.conf`, and no edit of `~/.claude/settings.json` - not even to "fix" something you
+just diagnosed. Report the problem and the exact line the user should add; they apply it.
+
+Two of these are not style preferences:
+
+- Writing a spliced copy of `window-status-format` to a window-local option freezes that window's
+  format forever, surviving reloads and uninstall. Read it, never write it.
+- `~/.claude/settings.json` is hand-maintained, is often a symlink into a dotfiles repo, and is
+  written by Claude Code itself at unpredictable moments. Read it, never write it.
+
+If a check needs a command that is not in `allowed-tools` above, report the check as "could not
+run" rather than reaching for a wider tool.
+
+## The checks, in order
+
+Run them all, then report. A later step failing is usually explained by an earlier one.
+
+**0. Is this session inside tmux?**
+`tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}'`. If tmux is not reachable,
+say so and stop: outside tmux every other symptom follows from this one, and the tool is a
+deliberate no-op there.
+
+**1. The binary.**
+`tmux-agent-status --version`, which prints the version *and* the executable that actually ran.
+Also run `command -v tmux-agent-status`.
+
+- Not found: the hooks are firing and exiting silently. Point at `docs/install.md`, and note that
+  the directory holding the binary must be on the `PATH` the agent's hooks inherit, which is not
+  always the `PATH` of an interactive shell.
+- Found under a build directory such as `target/debug` or `target/release`: a development shadow is
+  in front of the installed copy. Report the path; it is not an error, but it explains stale
+  behaviour.
+
+**2. The tmux snippet.**
+`tmux show-hooks -g` and look for `tmux-agent-status`. Expect two entries: `session-window-changed`
+and `window-pane-changed`, both calling `tmux-agent-status clear-window`.
+
+- Neither present: the snippet is not sourced. The user adds
+  `source-file <path>/tmux-agent-status.conf` to their tmux configuration and reloads.
+- Only one present: report which is missing. Without `window-pane-changed`, switching panes inside
+  a window will not clear its `done`/`error`/`waiting`.
+
+**3. The format term.**
+`tmux show-options -g window-status-format` and `tmux show-options -g window-status-current-format`.
+Report both values, and whether `@agent_status` appears in **each**.
+
+- Missing from either: the glyph is invisible on exactly the windows using that format - a term
+  present only in `window-status-format` means the glyph vanishes on the window you are looking at.
+  Give the term to paste, after the name segment (outside any `#{=/N/…:}` truncation) and before the
+  window flags:
+
+  ```tmux
+  #{?@agent_status, #{@agent_status},}
+  ```
+
+**4. The agent hooks.**
+This plugin owns them: installing it is what registers the six Claude Code events. Say so.
+
+Then read `~/.claude/settings.json` and check whether its `hooks` section *also* contains
+`tmux-agent-status` commands.
+
+- Present: the user has both the plugin and the manual paste, so every event fires twice. The writes
+  are idempotent so the glyph stays correct, but `done` rings the terminal bell twice. Tell them to
+  delete the `tmux-agent-status` entries from `~/.claude/settings.json` and keep the plugin, and
+  show which keys to remove. Do not remove them yourself.
+- Absent: correct. Nothing to do.
+
+## Reporting
+
+One line per step: the step, pass or fail, and the evidence you read. For the first failing step,
+add what to change and where. Finish with what to expect once it is fixed - 🤖 while a turn runs,
+✅ when it ends, ❗ on an aborted turn, 💬 when the agent is blocked on the user - and that a window
+with no agent renders exactly as it did before.
+
+If every step passes and the user still sees no glyph, the likely cause is that the turn ended on
+the window they were already watching: that state is cleared on the spot by design, and the bell is
+the only signal. Say that rather than inventing a further check.

@@ -7,6 +7,7 @@ nix develop          # cargo, clippy, rustfmt, rust-analyzer, tmux, just
 just check           # fmt-check + lint + test, exactly what CI runs
 just harness         # a throwaway tmux server showing all four states, to look at
 just link            # shadow the installed binary with this checkout's debug build
+just check-plugin    # validate the Claude Code plugin manifests (needs the `claude` CLI)
 ```
 
 `just check` is what CI runs. `just harness` starts a throwaway tmux server that displays all four states so you can inspect the glyphs.
@@ -53,11 +54,13 @@ just nix-build
 Verify the release build end to end on a supported system without relying on the development
 symlink:
 
-1. Run `just check` and `just nix-build`.
-2. Install the resulting package or release binary using one of the documented installation routes.
-3. Confirm `tmux-agent-status --version` resolves to that installed binary.
-4. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
-5. Confirm each state reaches `@agent_status` and that focusing its window clears non-sticky states.
+1. Bump `version` in `Cargo.toml` **and** in `plugins/tmux-agent-status/.claude-plugin/plugin.json`;
+   `just test` fails if only one of them moves.
+2. Run `just check`, `just check-plugin` and `just nix-build`.
+3. Install the resulting package or release binary using one of the documented installation routes.
+4. Confirm `tmux-agent-status --version` resolves to that installed binary.
+5. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
+6. Confirm each state reaches `@agent_status` and that focusing its window clears non-sticky states.
 
 For Nix, the checkout itself can be tested without changing another configuration:
 
