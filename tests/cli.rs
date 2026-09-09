@@ -3,6 +3,7 @@
 //! These tests run the binary as a separate process, the same way a human or a
 //! misconfigured hook would invoke it.
 
+use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
@@ -181,4 +182,64 @@ fn help_mentions_disabled_and_debug() {
     let text = stdout(&out);
     assert!(text.contains("TMUX_AGENT_STATUS_DISABLED"));
     assert!(text.contains("TMUX_AGENT_STATUS_DEBUG"));
+    assert!(text.contains("notify"));
+}
+
+#[test]
+fn notify_requires_agent() {
+    let out = run(&["notify", "{}"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("notify requires --agent"));
+}
+
+#[test]
+fn notify_requires_payload_or_stdin() {
+    let out = run(&["notify", "--agent", "mistral-vibe"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("notify requires a payload or --stdin"));
+}
+
+#[test]
+fn notify_agent_requires_a_value() {
+    let out = run(&["notify", "--agent"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("--agent requires a value"));
+}
+
+#[test]
+fn notify_with_unknown_agent_is_silent_no_op() {
+    let out = run(&["notify", "--agent", "no-such-agent", "{}"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn notify_with_unparseable_payload_is_silent_no_op() {
+    let out = run(&["notify", "--agent", "mistral-vibe", "not-json"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn notify_stdin_reads_payload() {
+    let payload = r#"{"hook_event_name":"pre_tool"}"#;
+    let mut child = Command::new(BIN)
+        .args(["notify", "--agent", "mistral-vibe", "--stdin"])
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary spawns");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin is piped");
+        stdin.write_all(payload.as_bytes()).expect("write payload");
+    }
+    let out = child.wait_with_output().expect("the binary runs");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
 }

@@ -11,10 +11,10 @@ keywords = ["tmux", "agent", "status", "hook"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+serde_json = { version = "1.0.151", default-features = false, features = ["std"] }
 
 [profile.release]
 strip = true
 
 [dev-dependencies]
 libc = "0.2"
-serde_json = { version = "1.0.151", default-features = false, features = ["std"] }
