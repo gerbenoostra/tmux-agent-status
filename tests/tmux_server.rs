@@ -447,6 +447,31 @@ fn finish_recomputes_a_window_with_a_higher_ranked_sibling() {
 }
 
 #[test]
+fn finish_on_a_watched_window_leaves_no_glyph_behind() {
+    // What `/clear` does to a stranded `working`: the session ends while the
+    // user is looking at the window, so the ✅ nobody needs is never written.
+    let server = Server::start();
+    let pane = server.first_pane();
+    // Arranged while detached, the way the turn that stranded it did.
+    assert_ok(&server.agent_status(&pane, &["set", "working"]));
+    let _client = server.attach();
+    wait_for(
+        || server.window_active_and_attached(&pane),
+        |seen| seen == "1 1",
+    );
+
+    assert_ok(&server.agent_status(&pane, &["finish"]));
+
+    assert_eq!(server.pane_statuses(&pane), [""]);
+    assert_eq!(server.window_status(&pane), "");
+
+    // The `SessionStart` of the successor session then finds nothing to clear.
+    assert_ok(&server.agent_status(&pane, &["reset"]));
+    assert_eq!(server.pane_statuses(&pane), [""]);
+    assert_eq!(server.window_status(&pane), "");
+}
+
+#[test]
 fn clearing_the_last_state_unsets_the_window_option() {
     let server = Server::start();
     let pane = server.first_pane();

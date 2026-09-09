@@ -36,7 +36,13 @@ tmux-agent-status set working
 tmux-agent-status set done
 tmux-agent-status set error
 tmux-agent-status set waiting
+tmux-agent-status reset
+tmux-agent-status finish
 ```
+
+The `set` commands go on the agent's turn events. `reset` goes on session start and drops whatever
+the previous agent left in the pane; `finish` goes on session end and resolves the session to done,
+leaving an `error` alone. Neither of those two rings the bell.
 
 The installation notes show how to do this per agent. Claude Code has a plugin that carries the
 hook set for you; see [step 4](#claude-code).
@@ -49,7 +55,7 @@ See [docs/install.md](docs/install.md) for the nix flake input, `nix profile`, a
 After installing the command line tool, there are three things left:
  - include the `tmux-agent-status.conf` into your tmux config to hook onto tmux's events.
  - include the `agent_status` placeholder in your tmux's window status format.
- - register the `tmux-agent-status set [state]` as agent hooks.
+ - register the `tmux-agent-status` commands as agent hooks.
 
 ## Set up
 
