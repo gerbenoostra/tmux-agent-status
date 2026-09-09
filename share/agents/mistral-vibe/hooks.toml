@@ -1,0 +1,17 @@
+[[hooks]]
+name = "tmux-agent-status-pre-tool"
+type = "pre_tool"
+match = "*"
+command = "tmux-agent-status notify --agent mistral-vibe --stdin"
+
+[[hooks]]
+name = "tmux-agent-status-post-tool"
+type = "post_tool"
+match = "*"
+command = "tmux-agent-status notify --agent mistral-vibe --stdin"
+
+[[hooks]]
+name = "tmux-agent-status-post-agent"
+type = "post_agent"
+match = "*"
+command = "tmux-agent-status notify --agent mistral-vibe --stdin"

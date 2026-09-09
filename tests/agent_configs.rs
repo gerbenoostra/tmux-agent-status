@@ -2,7 +2,8 @@
 //!
 //! Every JSON drop-in under `share/agents/` is walked and every command string
 //! that starts with `tmux-agent-status ` must invoke one of the supported
-//! subcommands with a valid state.
+//! subcommands with a valid state. TOML drop-ins are checked for the expected
+//! notify command shape without a full parser.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -97,5 +98,53 @@ fn validate_command(cmd: &str, path: &Path) {
         }
         "reset" | "finish" | "clear-window" => {}
         other => panic!("{}: unknown subcommand `{other}`: {cmd}", path.display()),
+    }
+}
+
+#[test]
+fn every_toml_drop_in_uses_notify_with_its_agent() {
+    let dir = agents_dir();
+    let mut checked = 0;
+    for entry in fs::read_dir(&dir).unwrap() {
+        let entry = entry.unwrap();
+        let agent_dir = entry.path();
+        if !agent_dir.is_dir() {
+            continue;
+        }
+        let agent = agent_dir.file_name().unwrap().to_string_lossy();
+        for file in fs::read_dir(&agent_dir).unwrap() {
+            let file = file.unwrap().path();
+            if file.extension().and_then(|s| s.to_str()) != Some("toml") {
+                continue;
+            }
+            checked += 1;
+            validate_toml_file(&file, &agent);
+        }
+    }
+    assert!(
+        checked > 0,
+        "no TOML drop-in files found under {}",
+        dir.display()
+    );
+}
+
+fn validate_toml_file(path: &Path, agent: &str) {
+    let text =
+        fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let expected = format!("tmux-agent-status notify --agent {agent} --stdin");
+    for line in text.lines() {
+        if let Some(value) = line
+            .split("command = \"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+        {
+            assert_eq!(
+                value,
+                expected,
+                "{}: every TOML command must be `{}`",
+                path.display(),
+                expected
+            );
+        }
     }
 }
