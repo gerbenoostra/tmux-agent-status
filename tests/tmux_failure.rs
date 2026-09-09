@@ -3,8 +3,8 @@
 //! Exercising the error paths of the tmux subprocess calls.
 //!
 //! These tests run the binary with a fake or missing `tmux` on `PATH` so the
-//! `command::set` / `command::clear_window` / `tmux::tmux` error branches are
-//! reached. The CLI's `hook()` wrapper swallows these errors, so every test
+//! command policy and `tmux::tmux` error branches are reached. The CLI's
+//! `hook()` wrapper swallows these errors, so every test
 //! still expects exit 0 and no output.
 
 use std::fs;
@@ -83,6 +83,16 @@ fn set_is_silent_when_list_panes_fails() {
 }
 
 #[test]
+fn boundary_commands_are_silent_when_list_panes_fails() {
+    let dir = fake_tmux_dir();
+    write_fake_tmux(&dir, "#!/bin/sh\nexit 1\n");
+    for command in ["reset", "finish"] {
+        let out = run(&[command], &format!("{}:", dir.display()));
+        assert_ok_and_silent(&out);
+    }
+}
+
+#[test]
 fn set_is_silent_when_list_panes_ignores_the_format() {
     // The tabs in the format are ours, so a line without them is a tmux that
     // did not answer the question asked. Unreadable *values* degrade to "not
@@ -155,7 +165,7 @@ exit 1\n",
 }
 
 #[test]
-fn clear_window_is_silent_when_clearing_a_pane_fails() {
+fn clearing_commands_are_silent_when_clearing_a_pane_fails() {
     let dir = fake_tmux_dir();
     write_fake_tmux(
         &dir,
@@ -169,6 +179,8 @@ if [ \"$1\" = \"set-option\" ] && [ \"$2\" = \"-p\" ] && [ \"$3\" = \"-u\" ]; th
 fi\n\
 exit 0\n",
     );
-    let out = run(&["clear-window", TMUX_PANE], &format!("{}:", dir.display()));
-    assert_ok_and_silent(&out);
+    for args in [["clear-window", TMUX_PANE].as_slice(), ["reset"].as_slice()] {
+        let out = run(args, &format!("{}:", dir.display()));
+        assert_ok_and_silent(&out);
+    }
 }

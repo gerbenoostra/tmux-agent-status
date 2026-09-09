@@ -38,6 +38,8 @@ fn help_flag_prints_usage() {
         );
         assert!(text.contains("usage:"), "{flag} missing usage");
         assert!(text.contains("set <state>"), "{flag} missing set command");
+        assert!(text.contains("reset"), "{flag} missing reset command");
+        assert!(text.contains("finish"), "{flag} missing finish command");
         assert!(
             text.contains("clear-window"),
             "{flag} missing clear-window command"
@@ -96,4 +98,17 @@ fn set_without_a_state_is_a_usage_error() {
     let err = stderr(&out);
     assert!(err.contains("set requires a state"));
     assert!(err.contains("usage:"));
+}
+
+#[test]
+fn boundary_commands_reject_arguments() {
+    for command in ["reset", "finish"] {
+        let out = run(&[command, "extra"]);
+        assert_eq!(out.status.code(), Some(2), "{command}");
+        let err = stderr(&out);
+        assert!(
+            err.contains(&format!("unexpected arguments: {command} extra")),
+            "{command}: {err}"
+        );
+    }
 }

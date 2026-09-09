@@ -136,10 +136,10 @@ impl Server {
         .to_owned()
     }
 
-    /// A new window whose pane runs the setter itself, the way an agent hook
-    /// does: `$TMUX` and `$TMUX_PANE` come from tmux, and the bell goes to that
+    /// A new window whose pane runs the command itself, the way an agent hook
+    /// does: `$TMUX` and `$TMUX_PANE` come from tmux, and any bell goes to that
     /// pane's tty.
-    fn new_window_running_setter(&self, name: &str, state: &str) -> String {
+    fn new_window_running_command(&self, name: &str, arguments: &str) -> String {
         self.tmux(&[
             "new-window",
             "-d",
@@ -151,7 +151,7 @@ impl Server {
             "-P",
             "-F",
             "#{window_id}",
-            &format!("'{BIN}' set {state}; {IDLE}"),
+            &format!("'{BIN}' {arguments}; {IDLE}"),
         ])
         .trim_end()
         .to_owned()
@@ -396,6 +396,82 @@ fn clear_window_clears_every_pane_but_keeps_working() {
 }
 
 #[test]
+fn reset_clears_only_its_pane_and_recomputes_the_rollup() {
+    let server = Server::start();
+    let reset = server.first_pane();
+    let sibling = server.split(&reset);
+    assert_ok(&server.agent_status(&reset, &["set", "waiting"]));
+    assert_ok(&server.agent_status(&sibling, &["set", "working"]));
+
+    assert_ok(&server.agent_status(&reset, &["reset"]));
+
+    assert_eq!(server.pane_statuses(&reset), ["", "working"]);
+    assert_eq!(server.window_status(&reset), "🤖");
+    assert_ok(&server.agent_status(&reset, &["reset"]));
+    assert_eq!(server.pane_statuses(&reset), ["", "working"]);
+}
+
+#[test]
+fn finish_resolves_session_states_but_preserves_error() {
+    let server = Server::start();
+    let pane = server.first_pane();
+
+    for initial in [Some("working"), Some("waiting"), None] {
+        assert_ok(&server.agent_status(&pane, &["reset"]));
+        if let Some(state) = initial {
+            assert_ok(&server.agent_status(&pane, &["set", state]));
+        }
+        assert_ok(&server.agent_status(&pane, &["finish"]));
+        assert_eq!(server.pane_statuses(&pane), ["done"], "initial {initial:?}");
+        assert_eq!(server.window_status(&pane), "✅", "initial {initial:?}");
+    }
+
+    assert_ok(&server.agent_status(&pane, &["set", "error"]));
+    assert_ok(&server.agent_status(&pane, &["finish"]));
+    assert_eq!(server.pane_statuses(&pane), ["error"]);
+    assert_eq!(server.window_status(&pane), "❗");
+}
+
+#[test]
+fn finish_recomputes_a_window_with_a_higher_ranked_sibling() {
+    let server = Server::start();
+    let finishing = server.first_pane();
+    let sibling = server.split(&finishing);
+    assert_ok(&server.agent_status(&finishing, &["set", "working"]));
+    assert_ok(&server.agent_status(&sibling, &["set", "waiting"]));
+
+    assert_ok(&server.agent_status(&finishing, &["finish"]));
+
+    assert_eq!(server.pane_statuses(&finishing), ["done", "waiting"]);
+    assert_eq!(server.window_status(&finishing), "💬");
+}
+
+#[test]
+fn finish_on_a_watched_window_leaves_no_glyph_behind() {
+    // What `/clear` does to a stranded `working`: the session ends while the
+    // user is looking at the window, so the ✅ nobody needs is never written.
+    let server = Server::start();
+    let pane = server.first_pane();
+    // Arranged while detached, the way the turn that stranded it did.
+    assert_ok(&server.agent_status(&pane, &["set", "working"]));
+    let _client = server.attach();
+    wait_for(
+        || server.window_active_and_attached(&pane),
+        |seen| seen == "1 1",
+    );
+
+    assert_ok(&server.agent_status(&pane, &["finish"]));
+
+    assert_eq!(server.pane_statuses(&pane), [""]);
+    assert_eq!(server.window_status(&pane), "");
+
+    // The `SessionStart` of the successor session then finds nothing to clear.
+    assert_ok(&server.agent_status(&pane, &["reset"]));
+    assert_eq!(server.pane_statuses(&pane), [""]);
+    assert_eq!(server.window_status(&pane), "");
+}
+
+#[test]
 fn clearing_the_last_state_unsets_the_window_option() {
     let server = Server::start();
     let pane = server.first_pane();
@@ -529,7 +605,7 @@ fn a_turn_ending_state_rings_the_bell_of_its_window() {
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "other"]);
 
-    let window = server.new_window_running_setter("ringer", "done");
+    let window = server.new_window_running_command("ringer", "set done");
 
     wait_for(
         || {
@@ -552,7 +628,7 @@ fn working_does_not_ring() {
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "other"]);
 
-    let window = server.new_window_running_setter("quiet", "working");
+    let window = server.new_window_running_command("quiet", "set working");
 
     // The state landing is proof the setter ran, and proof enough that no bell
     // is coming: the setter rings before it touches tmux at all.
@@ -568,9 +644,31 @@ fn working_does_not_ring() {
 }
 
 #[test]
+fn finish_does_not_ring() {
+    let server = Server::start();
+    server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
+    server.tmux(&["set-option", "-g", "bell-action", "other"]);
+
+    let commands = format!("set working; '{BIN}' finish");
+    let window = server.new_window_running_command("quiet-finish", &commands);
+
+    wait_for(|| server.window_status(&window), |status| status == "✅");
+    let flag = server.tmux(&[
+        "display-message",
+        "-p",
+        "-t",
+        &window,
+        "#{window_bell_flag}",
+    ]);
+    assert_eq!(flag.trim(), "0");
+}
+
+#[test]
 fn a_hook_outside_tmux_exits_zero_and_says_nothing() {
     for args in [
         ["set", "done"].as_slice(),
+        ["reset"].as_slice(),
+        ["finish"].as_slice(),
         ["clear-window"].as_slice(),
         ["clear-window", "%0"].as_slice(),
     ] {
