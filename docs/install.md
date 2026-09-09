@@ -64,7 +64,8 @@ Verify the tool and hooks are installed:
 
 ```sh
 tmux-agent-status --version
-tmux show-hooks -g | grep tmux-agent-status
+tmux show-hooks -g | grep tmux-agent-status    # session-window-changed
+tmux show-hooks -gw | grep tmux-agent-status   # window-pane-changed
 ```
 
 Note that if your agent's hook cannot find `tmux-agent-status` on `PATH`, it will silently fail.

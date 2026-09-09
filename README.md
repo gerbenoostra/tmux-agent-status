@@ -68,7 +68,9 @@ source-file ~/.tmux/tmux-agent-status.conf
 
 The snippet may live elsewhere; see the [installation path guidance](docs/install.md#choose-installation-paths).
 
-It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls. Confirm with `tmux show-hooks -g | grep tmux-agent-status`.
+It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls. Confirm with `tmux show-hooks -g | grep tmux-agent-status` and
+`tmux show-hooks -gw | grep tmux-agent-status`: they sit in different scopes, so one command shows
+only one of them.
 
 **3. Paste the format term.**
 Into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before

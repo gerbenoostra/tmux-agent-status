@@ -43,13 +43,20 @@ Also run `command -v tmux-agent-status`.
   behaviour.
 
 **2. The tmux snippet.**
-`tmux show-hooks -g` and look for `tmux-agent-status`. Expect two entries: `session-window-changed`
-and `window-pane-changed`, both calling `tmux-agent-status clear-window`.
+Two hooks, in **two different scopes** - checking only one scope is the easy mistake here:
+
+```sh
+tmux show-hooks -g    | grep tmux-agent-status   # session-window-changed
+tmux show-hooks -gw   | grep tmux-agent-status   # window-pane-changed
+```
+
+Both should call `tmux-agent-status clear-window`.
 
 - Neither present: the snippet is not sourced. The user adds
   `source-file <path>/tmux-agent-status.conf` to their tmux configuration and reloads.
 - Only one present: report which is missing. Without `window-pane-changed`, switching panes inside
-  a window will not clear its `done`/`error`/`waiting`.
+  a window will not clear its `done`/`error`/`waiting`; without `session-window-changed`, switching
+  windows will not either.
 
 **3. The format term.**
 `tmux show-options -g window-status-format` and `tmux show-options -g window-status-current-format`.
