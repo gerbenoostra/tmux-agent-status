@@ -1,6 +1,6 @@
 ---
 description: Read-only check of the tmux-agent-status setup - binary, tmux snippet, format term, hooks.
-allowed-tools: Bash(tmux-agent-status --version), Bash(command -v tmux-agent-status), Bash(tmux show-hooks:*), Bash(tmux show-options:*), Bash(tmux display-message:*), Read(~/.claude/settings.json)
+allowed-tools: Bash(printenv TMUX), Bash(tmux-agent-status --version), Bash(command -v tmux-agent-status), Bash(tmux show-hooks:*), Bash(tmux show-options:*), Bash(tmux display-message:*), Read(~/.claude/settings.json)
 disable-model-invocation: true
 ---
 
@@ -22,14 +22,25 @@ Two of these are not style preferences:
 If a check needs a command that is not in `allowed-tools` above, report the check as "could not
 run" rather than reaching for a wider tool.
 
+Run every command **bare**. Do not pipe one into `grep`, `head` or anything else: a pipeline is
+authorised only if *every* stage matches a rule, and no rule above grants a filter. Read the whole
+output and pick out what you need yourself - these commands print a handful of lines.
+
 ## The checks, in order
 
 Run them all, then report. A later step failing is usually explained by an earlier one.
 
 **0. Is this session inside tmux?**
-`tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}'`. If tmux is not reachable,
-say so and stop: outside tmux every other symptom follows from this one, and the tool is a
-deliberate no-op there.
+`printenv TMUX`. Empty output or a non-zero exit means this Claude session is not inside tmux: say
+so and stop, because every other symptom follows from it and the tool is a deliberate no-op there.
+
+Do **not** test this with `tmux display-message`. That reaches the default tmux server whether or
+not *this* process is inside tmux, so it succeeds in a plain terminal while a tmux server runs in
+another one - a false pass on the single condition that best explains a missing glyph. `$TMUX` is
+what the tool itself tests before doing anything, so it is what the diagnostic must test.
+
+Once `$TMUX` is set, `tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}'` says
+where you are, which is useful context for the rest of the report.
 
 **1. The binary.**
 `tmux-agent-status --version`, which prints the version *and* the executable that actually ran.
@@ -46,11 +57,12 @@ Also run `command -v tmux-agent-status`.
 Two hooks, in **two different scopes** - checking only one scope is the easy mistake here:
 
 ```sh
-tmux show-hooks -g    | grep tmux-agent-status   # session-window-changed
-tmux show-hooks -gw   | grep tmux-agent-status   # window-pane-changed
+tmux show-hooks -g     # expect session-window-changed
+tmux show-hooks -gw    # expect window-pane-changed
 ```
 
-Both should call `tmux-agent-status clear-window`.
+Both lists are short; read them and find the `tmux-agent-status` entries yourself. Both should call
+`tmux-agent-status clear-window`.
 
 - Neither present: the snippet is not sourced. The user adds
   `source-file <path>/tmux-agent-status.conf` to their tmux configuration and reloads.

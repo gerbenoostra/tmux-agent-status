@@ -69,7 +69,8 @@ clarifying clause (see "Work items").
 | `.claude-plugin/marketplace.json` + a plugin under `plugins/` | a separate plugin repository |
 | the six hook entries of the README table | changing which events map to which state (that is 001) |
 | a read-only `/tmux-agent-status:doctor` command | any command that writes tmux options, agent config or `~/.tmux.conf` |
-| README and `docs/install.md` pointing at the plugin | replacing the manual paste; it stays documented for non-plugin users |
+| README's agent-setup step pointing at the plugin | `docs/install.md`, which covers getting the binary, not configuring an agent |
+| | replacing the manual paste; it stays documented for non-plugin users |
 | a drift test between manifest and README | shipping the binary inside the plugin |
 | | plugins for other agents (see 005) |
 
@@ -217,9 +218,9 @@ is missing. It is **read-only**, and that is a hard constraint, not a style pref
 
 | Step | Check | Read-only means |
 | --- | --- | --- |
-| 0 tmux | `$TMUX` set at all | a Claude session outside tmux explains every other symptom at once |
+| 0 tmux | `printenv TMUX` - the variable, never `tmux display-message` | a Claude session outside tmux explains every other symptom at once |
 | 1 binary | `tmux-agent-status --version` | reports the version *and the path it ran from*, which is what catches a shadowing dev build |
-| 2 tmux snippet | `tmux show-hooks -g` filtered for `tmux-agent-status`; expect both `session-window-changed` and `window-pane-changed` | never `set-hook` |
+| 2 tmux snippet | `tmux show-hooks -g` for `session-window-changed` **and** `tmux show-hooks -gw` for `window-pane-changed` | never `set-hook` |
 | 3 format term | show the current `window-status-format` and `window-status-current-format`, and whether `@agent_status` is in **both**, plus the paste-ready term | `show-options` yes, `set-option` never |
 | 4 hooks | report that the plugin owns them, and warn if `~/.claude/settings.json` also has manual entries | never edits that file |
 
@@ -228,13 +229,25 @@ Frontmatter, which is where the prohibition is enforced rather than merely state
 ```yaml
 ---
 description: Read-only check of the tmux-agent-status setup - binary, tmux snippet, format term, hooks.
-allowed-tools: Bash(tmux-agent-status --version), Bash(command -v tmux-agent-status), Bash(tmux show-hooks:*), Bash(tmux show-options:*), Bash(tmux display-message:*), Read(~/.claude/settings.json)
+allowed-tools: Bash(printenv TMUX), Bash(tmux-agent-status --version), Bash(command -v tmux-agent-status), Bash(tmux show-hooks:*), Bash(tmux show-options:*), Bash(tmux display-message:*), Read(~/.claude/settings.json)
 disable-model-invocation: true
 ---
 ```
 
 `disable-model-invocation: true` because a diagnostic should run when a human asks, not when a model
 guesses it might help.
+
+Two traps that a first implementation fell into, both found by review rather than by tooling -
+`claude plugin validate --strict` does not check a command's frontmatter at all, so a wrong
+`allowed-tools` ships silently:
+
+- **Every command must be run bare.** A pipeline is authorised only if *each* stage matches a rule,
+  so `tmux show-hooks -g | grep tmux-agent-status` is not covered by `Bash(tmux show-hooks:*)`. The
+  body says to read the short output instead of filtering it.
+- **`$TMUX`, not `tmux display-message`.** `display-message` reaches the default tmux server whether
+  or not this process is inside tmux, so it passes in a plain terminal while a server runs in
+  another one - a false pass on the single condition that best explains a missing glyph. `$TMUX` is
+  what the tool itself tests, so it is what the diagnostic tests.
 
 Reading the format string for a diagnostic is explicitly allowed: the AGENTS.md rule is about
 *writing* it, because a spliced copy written to a window-local option freezes that window's format
@@ -243,13 +256,14 @@ no `set-option`, no `setw`, no `set-hook`, nothing that writes.
 
 The duplicate-hooks warning matters: a user who pastes the JSON *and* installs the plugin gets every
 event twice. The writes are idempotent, but `done` then rings the bell twice. The doctor says so and
-tells them to remove the manual entries, and the README says the same.
+tells them to remove the manual entries. The README presents the two routes as a choice and leaves
+the warning to the doctor.
 
 ## Keeping the manifest and the README honest
 
 The pasteable JSON stops existing in two places: the README's Claude Code section loses its JSON
 block and links to `plugins/tmux-agent-status/hooks/hooks.json` instead, telling a manual installer
-to copy that file's contents into `~/.claude/settings.json`. What remains duplicated is the
+to merge that file's `hooks` object into `~/.claude/settings.json`. What remains duplicated is the
 human-readable Event/Matcher/State table, and `tests/plugin_manifest.rs` pins it:
 
 1. Parse `hooks/hooks.json`. For every entry derive `(event, matcher, state)`, where `matcher` is
@@ -259,9 +273,14 @@ human-readable Event/Matcher/State table, and `tests/plugin_manifest.rs` pins it
 3. Parse the first markdown table after the README's `#### Claude Code` heading into the same
    triples: strip backticks, unescape the `\|` that a table cell needs, and read any cell starting
    with `all` as `None`.
-4. Assert the two sets are equal, and that both have six entries.
-5. Assert `plugin.json`'s `version` equals `Cargo.toml`'s `package.version`, and that its `name`
-   equals the marketplace entry's `name` and that the entry's `source` directory exists.
+4. Assert neither source lists the same triple twice. A set would collapse a repeat, and a repeat
+   is the one manifest mistake with a user-visible cost: the state write is idempotent so the glyph
+   stays right, but a duplicated turn-ending event rings the bell twice. Both sides are therefore
+   sorted lists with an explicit adjacent-equal check, not sets.
+5. Assert the two lists are equal, and that both have six entries.
+6. Assert `plugin.json`'s `version` equals the first `version = ` line of `Cargo.toml`, which is
+   `[package]`'s, and that its `name` equals the marketplace entry's `name` and that the entry's
+   `source` directory exists.
 
 `serde_json` goes in `[dev-dependencies]`. It is dev-only, so the shipped binary keeps its zero
 runtime dependencies; hand-rolling a JSON parser to avoid it would be the more fragile half of this
@@ -299,11 +318,14 @@ pre-tag checklist.
 3. `tests/plugin_manifest.rs` plus the `serde_json` dev-dependency and the `Cargo.lock` update.
 4. `justfile`: the `check-plugin` recipe.
 5. `README.md`: step 4 becomes "install the plugin, **or** paste"; the JSON block is replaced by a
-   link to `hooks/hooks.json`; the table stays; a note that doing both double-rings the bell.
+   link to `hooks/hooks.json`; the table stays. The paste instruction says **merge the `hooks`
+   object**, not "copy the file in": the file is a valid fragment, but appending it to a settings
+   file that already has a `hooks` key produces a duplicate key whose last value silently wins.
    The "Compatible agents" section mentions the plugin for Claude Code. The Devin section is
    untouched - it belongs to 005 and has no plugin.
-6. `docs/install.md`: the plugin route for setup step 4, stated as covering step 4 only, with the
-   binary still installed by one of the five existing routes.
+6. `docs/install.md`: **not** the plugin. That file is about getting the binary onto the machine;
+   configuring an agent is setup step 4 and lives in the README, and splitting it across two files
+   would give the plugin two homes that can disagree.
 7. `CONTRIBUTING.md`: `just check-plugin` in the development commands, and two lines in the pre-tag
    checklist - bump `plugin.json` alongside `Cargo.toml`, and run `just check-plugin`.
 8. `AGENTS.md`: extend the third "rules that are easy to break" bullet so the plugin route is not
@@ -337,20 +359,33 @@ that prove the promise.
   and writes only `enabledPlugins` and `extraKnownMarketplaces` - `hooks` is untouched. Uninstalling
   empties `enabledPlugins` and leaves the marketplace registration. That is verification 2 and the
   settings-file half of 6.
-- `just test` catches all four drift directions: a manifest edited alone, a README table edited
-  alone, a typo'd binary name in a hook command, and a `plugin.json` version left behind.
+- `just test` catches five drift directions: a manifest edited alone, a README table edited alone,
+  a typo'd binary name in a hook command, a `plugin.json` version left behind, and a hook entry
+  listed twice.
 - `just check`, `just coverage` (still 100% line and region), `cargo build --locked --all-targets`
   and `nix build .#tmux-agent-status` are green; the drift test runs inside the nix sandbox too.
 
-Left for a human at a terminal: 3 (the glyphs on a real turn), 4 (the doctor against four broken
-setups), the tmux half of 6, and 7 (the published marketplace, after the tag).
+Verification 3 was then done for real: a fresh `claude -p` session with no manual hooks anywhere
+set `@agent_pane_status done`, rolled up to `@agent_status ✅` on a detached window, and raised that
+window's bell flag; focusing the window cleared both. `/tmux-agent-status:doctor` ran and passed all
+four steps.
+
+That run and the review of it found three defects in the shipped files, all fixed on this branch:
+the `show-hooks` scope split (`-g` shows only one of the two hooks), the doctor volunteering a wrong
+claim about how `settings.json` is managed, and step 0 passing outside tmux because it asked
+`tmux display-message` instead of reading `$TMUX`. Two more were fixed at the same time: the
+doctor's checks were written as pipelines its own `allowed-tools` cannot authorise, and the README
+told a manual installer to "copy the file in", which destroys an existing `hooks` key.
+
+Left for a human at a terminal: 4 (the doctor against four *broken* setups - the passing case is
+done), the tmux half of 6, and 7 (the published marketplace, after the tag).
 
 ## Order of work
 
 1. The three manifests; `just check-plugin`; local install from the checkout; verification 1-3.
 2. `commands/doctor.md`; verification 4.
 3. The drift test and its dev-dependency; verification 5.
-4. README, `docs/install.md`, `CONTRIBUTING.md`, `AGENTS.md`.
+4. README, `CONTRIBUTING.md`, `AGENTS.md`.
 5. Verification 6.
 6. Tag, then verification 7 against the public marketplace.
 

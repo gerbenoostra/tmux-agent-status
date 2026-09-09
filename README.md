@@ -127,8 +127,11 @@ for the `enabledPlugins` and `extraKnownMarketplaces` by Claude Code.
 The plugin also ships `/tmux-agent-status:doctor`, a read-only check of all four setup steps.
 
 **Or the manual paste.**
-Copy the contents of [`plugins/tmux-agent-status/hooks/hooks.json`](./plugins/tmux-agent-status/hooks/hooks.json) into
-`~/.claude/settings.json`.
+[`plugins/tmux-agent-status/hooks/hooks.json`](./plugins/tmux-agent-status/hooks/hooks.json) is the
+file the plugin itself uses, and it has the shape `settings.json` wants. **Merge its `hooks` object
+into** `~/.claude/settings.json`: if you have no `hooks` key, take the file whole; if you already
+have one, add these six events inside it. Do not append the file as a second top-level object, and
+do not end up with two `hooks` keys - JSON's last one silently wins and the hooks you had are gone.
 
 **The watched events**
 These are the hooks being watched:

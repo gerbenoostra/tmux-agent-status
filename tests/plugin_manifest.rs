@@ -6,7 +6,6 @@
 //! Everything here parses files this repository owns, so the parsing is deliberately strict: a
 //! shape it does not recognise is a failure, not something to skip over.
 
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +14,22 @@ use std::path::{Path, PathBuf};
 /// `matcher` is `None` for "all", which the manifest expresses by omitting the key and the README
 /// by writing "all".
 type HookEntry = (String, Option<String>, String);
+
+/// Sort, and reject a repeated entry rather than collapsing it.
+///
+/// A set would silently absorb a second identical hook entry, which is the one manifest mistake
+/// with a user-visible cost: the state write is idempotent, so the glyph stays right, but every
+/// turn end rings the bell twice.
+fn normalise(mut entries: Vec<HookEntry>, source: &str) -> Vec<HookEntry> {
+    entries.sort();
+    for pair in entries.windows(2) {
+        assert_ne!(
+            pair[0], pair[1],
+            "{source} lists the same hook entry twice, which would fire it twice"
+        );
+    }
+    entries
+}
 
 const STATES: [&str; 4] = ["working", "waiting", "done", "error"];
 const EXPECTED_EVENTS: usize = 6;
@@ -47,7 +62,7 @@ fn state_of(command: &str) -> String {
     rest.to_string()
 }
 
-fn manifest_entries() -> BTreeSet<HookEntry> {
+fn manifest_entries() -> Vec<HookEntry> {
     let path = plugin_dir().join("hooks/hooks.json");
     let json: serde_json::Value = serde_json::from_str(&read(&path))
         .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", path.display()));
@@ -55,7 +70,7 @@ fn manifest_entries() -> BTreeSet<HookEntry> {
         .as_object()
         .unwrap_or_else(|| panic!("{} has no `hooks` object", path.display()));
 
-    let mut entries = BTreeSet::new();
+    let mut entries = Vec::new();
     for (event, groups) in events {
         for group in groups
             .as_array()
@@ -78,11 +93,11 @@ fn manifest_entries() -> BTreeSet<HookEntry> {
                 let command = hook["command"]
                     .as_str()
                     .unwrap_or_else(|| panic!("`{event}` has a hook with no command"));
-                entries.insert((event.clone(), matcher.clone(), state_of(command)));
+                entries.push((event.clone(), matcher.clone(), state_of(command)));
             }
         }
     }
-    entries
+    normalise(entries, "hooks.json")
 }
 
 /// Split one table row into cells on the `|` separators, leaving the `\|` a markdown cell needs to
@@ -124,7 +139,7 @@ fn unformat(cell: &str) -> String {
     cell.trim().trim_matches('`').replace("\\|", "|")
 }
 
-fn readme_entries() -> BTreeSet<HookEntry> {
+fn readme_entries() -> Vec<HookEntry> {
     let readme = read(&repo_root().join("README.md"));
     let rows = table_after(&readme, "#### Claude Code");
     assert_eq!(
@@ -133,7 +148,7 @@ fn readme_entries() -> BTreeSet<HookEntry> {
         "the Claude Code hook table's header changed"
     );
 
-    let mut entries = BTreeSet::new();
+    let mut entries = Vec::new();
     // Row 0 is the header, row 1 the `| --- |` separator.
     for row in &rows[2..] {
         assert_eq!(row.len(), 3, "hook table row is not three cells: {row:?}");
@@ -142,9 +157,9 @@ fn readme_entries() -> BTreeSet<HookEntry> {
         } else {
             Some(unformat(&row[1]))
         };
-        entries.insert((unformat(&row[0]), matcher, unformat(&row[2])));
+        entries.push((unformat(&row[0]), matcher, unformat(&row[2])));
     }
-    entries
+    normalise(entries, "the README's Claude Code table")
 }
 
 fn manifest_json(path: &Path) -> serde_json::Value {
