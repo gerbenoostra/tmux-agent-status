@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "sessionStart": [
+      { "type": "command", "command": "tmux-agent-status reset >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "sessionEnd": [
+      { "type": "command", "command": "tmux-agent-status finish >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "beforeSubmitPrompt": [
+      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "subagentStart": [
+      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "subagentStop": [
+      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "postToolUseFailure": [
+      { "type": "command", "command": "tmux-agent-status set error >/dev/null 2>&1 || true; printf '{}\n'" }
+    ],
+    "stop": [
+      { "type": "command", "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'" }
+    ]
+  }
+}
