@@ -1,6 +1,7 @@
 # Installing tmux-agent-status
 
-Five routes. After installing you need to finish with the four configuration setup steps in the [README](../README.md):
+Below we list the different installation options.
+After installing you need to finish with the configuration setup steps in the [README](../README.md):
 the binary on its own does nothing until tmux and your agent know about it.
 
 ## Choose installation paths
@@ -63,7 +64,8 @@ Verify the tool and hooks are installed:
 
 ```sh
 tmux-agent-status --version
-tmux show-hooks -g | grep tmux-agent-status
+tmux show-hooks -g | grep tmux-agent-status    # session-window-changed
+tmux show-hooks -gw | grep tmux-agent-status   # window-pane-changed
 ```
 
 Note that if your agent's hook cannot find `tmux-agent-status` on `PATH`, it will silently fail.

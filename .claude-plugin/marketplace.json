@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "tmux-agent-status",
+  "description": "The tmux-agent-status Claude Code plugin: lifecycle hooks that drive the tmux window glyph.",
+  "owner": { "name": "Gerben Oostra", "url": "https://github.com/gerbenoostra" },
+  "plugins": [
+    {
+      "name": "tmux-agent-status",
+      "description": "Agent lifecycle events as one glyph on the tmux window entry",
+      "source": "./plugins/tmux-agent-status",
+      "category": "productivity",
+      "homepage": "https://github.com/gerbenoostra/tmux-agent-status"
+    }
+  ]
+}
