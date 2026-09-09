@@ -20,16 +20,16 @@ fn main() -> ExitCode {
 
     match args.as_slice() {
         [cmd, state] if cmd == "set" => match state.parse::<State>() {
-            Ok(state) => hook(command::set(state, pane_ref)),
+            Ok(state) => run_hook(|| command::set(state, pane_ref)),
             Err(err) => usage_error(&err.to_string()),
         },
         [cmd, ..] if cmd == "set" => usage_error("set requires a state"),
-        [cmd] if cmd == "reset" => hook(command::reset(pane_ref)),
-        [cmd] if cmd == "finish" => hook(command::finish(pane_ref)),
-        [cmd] if cmd == "clear-window" => hook(command::clear_window(pane_ref)),
-        [cmd, positional] if cmd == "clear-window" => hook(command::clear_window(
-            pane_ref.or(Some(positional.as_str())),
-        )),
+        [cmd] if cmd == "reset" => run_hook(|| command::reset(pane_ref)),
+        [cmd] if cmd == "finish" => run_hook(|| command::finish(pane_ref)),
+        [cmd] if cmd == "clear-window" => run_hook(|| command::clear_window(pane_ref)),
+        [cmd, positional] if cmd == "clear-window" => {
+            run_hook(|| command::clear_window(pane_ref.or(Some(positional.as_str()))))
+        }
         // Written for humans on stdout, so `--help | less` works. The hook
         // commands themselves never write to stdout at all.
         [cmd] if cmd == "--help" || cmd == "-h" => {
@@ -74,6 +74,31 @@ fn hook(result: io::Result<()>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Run a hook command unless the user opted out of every write.
+///
+/// `TMUX_AGENT_STATUS_DISABLED=1` turns every write into a silent no-op.
+fn run_hook(f: impl FnOnce() -> io::Result<()>) -> ExitCode {
+    if is_disabled() {
+        return ExitCode::SUCCESS;
+    }
+    hook(f())
+}
+
+fn is_disabled() -> bool {
+    env::var_os("TMUX_AGENT_STATUS_DISABLED").is_some_and(|v| !v.is_empty())
+}
+
+/// Log a diagnostic to stderr when `TMUX_AGENT_STATUS_DEBUG=1` is set.
+///
+/// Never used on a hot path that agents call repeatedly; reserved for shape B
+/// `notify` dropping an unrecognised event.
+#[allow(dead_code)]
+fn debug(message: &str) {
+    if env::var_os("TMUX_AGENT_STATUS_DEBUG").is_some_and(|v| v == "1") {
+        eprintln!("tmux-agent-status: {message}");
+    }
+}
+
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("tmux-agent-status: {message}");
     eprint!("{}", help());
@@ -100,6 +125,9 @@ usage:
   tmux-agent-status --help         this text
 
 The pane is resolved in this order: --pane, $TMUX_AGENT_STATUS_PANE, $TMUX_PANE.
+
+Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every write into a no-op. Set
+`TMUX_AGENT_STATUS_DEBUG=1` to log dropped events to stderr.
 
 states: {}
 ",

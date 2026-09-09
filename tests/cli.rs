@@ -12,6 +12,19 @@ fn run(args: &[&str]) -> Output {
         .args(args)
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")
+        .env_remove("TMUX_AGENT_STATUS_DISABLED")
+        .env_remove("TMUX_AGENT_STATUS_DEBUG")
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs")
+}
+
+fn run_env(args: &[&str], key: &str, value: &str) -> Output {
+    Command::new(BIN)
+        .args(args)
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .env(key, value)
         .stdin(Stdio::null())
         .output()
         .expect("the binary runs")
@@ -136,4 +149,36 @@ fn pane_flag_is_allowed_on_hook_commands() {
         assert!(out.stdout.is_empty(), "{args:?}");
         assert!(out.stderr.is_empty(), "{args:?}");
     }
+}
+
+#[test]
+fn disabled_turns_hook_commands_into_no_ops() {
+    for args in [
+        ["set", "done"].as_slice(),
+        ["reset"].as_slice(),
+        ["finish"].as_slice(),
+        ["clear-window"].as_slice(),
+    ] {
+        let out = run_env(args, "TMUX_AGENT_STATUS_DISABLED", "1");
+        assert!(out.status.success(), "{args:?}: {}", stderr(&out));
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert!(out.stderr.is_empty(), "{args:?}");
+    }
+}
+
+#[test]
+fn disabled_does_not_hide_usage_errors() {
+    // `set` with no state is still a usage error: the opt-out is about writes,
+    // not about diagnosing a broken hook config.
+    let out = run_env(&["set"], "TMUX_AGENT_STATUS_DISABLED", "1");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("set requires a state"));
+}
+
+#[test]
+fn help_mentions_disabled_and_debug() {
+    let out = run(&["--help"]);
+    let text = stdout(&out);
+    assert!(text.contains("TMUX_AGENT_STATUS_DISABLED"));
+    assert!(text.contains("TMUX_AGENT_STATUS_DEBUG"));
 }

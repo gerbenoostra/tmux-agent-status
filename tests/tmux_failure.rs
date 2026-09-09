@@ -48,6 +48,18 @@ fn run(args: &[&str], path: &str) -> Output {
         .expect("the binary runs")
 }
 
+fn run_disabled(args: &[&str], path: &str) -> Output {
+    Command::new(BIN)
+        .args(args)
+        .env("TMUX", TMUX)
+        .env("TMUX_PANE", TMUX_PANE)
+        .env("TMUX_AGENT_STATUS_DISABLED", "1")
+        .env("PATH", path)
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs")
+}
+
 fn assert_ok_and_silent(out: &Output) {
     assert!(out.status.success(), "exit: {:?}", out.status);
     assert!(
@@ -183,4 +195,26 @@ exit 0\n",
         let out = run(args, &format!("{}:", dir.display()));
         assert_ok_and_silent(&out);
     }
+}
+
+#[test]
+fn disabled_runs_no_tmux_command() {
+    let dir = fake_tmux_dir();
+    let log = dir.join("calls");
+    write_fake_tmux(
+        &dir,
+        &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", log.display()),
+    );
+
+    for args in [
+        ["set", "done"].as_slice(),
+        ["reset"].as_slice(),
+        ["finish"].as_slice(),
+        ["clear-window", TMUX_PANE].as_slice(),
+    ] {
+        let out = run_disabled(args, &format!("{}:", dir.display()));
+        assert_ok_and_silent(&out);
+    }
+
+    assert!(!log.exists(), "disabled must not invoke tmux");
 }
