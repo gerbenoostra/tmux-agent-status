@@ -38,7 +38,8 @@ tmux-agent-status set error
 tmux-agent-status set waiting
 ```
 
-The installation notes show how to do this for Claude.
+The installation notes show how to do this per agent. Claude Code has a plugin that carries the
+hook set for you; see [step 4](#claude-code).
 
 ## Install
 
@@ -46,9 +47,9 @@ See [docs/install.md](docs/install.md) for the nix flake input, `nix profile`, a
 `cargo`, and building from source.
 
 After installing the command line tool, there are three things left:
- - register the `tmux-agent-status set [state]` as agent hooks.
  - include the `tmux-agent-status.conf` into your tmux config to hook onto tmux's events.
  - include the `agent_status` placeholder in your tmux's window status format.
+ - register the `tmux-agent-status set [state]` as agent hooks.
 
 ## Set up
 
@@ -67,7 +68,9 @@ source-file ~/.tmux/tmux-agent-status.conf
 
 The snippet may live elsewhere; see the [installation path guidance](docs/install.md#choose-installation-paths).
 
-It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls. Confirm with `tmux show-hooks -g | grep tmux-agent-status`.
+It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls. Confirm with `tmux show-hooks -g | grep tmux-agent-status` and
+`tmux show-hooks -gw | grep tmux-agent-status`: they sit in different scopes, so one command shows
+only one of them.
 
 **3. Paste the format term.**
 Into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before
@@ -93,11 +96,45 @@ set -g bell-action other
 setw -g window-status-bell-style 'fg=magenta,bold,nodim'
 ```
 
-**4. Paste the agent hooks.**
+**4. Register the agent hooks.**
 
-To prevent unexpected scrambling of your config files, we ask you to manually edit your agent config.
+Claude Code has a plugin, for other agents manually edit its configuration.
 
-For Claude Code, we recommend watching the following hooks in `~/.claude/settings.json`:
+### Configure agents
+
+#### Claude Code
+
+There are two options, either the plugin or manually editing the hooks.
+
+**The plugin.**
+
+```
+/plugin marketplace add gerbenoostra/tmux-agent-status
+/plugin install tmux-agent-status
+```
+
+Restart the session and the six hooks below are live.
+
+You can uninstall/revert using:
+```
+/plugin uninstall tmux-agent-status
+/plugin marketplace remove tmux-agent-status
+```
+
+The plugin only carries the hook configuration. Your `~/.claude/settings.json` will be untouched, except
+for the `enabledPlugins` and `extraKnownMarketplaces` by Claude Code.
+
+The plugin also ships `/tmux-agent-status:doctor`, a read-only check of all four setup steps.
+
+**Or the manual paste.**
+[`plugins/tmux-agent-status/hooks/hooks.json`](./plugins/tmux-agent-status/hooks/hooks.json) is the
+file the plugin itself uses, and it has the shape `settings.json` wants. **Merge its `hooks` object
+into** `~/.claude/settings.json`: if you have no `hooks` key, take the file whole; if you already
+have one, add these six events inside it. Do not append the file as a second top-level object, and
+do not end up with two `hooks` keys - JSON's last one silently wins and the hooks you had are gone.
+
+**The watched events**
+These are the hooks being watched:
 
 | Event | Matcher | State |
 | --- | --- | --- |
@@ -108,33 +145,8 @@ For Claude Code, we recommend watching the following hooks in `~/.claude/setting
 | `Stop` | all | `done` |
 | `StopFailure` | all | `error` |
 
-Which can be done as follows:
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
-    ],
-    "PostToolUse": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "AskUserQuestion|ExitPlanMode",
-        "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }]
-      }
-    ],
-    "Notification": [
-      { "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }] }
-    ],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }] }],
-    "StopFailure": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set error" }] }]
-  }
-}
-```
-
-Two things to know here. `Notification` must **not** be narrowed to permission prompts: the idle nag
-is precisely the event meaning "still blocked, and has been for a while".
+Two things to know here. `Notification` must **not** be narrowed to permission prompts, should also catch idle
+events that indicate "still blocked, and has been for a while".
 
 As the tool rings the bell itself, no standalone `printf '\a'` hooks for the same events are needed.
 
@@ -191,7 +203,8 @@ term to.
 ## Known limits
 
 - An agent that dies without firing `Stop` leaves a permanent 🤖. We're planning a future `stale` 💤 state
-  that decays from `working` after a timeout.
+  that decays from `working` after a timeout. An agent with a session-lifecycle event, like devin's
+  `SessionStart`, can release it on the next run in that pane.
 - A **zoomed** pane's siblings are hidden, but tmux still calls the whole window watched: their
   states clear when you look at the window, and a turn ending in a hidden sibling while you watch
   rings the bell and leaves no glyph.

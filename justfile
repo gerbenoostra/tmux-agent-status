@@ -35,6 +35,20 @@ coverage:
 # What CI runs.
 check: fmt-check lint test
 
+# Validate the plugin and marketplace manifests (needs the `claude` CLI).
+check-plugin:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Not a CI job, because it needs the `claude` CLI. The check that actually
+    # rots - manifest against README - is a test, so it runs everywhere.
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "claude CLI not found; skipping manifest validation." >&2
+        echo "The README/manifest drift check runs in 'just test'." >&2
+        exit 0
+    fi
+    claude plugin validate --strict .
+    claude plugin validate --strict plugins/tmux-agent-status
+
 # Build the release binary.
 build:
     cargo build --release
