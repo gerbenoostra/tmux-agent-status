@@ -11,18 +11,25 @@ use tmux_agent_status::state::State;
 const USAGE_ERROR: u8 = 2;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let mut args: Vec<String> = env::args().skip(1).collect();
+    let pane = match extract_pane(&mut args) {
+        Ok(pane) => pane,
+        Err(err) => return usage_error(&err),
+    };
+    let pane_ref = pane.as_deref();
 
     match args.as_slice() {
         [cmd, state] if cmd == "set" => match state.parse::<State>() {
-            Ok(state) => hook(command::set(state)),
+            Ok(state) => hook(command::set(state, pane_ref)),
             Err(err) => usage_error(&err.to_string()),
         },
         [cmd, ..] if cmd == "set" => usage_error("set requires a state"),
-        [cmd] if cmd == "reset" => hook(command::reset()),
-        [cmd] if cmd == "finish" => hook(command::finish()),
-        [cmd] if cmd == "clear-window" => hook(command::clear_window(None)),
-        [cmd, pane] if cmd == "clear-window" => hook(command::clear_window(Some(pane.as_str()))),
+        [cmd] if cmd == "reset" => hook(command::reset(pane_ref)),
+        [cmd] if cmd == "finish" => hook(command::finish(pane_ref)),
+        [cmd] if cmd == "clear-window" => hook(command::clear_window(pane_ref)),
+        [cmd, positional] if cmd == "clear-window" => hook(command::clear_window(
+            pane_ref.or(Some(positional.as_str())),
+        )),
         // Written for humans on stdout, so `--help | less` works. The hook
         // commands themselves never write to stdout at all.
         [cmd] if cmd == "--help" || cmd == "-h" => {
@@ -36,6 +43,20 @@ fn main() -> ExitCode {
         [] => usage_error("no command given"),
         _ => usage_error(&format!("unexpected arguments: {}", args.join(" "))),
     }
+}
+
+/// Pull `--pane <id>` out of the argument list if present.
+///
+/// Returns an error when `--pane` is the last argument with no value.
+fn extract_pane(args: &mut Vec<String>) -> Result<Option<String>, String> {
+    let Some(pos) = args.iter().position(|arg| arg == "--pane") else {
+        return Ok(None);
+    };
+    args.remove(pos);
+    if pos >= args.len() {
+        return Err("--pane requires a value".into());
+    }
+    Ok(Some(args.remove(pos)))
 }
 
 /// A hook must never break the agent that called it.
@@ -66,14 +87,19 @@ fn help() -> String {
 tmux-agent-status - agent lifecycle events as one glyph on the tmux window entry
 
 usage:
-  tmux-agent-status set <state>    write this pane's state and recompute the window
-  tmux-agent-status reset          clear this pane's state and recompute the window
-  tmux-agent-status finish         silently resolve this pane's session to done
-  tmux-agent-status clear-window [<pane>]
+  tmux-agent-status set <state> [--pane <id>]
+                              write this pane's state and recompute the window
+  tmux-agent-status reset [--pane <id>]
+                              clear this pane's state and recompute the window
+  tmux-agent-status finish [--pane <id>]
+                              silently resolve this pane's session to done
+  tmux-agent-status clear-window [<pane>] [--pane <id>]
                               clear the non-sticky states of every pane of that
                               pane's window, defaulting to $TMUX_PANE
   tmux-agent-status --version      version, and the executable that is actually running
   tmux-agent-status --help         this text
+
+The pane is resolved in this order: --pane, $TMUX_AGENT_STATUS_PANE, $TMUX_PANE.
 
 states: {}
 ",

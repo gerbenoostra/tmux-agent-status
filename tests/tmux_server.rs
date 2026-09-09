@@ -99,6 +99,18 @@ impl Server {
             .expect("the binary runs")
     }
 
+    /// Run the binary with no $TMUX_PANE, using $TMUX_AGENT_STATUS_PANE instead.
+    fn agent_status_pane_env(&self, pane: &str, args: &[&str]) -> Output {
+        Command::new(BIN)
+            .args(args)
+            .env("TMUX", format!("{},0,0", self.socket_path()))
+            .env("TMUX_AGENT_STATUS_PANE", pane)
+            .env_remove("TMUX_PANE")
+            .stdin(Stdio::null())
+            .output()
+            .expect("the binary runs")
+    }
+
     /// A new window with one idle pane, returning that pane's id.
     ///
     /// Appended after the last window: `-a` against an occupied index moves the
@@ -270,6 +282,29 @@ fn set_writes_the_pane_state_and_the_window_glyph() {
 
     assert_eq!(server.pane_statuses(&pane), ["done"]);
     assert_eq!(server.window_status(&pane), "✅");
+}
+
+#[test]
+fn pane_flag_overrides_missing_tmux_pane() {
+    let server = Server::start();
+    let pane = server.first_pane();
+
+    assert_ok(&server.agent_status_pane_env(&pane, &["set", "done"]));
+
+    assert_eq!(server.pane_statuses(&pane), ["done"]);
+    assert_eq!(server.window_status(&pane), "✅");
+}
+
+#[test]
+fn pane_flag_overrides_tmux_pane() {
+    let server = Server::start();
+    let first = server.first_pane();
+    let second = server.split(&first);
+
+    assert_ok(&server.agent_status(&first, &["set", "done", "--pane", second.as_str()]));
+
+    assert_eq!(server.pane_statuses(&first), ["", "done"]);
+    assert_eq!(server.window_status(&first), "✅");
 }
 
 #[test]

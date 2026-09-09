@@ -16,11 +16,11 @@ use crate::tmux;
 /// The bell is rung whether or not there is a tmux to write to, because it is a
 /// separate channel: it reaches the human through the terminal, which a tmux
 /// option can never do.
-pub fn set(state: State) -> io::Result<()> {
+pub fn set(state: State, pane: Option<&str>) -> io::Result<()> {
     if state.rings_bell() {
         bell::ring();
     }
-    let Some(pane) = tmux::current_pane() else {
+    let Some(pane) = tmux::resolve_pane(pane) else {
         return Ok(());
     };
     let window = tmux::window(&pane)?;
@@ -28,8 +28,8 @@ pub fn set(state: State) -> io::Result<()> {
 }
 
 /// `tmux-agent-status finish`: silently resolve this pane's session to done.
-pub fn finish() -> io::Result<()> {
-    let Some(pane) = tmux::current_pane() else {
+pub fn finish(pane: Option<&str>) -> io::Result<()> {
+    let Some(pane) = tmux::resolve_pane(pane) else {
         return Ok(());
     };
     let window = tmux::window(&pane)?;
@@ -44,8 +44,8 @@ pub fn finish() -> io::Result<()> {
 }
 
 /// `tmux-agent-status reset`: unconditionally drop this pane's session status.
-pub fn reset() -> io::Result<()> {
-    let Some(pane) = tmux::current_pane() else {
+pub fn reset(pane: Option<&str>) -> io::Result<()> {
+    let Some(pane) = tmux::resolve_pane(pane) else {
         return Ok(());
     };
     let mut window = tmux::window(&pane)?;
@@ -88,12 +88,8 @@ fn write_status(pane: &str, mut window: tmux::Window, state: State) -> io::Resul
 /// shipped hook passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which
 /// is what a hand invocation from a pane has.
 pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
-    let pane = match pane {
-        Some(pane) => pane.to_owned(),
-        None => match tmux::current_pane() {
-            Some(pane) => pane,
-            None => return Ok(()),
-        },
+    let Some(pane) = tmux::resolve_pane(pane) else {
+        return Ok(());
     };
     let mut window = tmux::window(&pane)?;
     clear_statuses(&pane, &mut window.panes, None)

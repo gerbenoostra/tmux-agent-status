@@ -53,6 +53,27 @@ pub fn current_pane() -> Option<String> {
         .filter(|pane| !pane.is_empty())
 }
 
+/// Resolve the pane to operate on, in priority order.
+///
+/// 1. An explicit value passed on the command line (`--pane`).
+/// 2. The `TMUX_AGENT_STATUS_PANE` environment variable, for agents whose hook
+///    format cannot pass an argument.
+/// 3. The tmux-provided `$TMUX_PANE` of the caller's pane.
+///
+/// `None` means the caller is not inside tmux and no override was given, so the
+/// command should silently do nothing.
+pub fn resolve_pane(explicit: Option<&str>) -> Option<String> {
+    if let Some(pane) = explicit {
+        return Some(pane.to_owned());
+    }
+    if let Ok(pane) = std::env::var("TMUX_AGENT_STATUS_PANE") {
+        if !pane.is_empty() {
+            return Some(pane);
+        }
+    }
+    current_pane()
+}
+
 /// The status of every pane of `target`'s window, and whether it is watched.
 ///
 /// A pane target resolves to the window that holds it, which is how one

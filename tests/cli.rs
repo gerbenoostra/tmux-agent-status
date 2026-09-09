@@ -112,3 +112,28 @@ fn boundary_commands_reject_arguments() {
         );
     }
 }
+
+#[test]
+fn pane_flag_requires_a_value() {
+    let out = run(&["reset", "--pane"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("--pane requires a value"));
+}
+
+#[test]
+fn pane_flag_is_allowed_on_hook_commands() {
+    // No tmux in the test environment, so the pane override is accepted and
+    // the missing tmux is silently ignored.
+    for args in [
+        ["set", "done", "--pane", "%0"].as_slice(),
+        ["reset", "--pane", "%0"].as_slice(),
+        ["finish", "--pane", "%0"].as_slice(),
+        ["clear-window", "--pane", "%0"].as_slice(),
+        ["clear-window", "%0", "--pane", "%1"].as_slice(),
+    ] {
+        let out = run(args);
+        assert!(out.status.success(), "{args:?}: {}", stderr(&out));
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert!(out.stderr.is_empty(), "{args:?}");
+    }
+}
