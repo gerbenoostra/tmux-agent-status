@@ -69,3 +69,27 @@ The shipped hooks pass `#{pane_id}` to `clear-window`, and `tmux-agent-status cl
 **Severity:** nit - coverage.
 
 `current_pane()` in `src/tmux.rs` returns `None` unless both `TMUX` and `TMUX_PANE` are set. Add a test that the hook exits silently when only `TMUX_PANE` is present, mirroring the existing "outside tmux" test that removes both variables.
+
+## Second review pass
+
+Reviewing the implementation of the items above found six more, all fixed on the same branch.
+
+1. **An unreadable tmux flag took the whole tool out.** `parse_fields` returned `None` for a
+   `window_active` or `session_attached` value it did not recognise, which aborted `pane_statuses`,
+   so `set` wrote no pane option and no glyph - and `hook()` discards the error, so the user would
+   see nothing, ever. Nobody can observe that error, so failing hard on it buys nothing. Values are
+   now read leniently (`is_watched`): unreadable means not watched, which costs the immediate clear
+   and nothing else. The tabs are still ours, so a line missing one is still an error.
+2. **`window_watched` was a window fact on every `PaneStatus`,** recovered with `.any()` over N
+   identical copies. `tmux::pane_statuses` is now `tmux::window`, returning `Window { watched,
+   panes }`; `PaneStatus` is back to pane and status.
+3. **A `done` from a pane hidden behind a zoom is dropped.** Verified on 3.6a. Pre-existing for the
+   focus hooks, extended to `set` by item 1 above. Documented in the README and taken up as a third
+   section of `006`, which already owns "tmux thinks you are looking and you are not".
+4. **The README's diagnostic recipe had become a trap:** it told a user who sees no glyph to read
+   `@agent_status` from the window they are on, which is exactly where it is correctly empty. Recipe
+   removed, and the immediate clear is now documented in "How it works" instead of nowhere.
+5. **`recompute_after_set` duplicated `recompute`.** The reporting pane's new state is written into
+   the already-fetched pane list instead, and `write_rollup` folds back into `recompute`.
+6. **Stale cross-references from the renumbering** (`003`↔`005`, `004`↔`005`) in `004`, `005`
+   and `006`.

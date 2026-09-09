@@ -23,17 +23,22 @@ pub fn set(state: State) -> io::Result<()> {
     let Some(pane) = tmux::current_pane() else {
         return Ok(());
     };
-    let mut panes = tmux::pane_statuses(&pane)?;
-    if !state.is_sticky() && panes.iter().any(|status| status.window_watched) {
+    let mut window = tmux::window(&pane)?;
+    if !state.is_sticky() && window.watched {
         // The window is already on screen, so writing the glyph would only be
         // read by the person who is looking at it anyway: clear instead, the
         // way focusing the window would. This pane is passed as superseded
         // because its own old state is over - a `done` that left `working` in
         // place would strand a 🤖 no later focus event ever clears.
-        return clear_statuses(&pane, &mut panes, Some(&pane));
+        return clear_statuses(&pane, &mut window.panes, Some(&pane));
     }
     tmux::set_pane_status(&pane, state.name())?;
-    recompute_after_set(&pane, &panes, state)
+    // The panes were read before that write, so this pane still carries the
+    // state the write just replaced, and the rollup must not see the old one.
+    for reporter in window.panes.iter_mut().filter(|listed| listed.pane == pane) {
+        reporter.status = state.name().to_owned();
+    }
+    recompute(&pane, &window.panes)
 }
 
 /// `tmux-agent-status clear-window [<pane>]`: drop the non-sticky states of every
@@ -54,8 +59,8 @@ pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
             None => return Ok(()),
         },
     };
-    let mut panes = tmux::pane_statuses(&pane)?;
-    clear_statuses(&pane, &mut panes, None)
+    let mut window = tmux::window(&pane)?;
+    clear_statuses(&pane, &mut window.panes, None)
 }
 
 /// Drop the states that seeing the window drops, then recompute.
@@ -90,31 +95,13 @@ fn clears(pane: &tmux::PaneStatus, superseded: Option<&str>) -> bool {
         .is_ok_and(|state| !state.is_sticky())
 }
 
-fn recompute_after_set(target: &str, panes: &[tmux::PaneStatus], state: State) -> io::Result<()> {
-    let states: Vec<Option<State>> = panes
-        .iter()
-        .map(|pane| {
-            if pane.pane == target {
-                Some(state)
-            } else {
-                pane.status.parse::<State>().ok()
-            }
-        })
-        .collect();
-    write_rollup(target, &states)
-}
-
 /// Reduce the window's panes to one glyph, or to no option at all.
 fn recompute(target: &str, panes: &[tmux::PaneStatus]) -> io::Result<()> {
     let states: Vec<Option<State>> = panes
         .iter()
         .map(|pane| pane.status.parse::<State>().ok())
         .collect();
-    write_rollup(target, &states)
-}
-
-fn write_rollup(target: &str, states: &[Option<State>]) -> io::Result<()> {
-    match rollup(states) {
+    match rollup(&states) {
         Some(state) => tmux::set_window_status(target, state.icon()),
         None => tmux::clear_window_status(target),
     }

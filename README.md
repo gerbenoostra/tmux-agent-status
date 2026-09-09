@@ -7,10 +7,6 @@ Example result:
  0:notes  1:api ✅  2:refactor 🤖  3:migration 💬- 4:build*
 ```
 
-The `tmux-agent-status` executable is called from your coding agent's lifecycle hooks. It writes
-a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window,
-and rings the terminal bell.
-
 To not interfere with your formatting, window naming scripts, or monitor-bell, this tool deliberately
 does not change, colour, or format window names. It just enables the bell and adds a glyph.
 
@@ -25,21 +21,36 @@ The following states are distinguished:
 | `error` | ❗ | the turn aborted: API error, context overflow, unparseable tool call | you look at the window |
 | `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, the idle nag | you look at the window |
 
-A window with multiple agents will show the status that wants you most. Thus `waiting` > `error` > `done` > `working`.
+A window with multiple agents will show the most demanding status. Thus `waiting` > `error` > `done` > `working`.
 
 For windows with no agent this tool is a no-op.
 
 The glyphs are emoji, so they survive a font change. They need a tmux client in UTF-8 mode; a client
 without it renders them as underscores.
 
+## Compatible agents
+Any agent that allows to hook on to lifecycle events work.
+You can register the following commands as hook commands:
+```
+tmux-agent-status set working
+tmux-agent-status set done
+tmux-agent-status set error
+tmux-agent-status set waiting
+```
+
+The installation notes show how to do this for Claude.
+
 ## Install
 
 See [docs/install.md](docs/install.md) for the nix flake input, `nix profile`, a prebuilt binary,
 `cargo`, and building from source.
 
-After installing the command line tool, you'll need to include it in your tmux's window status format, and include it in your agent hooks.
+After installing the command line tool, there are three things left:
+ - register the `tmux-agent-status set [state]` as agent hooks.
+ - include the `tmux-agent-status.conf` into your tmux config to hook onto tmux's events.
+ - include the `agent_status` placeholder in your tmux's window status format.
 
-## Set up, in this order
+## Set up
 
 **1. Check the binary.**
 After installing, verify the binary is available: `tmux-agent-status --version` should print the version and the executable that is
@@ -137,14 +148,14 @@ Instead of relying on the hooks for the bell (and thus highlight), you can also 
 ```
 
 The agent hook will not raise errors if the `tmux-agent-status` command cannot be found. You'll only notice it as
-no `@agent_status` value being available in the window. If you don't get glyphs and want to diagnose whether the
-hook is failing or the glyph printing fails, you can manually inspect the status by running:
-```sh
-tmux display-message -p '#{@agent_status}'
-```
+no glyph appearing on the window.
 
 
 ## How it works
+
+The `tmux-agent-status` executable is called from your coding agent's lifecycle hooks. It writes
+a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window,
+and rings the terminal bell.
 
 We use two tmux options, separating status from final glyph:
 
@@ -155,13 +166,20 @@ We use two tmux options, separating status from final glyph:
 They have different names because tmux option inheritance returns the window's value when reading a
 pane without a value.
 
+Looking at a window clears it. Switching to a window, or to another pane inside it, drops that
+window's `waiting`, `error` and `done`; `working` survives, or an agent you glance at would go blank
+while it is still running. A turn that ends on the window you are **already** watching is cleared on
+the spot: the bell rings and no glyph appears, because you are looking at the pane that would have
+explained it. Watched means the window is the current window of a session with a client attached, so
+a turn ending while you are detached keeps its glyph until you come back.
+
 ## The bell, and colour
 
 For the end states (`waiting`, `error` and `done`, thus not `working`) a terminal bell (`\a`) is printed.
 With `monitor-bell on`, tmux gives you the window highlight, in whatever way you configure it.
 To not interfere with your own highlight format, this tool deliberately does not colour or name windows.
 
-If you want `error` to stand out further, the shipped snippet carries an opt-in one-liner for it.
+If you want `error` to stand out further, the shipped snippet shows an opt-in one-liner for it.
 
 ## Interoperability
 
@@ -174,7 +192,12 @@ term to.
 
 - An agent that dies without firing `Stop` leaves a permanent 🤖. We're planning a future `stale` 💤 state
   that decays from `working` after a timeout.
-- A **zoomed** pane's siblings are hidden, but are still cleared when looking at the tmux window.
+- A **zoomed** pane's siblings are hidden, but tmux still calls the whole window watched: their
+  states clear when you look at the window, and a turn ending in a hidden sibling while you watch
+  rings the bell and leaves no glyph.
+- The same goes for a terminal window behind another tab, desktop or monitor: the client is
+  attached, so tmux says you are looking. We're planning to read the client's focus flag so those
+  keep their glyph.
 - Creating or splitting a pane counts as looking at that window, so it clears the window's
   non-sticky states.
 - Only agents that can push lifecycle events get a glyph at all. An absent glyph means "no signal".
