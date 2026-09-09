@@ -44,8 +44,9 @@ The `set` commands go on the agent's turn events. `reset` goes on session start 
 the previous agent left in the pane; `finish` goes on session end and resolves the session to done,
 leaving an `error` alone. Neither of those two rings the bell.
 
-The installation notes show how to do this per agent. Claude Code has a plugin that carries the
-hook set for you; see [step 4](#claude-code).
+The [docs/agents](docs/agents/README.md) pages give the drop-in file or manual
+config for each supported agent. Claude Code has a plugin that carries the hook
+set for you; see [step 4](#claude-code).
 
 ## Install
 

@@ -44,13 +44,16 @@ and add it to the home-manager module:
 home.packages = [ inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status ];
 ```
 
-**2. The tmux snippet, at a stable path.**
+**2. The tmux snippet and agent drop-ins, at stable paths.**
 
 Place the tmux-agent-status configuration at a deliberate path such that it can be imported from `.tmux.conf`:
 ```nix
 home.file.".tmux/tmux-agent-status.conf".source =
   "${inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status}/share/tmux/tmux-agent-status.conf";
 ```
+
+Agent-specific drop-in files are under `${pkg}/share/agents/<agent>/`. Copy the one
+for your agent to the location its documentation describes.
 
 Then add the following line to `.tmux.conf`:
 ```tmux

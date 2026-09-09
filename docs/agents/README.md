@@ -6,7 +6,7 @@ that says the event does not exist.
 
 | Agent | Shape | Drop-in file | Needs enabling | Subagent events | Multi-session per pane | `error` event | `waiting` repeats | Stdout parsed | Payload on stdin | `TMUX_PANE` inherited | Session start | Session end | Verified |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| [Claude Code](claude.md) | A (plugin) | yes, via plugin | no | no | no | `StopFailure` | `Notification` | yes | yes | yes | yes | yes | plugin API |
+| Claude Code ([README](../../README.md#claude-code)) | A (plugin) | yes, via plugin | no | no | no | `StopFailure` | `Notification` | yes | yes | yes | yes | yes | plugin API |
 | [Codex CLI](codex.md) | A | yes | no | `SubagentStart`/`SubagentStop` | unknown | inferred | `PermissionRequest` | yes | yes | unknown | yes | yes | 2026-09-09 |
 | [GitHub Copilot CLI](copilot.md) | A | yes | no | yes | unknown | `errorOccurred` | `notification` | yes | unknown | unknown | yes | yes | 2026-09-09 |
 | [Droid](droid.md) | A | yes | no | `SubagentStop` only | unknown | inferred | `Notification` | yes | yes | unknown | yes | yes | 2026-09-09 |
