@@ -47,32 +47,24 @@ leaving an `error` alone. Neither of those two rings the bell.
 The [docs/agents](docs/agents/README.md) pages give the manaul config, drop-in file or plugin for each supported agent, [Claude Code](docs/agents/claude-code.md) included.
 
 ## Install
+Installation consists of 4 steps:
+1. Install the `tmux-agent-status` cli
+2. include the `tmux-agent-status.conf` into your tmux config to hook onto tmux's events.
+3. include the `agent_status` placeholder in your tmux's window status format.
+4. register the `tmux-agent-status` commands as agent hooks.
 
-See [docs/install.md](docs/install.md) on how to install the helper command line tool (nix flake input, `nix profile`, a prebuilt binary,
-`cargo`, and building from source).
-
-After installing the command line tool, there are three things left:
- - include the `tmux-agent-status.conf` into your tmux config to hook onto tmux's events.
- - include the `agent_status` placeholder in your tmux's window status format.
- - register the `tmux-agent-status` commands as agent hooks.
-
-## Set up
-
-**1. Check the binary.**
-After installing, verify the binary is available: `tmux-agent-status --version` should print the version and the executable that is actually running.
+**1. Install the `tmux-agent-status` cli**
+See [docs/install.md](docs/install.md) on how to install the helper command line tool (nix flake input, `nix profile`, a prebuilt binary, `cargo`, and building from source).
 
 **2. Source the tmux snippet.**
 It ships at [`share/tmux/tmux-agent-status.conf`](./share/tmux/tmux-agent-status.conf) in the package.
-Import it from your tmux configuration using the path where you installed it. For example, if you placed it in `~/.tmux`:
+Its location on your disk depends on your installation method; see the [installation path guidance](docs/install.md#choose-installation-paths).
+Import it from your tmux configuration using the path where you installed it.
+For example, if you placed it in `~/.tmux`:
 
 ```tmux
 source-file ~/.tmux/tmux-agent-status.conf
 ```
-
-The snippet may live elsewhere; see the [installation path guidance](docs/install.md#choose-installation-paths).
-
-It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls.
-Can be confirmed with `tmux show-hooks -g | grep tmux-agent-status` and `tmux show-hooks -gw | grep tmux-agent-status`.
 
 **3. Include the glyph term in your tmux window format.**
 Paste the following format term into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before the window flags:
@@ -88,10 +80,9 @@ set -g window-status-format '#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@a
 ```
 
 The name segment stays whatever you already had.
-You can confirm it renders by setting a glyph by hand: `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.
 
 **Optional: terminal & tmux bell and the tmux highlight.**
-The tool writes a `\a` to the tmux pane. You can configure tmux with what you want to be done with it:
+The tool writes a bell (`\a`) to the tmux pane. You can configure tmux behavior as you like:
 
 | Setting | What it decides | Suggested |
 | --- | --- | --- |
@@ -100,6 +91,8 @@ The tool writes a `\a` to the tmux pane. You can configure tmux with what you wa
 | `visual-bell` | Whether the bell stays a bell. `on` replaces it with a tmux message, so your terminal never sees it. | `off` (tmux default) |
 | `window-status-bell-style` | How a window that rang is painted until you visit it. It only ever applies to windows you are *not* on: tmux drops the flag of the current window immediately. | to taste |
 
+
+For example:
 ```tmux
 setw -g monitor-bell on
 set -g bell-action any
@@ -109,31 +102,45 @@ setw -g window-status-bell-style 'fg=magenta,bold,nodim'
 
 The price of `any` is that every other bell from the window you are on reaches the terminal as well:
 a shell completion beep, vim hitting the end of a search, and an agent finishing in the window you
-are already watching. The benefit is that you also get a bell on tabs in your terminal if the
-active tmux window rang. If you are in one terminal tab, and in another you have a tmux session with an agent,
-and that agent is in the active window, it will get a terminal bell with `any`, and no terminal bell otherwise.
+are already watching.
+The benefit is that you also get a bell on tabs in your terminal if the active tmux window rang.
+If you are in one terminal tab, and in another you have a tmux session with an agent, and that agent
+is in the active window, it will only get a terminal bell with `bell-action any`.
 
-What your terminal then does with that bell is its own business, and it is often not a sound.
-Ghostty, for example, prefixes the tab title with 🔔 and asks for attention while it is unfocused,
-and stays silent unless you enable a sound in `bell-features`. So the bell tells you *which tab*,
-and the glyph tells you *which window*.
+What your terminal then does with that bell can be configured in the terminal.
+Ghostty, for example, by default prefixes the tab title with 🔔 and asks for attention while it is unfocused,
+and stays silent unless you enable a sound in `bell-features`.
+
+In this way, the bell tells you *which tab*, and the glyph tells you *which window*.
 
 **4. Register the agent hooks.**
 
-Claude Code has a plugin, for other agents manually edit its configuration.
+Follow [docs/agents/README.md](docs/agents/README.md) for instructions to watch your agent of choice.
 
-### Configure agents
+Depending on the agent, this can be done manually, by copying a file, or installing a plugin.
 
-Follow [docs/agents/README.md](docs/agents/README.md) for instructions to watch your agent of choice, it refers to a page per agent.
+## Validation
 
-For example, see [docs/agents/claude-code.md](docs/agents/claude-code.md) for the plugin, the manual hook merge,
-the event mapping of Claude.
+Now you should be ready to go.
+If you want to verify the parts, that can be done as follows.
+
+To verify the tool is installed and on your path:
+```sh
+tmux-agent-status --version
+```
+
+The tmux hooks can be confirmed with:
+```sh
+tmux show-hooks -g | grep tmux-agent-status    # session-window-changed
+tmux show-hooks -gw | grep tmux-agent-status   # window-pane-changed
+```
+
+The tmux window status glyph rendering can be verified by setting a glyph by hand in tmux: `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.
 
 ## How it works
 
-The `tmux-agent-status` executable is called from your coding agent's lifecycle hooks. It writes
-a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window,
-and rings the terminal bell.
+The `tmux-agent-status` executable is called from your coding agent's lifecycle hooks.
+It writes a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window, and rings the terminal bell.
 
 We use two tmux options, separating status from final glyph:
 
@@ -141,15 +148,19 @@ We use two tmux options, separating status from final glyph:
 - **`@agent_status`**, per window, holds the glyph. The maximum by rank over that window's panes,
   recomputed after every write. This is what's interpolated in the format string.
 
-They have different names because tmux option inheritance returns the window's value when reading a
-pane without a value.
+They have different names, as tmux option inheritance uses the window properties as fallback for pane properties.
 
-Looking at a window clears it. Switching to a window, or to another pane inside it, drops that
-window's `waiting`, `error` and `done`; `working` survives, because otherwise an agent you glance at
-would go blank while it is still running. A turn that ends on the window you are **already** watching
-is cleared on the spot: the bell rings and no glyph appears, because you are looking at the pane that
-would have explained it. Watched means the window is the current window of a session with a client attached, so
-a turn ending while you are detached keeps its glyph until you come back.
+Looking at a window clear it.
+This is achieved by two tmux hooks, both calling `tmux-agent-status clear-window <pane>`, which clears the status
+for the focused window.
+
+Therefore, switching to a window, or to another pane inside it, drops that window's `waiting`, `error` and `done`;
+`working` survives, because otherwise an agent you glance at would go blank while it is still running.
+A turn that ends on the window you are **already** watching is cleared on the spot: the bell rings and no glyph appears,
+because you are looking at the pane that would have explained it.
+Watched means the window is the current window of a session with a client attached, so a turn ending while you
+are detached keeps its glyph until you come back.
+If this happens on a different tab in your terminal, we still raise the bell.
 
 ## The bell, and colour
 
@@ -177,19 +188,20 @@ It is also documented in the [shipped snippet](./share/tmux/tmux-agent-status.co
 
 ## Interoperability
 
-`@agent_pane_status` and `@agent_status` are this tool's entire tmux footprint, so anything owning a
-different option prefix can stay installed alongside it.
-The one shared resource is the format string specifying the window name, where this tool appends one
-term to.
+The tool deliberately stays as independent and small as possible. It doesn't require any deamon processes, nor
+spawns subporcesses. It should also not interfere with your other agent or custom tmux configuration.
+
+The only footprint within tmux are the two variables `@agent_pane_status` and `@agent_status` .
+
+Then you can use the format string in a way you like.
 
 ## Disabling
 
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every subcommand into a no-op that exits 0. No tmux
-options are written, no bell rings - the binary returns success immediately. Any non-empty value
-counts; the documented spelling is `=1`.
+Set `TMUX_AGENT_STATUS_DISABLED=1` to make the cli a no-op that always exits 0.
+No tmux options are written, no bell rings, the binary returns success immediately.
+Actually, any non-empty value counts; the documented spelling is `=1`.
 
-Useful for CI, demo recordings, nested test sessions, or any environment where the hooks fire but
-you do not want the glyphs.
+This can be useful for CI, demo recordings, nested test sessions, or any environment where the agent hooks fire but you do not want the glyphs.
 
 ## Known limits
 
