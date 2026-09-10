@@ -1,12 +1,13 @@
 //! Argument dispatch and exit codes. All behaviour lives in the library.
 
+use std::fmt;
 use std::io::{self, IsTerminal, Read, Write};
 use std::process::ExitCode;
 
 use pico_args::Arguments;
 use tmux_agent_status::command;
 use tmux_agent_status::notify;
-use tmux_agent_status::state::State;
+use tmux_agent_status::state::{State, UnknownState};
 
 /// A wrong invocation: a bug in the caller's hook config, and so a loud one.
 const USAGE_ERROR: u8 = 2;
@@ -18,7 +19,46 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<ExitCode, String> {
+#[derive(Debug)]
+enum MainError {
+    Usage(String),
+}
+
+impl fmt::Display for MainError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MainError::Usage(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for MainError {}
+
+impl From<&str> for MainError {
+    fn from(message: &str) -> Self {
+        MainError::Usage(message.to_owned())
+    }
+}
+
+impl From<String> for MainError {
+    fn from(message: String) -> Self {
+        MainError::Usage(message)
+    }
+}
+
+impl From<pico_args::Error> for MainError {
+    fn from(error: pico_args::Error) -> Self {
+        MainError::Usage(error.to_string())
+    }
+}
+
+impl From<UnknownState> for MainError {
+    fn from(error: UnknownState) -> Self {
+        MainError::Usage(error.to_string())
+    }
+}
+
+fn run() -> Result<ExitCode, MainError> {
     let mut pargs = Arguments::from_vec(std::env::args_os().skip(1).collect());
 
     if pargs.contains(["-h", "--help"]) {
@@ -31,9 +71,8 @@ fn run() -> Result<ExitCode, String> {
     }
 
     let subcommand = pargs
-        .subcommand()
-        .map_err(|e| e.to_string())?
-        .ok_or("no command given".to_string())?;
+        .subcommand()?
+        .ok_or(MainError::from("no command given"))?;
 
     match subcommand.as_str() {
         "set" => run_set(pargs),
@@ -44,37 +83,42 @@ fn run() -> Result<ExitCode, String> {
         _ => {
             let free = free_strings(pargs)?;
             if free.is_empty() {
-                Err(format!("unexpected arguments: {subcommand}"))
+                Err(MainError::from(format!(
+                    "unexpected arguments: {subcommand}"
+                )))
             } else {
-                Err(format!(
+                Err(MainError::from(format!(
                     "unexpected arguments: {subcommand} {}",
                     free.join(" ")
-                ))
+                )))
             }
         }
     }
 }
 
-fn run_set(mut pargs: Arguments) -> Result<ExitCode, String> {
+fn run_set(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     let free = free_strings(pargs)?;
 
     if free.is_empty() {
-        return Err("set requires a state".to_string());
+        return Err(MainError::from("set requires a state"));
     }
     if free.len() > 1 {
         let mut all = vec!["set".to_string()];
         all.extend(free);
-        return Err(format!("unexpected arguments: {}", all.join(" ")));
+        return Err(MainError::from(format!(
+            "unexpected arguments: {}",
+            all.join(" ")
+        )));
     }
 
-    let state = free[0].parse::<State>().map_err(|e| e.to_string())?;
+    let state = free[0].parse::<State>()?;
     let pane = pane.as_deref();
     Ok(run_hook(|| command::set(state, pane), json))
 }
 
-fn run_reset(mut pargs: Arguments) -> Result<ExitCode, String> {
+fn run_reset(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     reject_extra(pargs, "reset")?;
@@ -82,7 +126,7 @@ fn run_reset(mut pargs: Arguments) -> Result<ExitCode, String> {
     Ok(run_hook(|| command::reset(pane), json))
 }
 
-fn run_finish(mut pargs: Arguments) -> Result<ExitCode, String> {
+fn run_finish(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     reject_extra(pargs, "finish")?;
@@ -90,7 +134,7 @@ fn run_finish(mut pargs: Arguments) -> Result<ExitCode, String> {
     Ok(run_hook(|| command::finish(pane), json))
 }
 
-fn run_clear_window(mut pargs: Arguments) -> Result<ExitCode, String> {
+fn run_clear_window(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let pane_flag = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     let free = free_strings(pargs)?;
@@ -98,7 +142,10 @@ fn run_clear_window(mut pargs: Arguments) -> Result<ExitCode, String> {
     if free.len() > 1 {
         let mut all = vec!["clear-window".to_string()];
         all.extend(free);
-        return Err(format!("unexpected arguments: {}", all.join(" ")));
+        return Err(MainError::from(format!(
+            "unexpected arguments: {}",
+            all.join(" ")
+        )));
     }
 
     let positional = free.first().map(|s| s.as_str());
@@ -106,12 +153,12 @@ fn run_clear_window(mut pargs: Arguments) -> Result<ExitCode, String> {
     Ok(run_hook(|| command::clear_window(pane), json))
 }
 
-fn run_notify(mut pargs: Arguments) -> Result<ExitCode, String> {
+fn run_notify(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let from_stdin = pargs.contains("--stdin");
     let agent = pargs
         .opt_value_from_fn("--agent", |s: &str| Ok::<_, &'static str>(s.to_owned()))
-        .map_err(|_| "--agent requires a value".to_string())?
-        .ok_or("notify requires --agent".to_string())?;
+        .map_err(|_| MainError::from("--agent requires a value"))?
+        .ok_or(MainError::from("notify requires --agent"))?;
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     let free = free_strings(pargs)?;
@@ -120,7 +167,10 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, String> {
         if !free.is_empty() {
             let mut all = vec!["notify".to_string()];
             all.extend(free);
-            return Err(format!("unexpected arguments: {}", all.join(" ")));
+            return Err(MainError::from(format!(
+                "unexpected arguments: {}",
+                all.join(" ")
+            )));
         }
         if std::io::stdin().is_terminal() {
             debug("notify: --stdin with a terminal is a no-op");
@@ -137,12 +187,15 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, String> {
         buf
     } else {
         match free.as_slice() {
-            [] => return Err("notify requires a payload or --stdin".to_string()),
+            [] => return Err(MainError::from("notify requires a payload or --stdin")),
             [payload] => payload.clone(),
             _ => {
                 let mut all = vec!["notify".to_string()];
                 all.extend(free);
-                return Err(format!("unexpected arguments: {}", all.join(" ")));
+                return Err(MainError::from(format!(
+                    "unexpected arguments: {}",
+                    all.join(" ")
+                )));
             }
         }
     };
@@ -172,29 +225,32 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn pane_value(pargs: &mut Arguments) -> Result<Option<String>, String> {
+fn pane_value(pargs: &mut Arguments) -> Result<Option<String>, MainError> {
     pargs
         .opt_value_from_fn("--pane", |s: &str| Ok::<_, &'static str>(s.to_owned()))
-        .map_err(|_| "--pane requires a value".to_string())
+        .map_err(|_| MainError::from("--pane requires a value"))
 }
 
-fn free_strings(pargs: Arguments) -> Result<Vec<String>, String> {
+fn free_strings(pargs: Arguments) -> Result<Vec<String>, MainError> {
     pargs
         .finish()
         .into_iter()
         .map(|os| {
             os.into_string()
-                .map_err(|_| "argument is not valid UTF-8".to_string())
+                .map_err(|_| MainError::from("argument is not valid UTF-8"))
         })
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn reject_extra(pargs: Arguments, command: &str) -> Result<(), String> {
+fn reject_extra(pargs: Arguments, command: &str) -> Result<(), MainError> {
     let free = free_strings(pargs)?;
     if !free.is_empty() {
         let mut all = vec![command.to_string()];
         all.extend(free);
-        return Err(format!("unexpected arguments: {}", all.join(" ")));
+        return Err(MainError::from(format!(
+            "unexpected arguments: {}",
+            all.join(" ")
+        )));
     }
     Ok(())
 }
@@ -249,7 +305,7 @@ fn flag(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|value| !value.is_empty())
 }
 
-fn usage_error(message: &str) -> ExitCode {
+fn usage_error(message: &MainError) -> ExitCode {
     eprintln!("tmux-agent-status: {message}");
     eprint!("{}", help());
     ExitCode::from(USAGE_ERROR)

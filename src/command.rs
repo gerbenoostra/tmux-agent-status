@@ -49,9 +49,13 @@ pub fn reset(pane: Option<&str>) -> io::Result<()> {
         return Ok(());
     };
     let mut window = tmux::window(&pane)?;
-    for reporter in window.panes.iter_mut().filter(|listed| listed.pane == pane) {
-        if reporter.status.is_some() {
-            tmux::clear_pane_status(&pane)?;
+    if window
+        .panes
+        .iter()
+        .any(|listed| listed.pane == pane && listed.status.is_some())
+    {
+        tmux::clear_pane_status(&pane)?;
+        for reporter in window.panes.iter_mut().filter(|listed| listed.pane == pane) {
             reporter.status = None;
         }
     }
