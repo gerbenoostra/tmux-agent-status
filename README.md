@@ -93,12 +93,16 @@ set -g window-status-format '#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@a
 The name segment stays whatever you already had. Confirm it renders by setting a glyph by hand:
 `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.
 
-If you want to highlight or colour the window title when the bell has rung, add this to `~/.tmux.conf`:
+If you want to highlight or colour the window title when the bell has rung, add something like this to `~/.tmux.conf`:
 ```tmux
 setw -g monitor-bell on
 set -g bell-action other
 setw -g window-status-bell-style 'fg=magenta,bold,nodim'
 ```
+The above example:
+1) monitors the bell to highlight windows
+2) only highlights the non-active windows (=other)
+3) specifies which formatting should be applied.
 
 **4. Register the agent hooks.**
 
