@@ -136,6 +136,19 @@ Its helpers set `TMUX`/`TMUX_PANE`/`PATH` but never cleared `TMUX_AGENT_STATUS_P
 most of the file into vacuous passes. Both files now build every invocation through one helper that
 clears all three.
 
+### 15. Claude Code had no `share/agents/` entry
+
+Not a review finding, done in the same branch. Claude Code's hook set only existed in the plugin and
+in the root `README`, so a user who installed through nix, a tarball or `cargo` had no copy of it -
+the one agent with a first-class integration was the one agent missing from the install tree. It now
+ships as `share/agents/claude-code/hooks.json`, byte for byte the plugin's own `hooks/hooks.json`
+with a test asserting it stays that way, plus `docs/agents/claude-code.md` in the shape every other
+agent page uses. Claude Code has no hooks drop-in directory, so the page documents a merge into
+`settings.json` and recommends the plugin first.
+
+The directory is `claude-code`, not `claude`, because the page it implies would be
+`docs/agents/claude.md` and that collides with `CLAUDE.md` on a case-insensitive filesystem.
+
 New coverage for items 1, 7, 8 and 9: an empty `--pane` falls back and, outside tmux, runs no tmux
 command at all; a disabled `notify --stdin` still drains a 256 KiB payload; `DEBUG=true` logs;
 `--stdin` with a leftover positional exits 2.

@@ -1,7 +1,7 @@
-//! The Claude Code hook set exists twice: as the plugin's `hooks/hooks.json`, which is what
-//! actually runs, and as the README's table, which is what a reader believes. These tests fail
-//! when the two stop saying the same thing, and when the plugin's version stops tracking the
-//! crate's.
+//! The Claude Code hook set exists three times: as the plugin's `hooks/hooks.json`, which is what
+//! actually runs, as `share/agents/claude-code/hooks.json`, which is what an installed user copies or
+//! merges, and as the README's table, which is what a reader believes. These tests fail when they
+//! stop saying the same thing, and when the plugin's version stops tracking the crate's.
 //!
 //! Everything here parses files this repository owns, so the parsing is deliberately strict: a
 //! shape it does not recognise is a failure, not something to skip over.
@@ -223,5 +223,24 @@ fn marketplace_points_at_the_plugin() {
     assert!(
         dir.join(".claude-plugin/plugin.json").is_file(),
         "the marketplace entry's source {source} holds no plugin manifest"
+    );
+}
+
+/// The shipped drop-in and the plugin's hooks are one file in two places.
+///
+/// The plugin is only reachable from a checkout or the marketplace; a user who installed the
+/// binary through nix, a tarball or cargo gets `share/agents/claude-code/hooks.json` instead. Two
+/// copies of a hook set drift, and a drifted copy is a glyph that is wrong for exactly the users
+/// who never see the plugin, so they are asserted byte for byte.
+#[test]
+fn the_shipped_claude_drop_in_is_the_plugin_hook_set() {
+    let plugin = plugin_dir().join("hooks/hooks.json");
+    let shipped = repo_root().join("share/agents/claude-code/hooks.json");
+    assert_eq!(
+        read(&shipped),
+        read(&plugin),
+        "{} and {} must be identical",
+        shipped.display(),
+        plugin.display()
     );
 }
