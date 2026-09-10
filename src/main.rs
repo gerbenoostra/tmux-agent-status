@@ -1,9 +1,9 @@
 //! Argument dispatch and exit codes. All behaviour lives in the library.
 
-use std::env;
 use std::io::{self, IsTerminal, Read, Write};
 use std::process::ExitCode;
 
+use pico_args::Arguments;
 use tmux_agent_status::command;
 use tmux_agent_status::notify;
 use tmux_agent_status::state::State;
@@ -12,110 +12,122 @@ use tmux_agent_status::state::State;
 const USAGE_ERROR: u8 = 2;
 
 fn main() -> ExitCode {
-    let mut args: Vec<String> = env::args().skip(1).collect();
-    let json = extract_json(&mut args);
-    let pane = match extract_pane(&mut args) {
-        Ok(pane) => pane,
-        Err(err) => return usage_error(&err),
-    };
-    let pane_ref = pane.as_deref();
+    match run() {
+        Ok(code) => code,
+        Err(err) => usage_error(&err),
+    }
+}
 
-    match args.as_slice() {
-        [cmd, state] if cmd == "set" => match state.parse::<State>() {
-            Ok(state) => run_hook(|| command::set(state, pane_ref), json),
-            Err(err) => usage_error(&err.to_string()),
-        },
-        [cmd, ..] if cmd == "set" => usage_error("set requires a state"),
-        [cmd] if cmd == "reset" => run_hook(|| command::reset(pane_ref), json),
-        [cmd] if cmd == "finish" => run_hook(|| command::finish(pane_ref), json),
-        [cmd] if cmd == "clear-window" => run_hook(|| command::clear_window(pane_ref), json),
-        [cmd, positional] if cmd == "clear-window" => run_hook(
-            || command::clear_window(pane_ref.or(Some(positional.as_str()))),
-            json,
-        ),
-        [cmd, ..] if cmd == "notify" => match run_notify(args, pane_ref, json) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(err) => usage_error(&err),
-        },
-        // Written for humans on stdout, so `--help | less` works. The hook
-        // commands themselves never write to stdout at all.
-        [cmd] if cmd == "--help" || cmd == "-h" => {
-            print!("{}", help());
-            ExitCode::SUCCESS
+fn run() -> Result<ExitCode, String> {
+    let mut pargs = Arguments::from_vec(std::env::args_os().skip(1).collect());
+
+    if pargs.contains(["-h", "--help"]) {
+        print!("{}", help());
+        return Ok(ExitCode::SUCCESS);
+    }
+    if pargs.contains(["-V", "--version"]) {
+        println!("{}", version());
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let subcommand = pargs
+        .subcommand()
+        .map_err(|e| e.to_string())?
+        .ok_or("no command given".to_string())?;
+
+    match subcommand.as_str() {
+        "set" => run_set(pargs),
+        "reset" => run_reset(pargs),
+        "finish" => run_finish(pargs),
+        "clear-window" => run_clear_window(pargs),
+        "notify" => run_notify(pargs),
+        _ => {
+            let free = free_strings(pargs)?;
+            if free.is_empty() {
+                Err(format!("unexpected arguments: {subcommand}"))
+            } else {
+                Err(format!(
+                    "unexpected arguments: {subcommand} {}",
+                    free.join(" ")
+                ))
+            }
         }
-        [cmd] if cmd == "--version" || cmd == "-V" => {
-            println!("{}", version());
-            ExitCode::SUCCESS
-        }
-        [] => usage_error("no command given"),
-        _ => usage_error(&format!("unexpected arguments: {}", args.join(" "))),
     }
 }
 
-/// Pull `--pane <id>` out of the argument list if present.
-///
-/// Returns an error when `--pane` is the last argument with no value.
-fn extract_pane(args: &mut Vec<String>) -> Result<Option<String>, String> {
-    let Some(pos) = args.iter().position(|arg| arg == "--pane") else {
-        return Ok(None);
-    };
-    args.remove(pos);
-    if pos >= args.len() {
-        return Err("--pane requires a value".into());
+fn run_set(mut pargs: Arguments) -> Result<ExitCode, String> {
+    let pane = pane_value(&mut pargs)?;
+    let json = pargs.contains("--json");
+    let free = free_strings(pargs)?;
+
+    if free.is_empty() {
+        return Err("set requires a state".to_string());
     }
-    Ok(Some(args.remove(pos)))
-}
-
-fn extract_agent(args: &mut Vec<String>) -> Result<Option<String>, String> {
-    let Some(pos) = args.iter().position(|arg| arg == "--agent") else {
-        return Ok(None);
-    };
-    args.remove(pos);
-    if pos >= args.len() {
-        return Err("--agent requires a value".into());
+    if free.len() > 1 {
+        let mut all = vec!["set".to_string()];
+        all.extend(free);
+        return Err(format!("unexpected arguments: {}", all.join(" ")));
     }
-    Ok(Some(args.remove(pos)))
+
+    let state = free[0].parse::<State>().map_err(|e| e.to_string())?;
+    let pane = pane.as_deref();
+    Ok(run_hook(|| command::set(state, pane), json))
 }
 
-fn extract_stdin(args: &mut Vec<String>) -> bool {
-    let Some(pos) = args.iter().position(|arg| arg == "--stdin") else {
-        return false;
-    };
-    args.remove(pos);
-    true
+fn run_reset(mut pargs: Arguments) -> Result<ExitCode, String> {
+    let pane = pane_value(&mut pargs)?;
+    let json = pargs.contains("--json");
+    reject_extra(pargs, "reset")?;
+    let pane = pane.as_deref();
+    Ok(run_hook(|| command::reset(pane), json))
 }
 
-fn extract_json(args: &mut Vec<String>) -> bool {
-    let Some(pos) = args.iter().position(|arg| arg == "--json") else {
-        return false;
-    };
-    args.remove(pos);
-    true
+fn run_finish(mut pargs: Arguments) -> Result<ExitCode, String> {
+    let pane = pane_value(&mut pargs)?;
+    let json = pargs.contains("--json");
+    reject_extra(pargs, "finish")?;
+    let pane = pane.as_deref();
+    Ok(run_hook(|| command::finish(pane), json))
 }
 
-/// Run the shape-B `notify` subcommand: parse the JSON payload and call the
-/// matching hook command.
-///
-/// Errors are usage errors because they mean the hook line itself is wrong. An
-/// unrecognised payload is not an error: it is silently dropped so upstream
-/// changes do not break the agent.
-fn run_notify(mut args: Vec<String>, pane: Option<&str>, json: bool) -> Result<(), String> {
-    let from_stdin = extract_stdin(&mut args);
-    let agent = extract_agent(&mut args)?.ok_or("notify requires --agent")?;
+fn run_clear_window(mut pargs: Arguments) -> Result<ExitCode, String> {
+    let pane_flag = pane_value(&mut pargs)?;
+    let json = pargs.contains("--json");
+    let free = free_strings(pargs)?;
+
+    if free.len() > 1 {
+        let mut all = vec!["clear-window".to_string()];
+        all.extend(free);
+        return Err(format!("unexpected arguments: {}", all.join(" ")));
+    }
+
+    let positional = free.first().map(|s| s.as_str());
+    let pane = pane_flag.as_deref().or(positional);
+    Ok(run_hook(|| command::clear_window(pane), json))
+}
+
+fn run_notify(mut pargs: Arguments) -> Result<ExitCode, String> {
+    let from_stdin = pargs.contains("--stdin");
+    let agent = pargs
+        .opt_value_from_fn("--agent", |s: &str| Ok::<_, &'static str>(s.to_owned()))
+        .map_err(|_| "--agent requires a value".to_string())?
+        .ok_or("notify requires --agent".to_string())?;
+    let pane = pane_value(&mut pargs)?;
+    let json = pargs.contains("--json");
+    let free = free_strings(pargs)?;
 
     let payload = if from_stdin {
-        // `--stdin` takes the whole payload, so a leftover positional is a typo
-        // in the hook line and nothing else. The argv path is loud about them;
-        // this one must be too.
-        if args.len() > 1 {
-            return Err(format!("unexpected arguments: {}", args.join(" ")));
+        if !free.is_empty() {
+            let mut all = vec!["notify".to_string()];
+            all.extend(free);
+            return Err(format!("unexpected arguments: {}", all.join(" ")));
         }
         if std::io::stdin().is_terminal() {
             debug("notify: --stdin with a terminal is a no-op");
             if json {
                 let _ = writeln!(io::stdout(), "{{}}");
             }
-            return Ok(());
+            return Ok(ExitCode::SUCCESS);
         }
         let mut buf = String::new();
         // A read failure here is not a hook-config error: stdin was promised
@@ -124,12 +136,14 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>, json: bool) -> Result<(
         let _ = std::io::stdin().read_to_string(&mut buf);
         buf
     } else {
-        match args.as_slice() {
-            [_, payload] => payload.clone(),
-            [cmd] if cmd == "notify" => {
-                return Err("notify requires a payload or --stdin".into());
+        match free.as_slice() {
+            [] => return Err("notify requires a payload or --stdin".to_string()),
+            [payload] => payload.clone(),
+            _ => {
+                let mut all = vec!["notify".to_string()];
+                all.extend(free);
+                return Err(format!("unexpected arguments: {}", all.join(" ")));
             }
-            _ => return Err(format!("unexpected arguments: {}", args.join(" "))),
         }
     };
 
@@ -141,12 +155,12 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>, json: bool) -> Result<(
         if json {
             let _ = writeln!(io::stdout(), "{{}}");
         }
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
 
     match notify::dispatch(&agent, &payload) {
         Some(state) => {
-            hook(command::set(state, pane));
+            hook(command::set(state, pane.as_deref()));
         }
         None => {
             debug(&format!("notify: dropped payload for {agent}"));
@@ -154,6 +168,33 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>, json: bool) -> Result<(
     };
     if json {
         let _ = writeln!(io::stdout(), "{{}}");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn pane_value(pargs: &mut Arguments) -> Result<Option<String>, String> {
+    pargs
+        .opt_value_from_fn("--pane", |s: &str| Ok::<_, &'static str>(s.to_owned()))
+        .map_err(|_| "--pane requires a value".to_string())
+}
+
+fn free_strings(pargs: Arguments) -> Result<Vec<String>, String> {
+    pargs
+        .finish()
+        .into_iter()
+        .map(|os| {
+            os.into_string()
+                .map_err(|_| "argument is not valid UTF-8".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn reject_extra(pargs: Arguments, command: &str) -> Result<(), String> {
+    let free = free_strings(pargs)?;
+    if !free.is_empty() {
+        let mut all = vec![command.to_string()];
+        all.extend(free);
+        return Err(format!("unexpected arguments: {}", all.join(" ")));
     }
     Ok(())
 }
@@ -163,11 +204,6 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>, json: bool) -> Result<(
 /// No tmux in the environment, a server that has exited, a tmux that is not on
 /// `PATH`: all of them exit 0 and write nothing. The invocation was right; the
 /// world simply had no tmux in it.
-///
-/// This is the intentional boundary between `command.rs` (which propagates tmux
-/// I/O failures as `io::Result`) and the CLI (which decides that hook commands
-/// are allowed to fail silently). Any future command that is not a hook should
-/// route its errors differently rather than passing through `hook()`.
 fn hook(result: io::Result<()>) -> ExitCode {
     let _ = result;
     ExitCode::SUCCESS
@@ -210,7 +246,7 @@ fn debug(message: &str) {
 /// thing, and a switch that silently ignores them cannot be told apart from one
 /// that had nothing to report.
 fn flag(name: &str) -> bool {
-    env::var_os(name).is_some_and(|value| !value.is_empty())
+    std::env::var_os(name).is_some_and(|value| !value.is_empty())
 }
 
 fn usage_error(message: &str) -> ExitCode {
@@ -259,7 +295,7 @@ states: {}
 fn version() -> String {
     // The dev loop deliberately shadows the installed binary through PATH, and
     // a shadow you cannot see is a shadow that wastes an afternoon.
-    let exe = env::current_exe()
+    let exe = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or("<unknown>".to_owned());
     format!(

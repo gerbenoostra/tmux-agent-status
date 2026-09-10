@@ -6,17 +6,23 @@
 use std::io;
 use std::process::{Command, Stdio};
 
+use crate::state::State;
+
 /// Per pane, written from `$TMUX_PANE`. Never referenced by the format string.
 const PANE_OPTION: &str = "@agent_pane_status";
 
 /// Per window, the rollup. The only thing the format string reads.
 const WINDOW_OPTION: &str = "@agent_status";
 
-/// A pane and whatever `@agent_pane_status` holds for it, empty string included.
+/// A pane and whatever `@agent_pane_status` holds for it.
+///
+/// The raw string is parsed to a `State` once, at the boundary. An empty or
+/// unrecognised value is `None`, so an externally set invalid string cannot
+/// corrupt the rollup.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaneStatus {
     pub pane: String,
-    pub status: String,
+    pub status: Option<State>,
 }
 
 /// A window's panes, and whether anyone is looking at it.
@@ -141,7 +147,7 @@ fn parse_fields(line: &str) -> Option<PaneLine> {
     Some(PaneLine {
         status: PaneStatus {
             pane: pane.to_owned(),
-            status: status.to_owned(),
+            status: status.parse::<State>().ok(),
         },
         watched: is_watched(active, attached),
     })
@@ -191,7 +197,7 @@ mod tests {
     fn parse_pane_line_splits_on_tab() {
         let line = parse_pane_line("%0\tdone\t1\t1").unwrap();
         assert_eq!(line.status.pane, "%0");
-        assert_eq!(line.status.status, "done");
+        assert_eq!(line.status.status, Some(State::Done));
         assert!(line.watched);
     }
 
@@ -199,15 +205,18 @@ mod tests {
     fn parse_pane_line_allows_empty_status() {
         let line = parse_pane_line("%0\t\t0\t1").unwrap();
         assert_eq!(line.status.pane, "%0");
-        assert_eq!(line.status.status, "");
+        assert_eq!(line.status.status, None);
         assert!(!line.watched);
     }
 
     #[test]
     fn parse_pane_line_keeps_extra_tabs_in_status() {
+        // Extra tabs in the status field make the value unrecognisable, but the
+        // parser must still split the line and not panic.
         let line = parse_pane_line("%0\twaiting\textra\t0\t1").unwrap();
         assert_eq!(line.status.pane, "%0");
-        assert_eq!(line.status.status, "waiting\textra");
+        assert_eq!(line.status.status, None);
+        assert!(!line.watched);
     }
 
     #[test]
@@ -229,7 +238,7 @@ mod tests {
         // and not the tool.
         for line in ["%0\tdone\tyes\t1", "%0\tdone\t1\tmany", "%0\tdone\t\t"] {
             let parsed = parse_pane_line(line).unwrap();
-            assert_eq!(parsed.status.status, "done", "line {line:?}");
+            assert_eq!(parsed.status.status, Some(State::Done), "line {line:?}");
             assert!(!parsed.watched, "line {line:?}");
         }
     }

@@ -1,0 +1,7 @@
+{
+  "session_id": "sess-1",
+  "parent_session_id": "",
+  "transcript_path": "/tmp/transcript.md",
+  "cwd": "/home/user/project",
+  "hook_event_name": "unknown"
+}
