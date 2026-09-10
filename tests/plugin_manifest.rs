@@ -226,16 +226,34 @@ fn marketplace_points_at_the_plugin() {
     );
 }
 
-/// The shipped drop-in and the plugin's hooks are one file in two places.
+/// The shipped drop-in and the plugin's hooks are one file, reached by two paths.
 ///
 /// The plugin is only reachable from a checkout or the marketplace; a user who installed the
 /// binary through nix, a tarball or cargo gets `share/agents/claude-code/hooks.json` instead. Two
 /// copies of a hook set drift, and a drifted copy is a glyph that is wrong for exactly the users
-/// who never see the plugin, so they are asserted byte for byte.
+/// who never see the plugin, so the shipped path is a symlink onto the plugin's file rather than a
+/// copy of it. Every packaging route dereferences it - cargo, GNU `install` under nix, and the
+/// release workflow's `cp -RL` - so replacing the link with a real file is the one regression this
+/// guards, and it would be invisible in a diff.
 #[test]
 fn the_shipped_claude_drop_in_is_the_plugin_hook_set() {
     let plugin = plugin_dir().join("hooks/hooks.json");
     let shipped = repo_root().join("share/agents/claude-code/hooks.json");
+
+    let link = fs::symlink_metadata(&shipped)
+        .unwrap_or_else(|e| panic!("cannot stat {}: {e}", shipped.display()));
+    assert!(
+        link.file_type().is_symlink(),
+        "{} must stay a symlink onto {}, not become a second copy of it",
+        shipped.display(),
+        plugin.display()
+    );
+    assert_eq!(
+        fs::canonicalize(&shipped).expect("the shipped drop-in link dangles"),
+        fs::canonicalize(&plugin).expect("the plugin hook set is missing"),
+        "{} points somewhere other than the plugin hook set",
+        shipped.display()
+    );
     assert_eq!(
         read(&shipped),
         read(&plugin),

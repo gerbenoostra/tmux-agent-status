@@ -39,7 +39,9 @@ itself. To revert:
 ## Drop-in file
 
 `share/agents/claude-code/hooks.json` is the same hook set as a file, for a user who did not install
-the plugin. It is byte for byte the plugin's own `hooks/hooks.json`, and a test keeps it that way.
+the plugin. In the repository it is a symlink onto the plugin's own `hooks/hooks.json`, so the two
+cannot drift; every packaging route dereferences it, and nix, the release tarball and the crate all
+carry a real file.
 
 Claude Code has no hooks drop-in directory, so this is a **merge**, not a copy. Take the file whole
 if `~/.claude/settings.json` has no `hooks` key; if you already have one, add these eight events

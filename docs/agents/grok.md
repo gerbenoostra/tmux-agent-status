@@ -27,6 +27,19 @@ mkdir -p ~/.grok/hooks
 cp /path/to/share/agents/grok/tmux-agent-status.json ~/.grok/hooks/
 ```
 
+## The Claude Code plugin (untested)
+
+xAI documents Grok as "fully compatible with Claude Code with zero
+configuration needed", reading Claude Code marketplaces, plugins and hooks
+alongside `.grok/`, so `/plugin marketplace add gerbenoostra/tmux-agent-status`
+may well work here too.
+
+**Nobody has run it.** The plugin's hook set is written in Claude's event
+vocabulary and which of those names Grok honours is unverified: `StopFailure`
+and `Notification` have no Grok equivalent, and `UserPromptSubmit` is not in the
+event list above, so `working` might arrive only on `PostToolUse`. The drop-in
+file is the route this project stands behind for Grok.
+
 ## Prove it fired
 
 Start a Grok session in a tmux pane and check `@agent_pane_status`:

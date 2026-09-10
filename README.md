@@ -45,8 +45,9 @@ the previous agent left in the pane; `finish` goes on session end and resolves t
 leaving an `error` alone. Neither of those two rings the bell.
 
 The [docs/agents](docs/agents/README.md) pages give the drop-in file or manual
-config for each supported agent. Claude Code has a plugin that carries the hook
-set for you; see [step 4](#claude-code).
+config for each supported agent, [Claude Code](docs/agents/claude-code.md)
+included. Claude Code has a plugin that carries the hook set for you; see
+[step 4](#claude-code).
 
 ## Install
 
@@ -61,13 +62,11 @@ After installing the command line tool, there are three things left:
 ## Set up
 
 **1. Check the binary.**
-After installing, verify the binary is available: `tmux-agent-status --version` should print the version and the executable that is
-actually running.
+After installing, verify the binary is available: `tmux-agent-status --version` should print the version and the executable that is actually running.
 
 **2. Source the tmux snippet.**
 It ships at `share/tmux/tmux-agent-status.conf` in the package [here](./share/tmux/tmux-agent-status.conf).
-Import it from your tmux configuration using the path where you installed it. For example, if you
-placed it in `~/.tmux`:
+Import it from your tmux configuration using the path where you installed it. For example, if you placed it in `~/.tmux`:
 
 ```tmux
 source-file ~/.tmux/tmux-agent-status.conf
@@ -75,13 +74,11 @@ source-file ~/.tmux/tmux-agent-status.conf
 
 The snippet may live elsewhere; see the [installation path guidance](docs/install.md#choose-installation-paths).
 
-It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls. Confirm with `tmux show-hooks -g | grep tmux-agent-status` and
-`tmux show-hooks -gw | grep tmux-agent-status`: they sit in different scopes, so one command shows
-only one of them.
+It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls.
+Confirm with `tmux show-hooks -g | grep tmux-agent-status` and `tmux show-hooks -gw | grep tmux-agent-status`: they sit in different scopes, so one command shows only one of them.
 
 **3. Paste the format term.**
-Into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before
-the window flags:
+Into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before the window flags:
 
 ```tmux
 #{?@agent_status, #{@agent_status},}
@@ -113,7 +110,7 @@ Claude Code has a plugin, for other agents manually edit its configuration.
 
 There are two options, either the plugin or manually editing the hooks.
 
-**The plugin.**
+**Using the plugin.**
 
 ```
 /plugin marketplace add gerbenoostra/tmux-agent-status
@@ -128,15 +125,17 @@ You can uninstall/revert using:
 /plugin marketplace remove tmux-agent-status
 ```
 
-The plugin only carries the hook configuration. Your `~/.claude/settings.json` will be untouched, except
+The plugin only contains the hook configuration. Your `~/.claude/settings.json` will be untouched, except
 for the `enabledPlugins` and `extraKnownMarketplaces` by Claude Code.
 
 The plugin also ships `/tmux-agent-status:doctor`, a read-only check of all four setup steps.
 
-**Or the manual paste.**
+**Manual config edit.**
 [`plugins/tmux-agent-status/hooks/hooks.json`](./plugins/tmux-agent-status/hooks/hooks.json) is the
-file the plugin itself uses, and it has the shape `settings.json` wants. **Merge its `hooks` object
-into** `~/.claude/settings.json`: if you have no `hooks` key, take the file whole; if you already
+required hook definition in the shape of claude's `settings.json`. It ships as
+[`share/agents/claude-code/hooks.json`](./share/agents/claude-code/hooks.json) too, which is what an
+installed user has without a checkout - a symlink onto the same file here, a real file once packaged.
+**Merge its `hooks` object into** `~/.claude/settings.json`: if you have no `hooks` key, take the file whole; if you already
 have one, add these eight events inside it. Do not append the file as a second top-level object, and
 do not end up with two `hooks` keys - JSON's last one silently wins and the hooks you had are gone.
 
@@ -156,7 +155,7 @@ These are the hooks being watched:
 
 `SessionStart` and `SessionEnd` do not ring or report a turn. The former clears this pane's previous
 status, while the latter resolves the ending session. `Notification` must **not** be narrowed to
-permission prompts and should also catch idle events that indicate "still blocked, and has been for
+permission prompts and to also catch idle events that indicate "still blocked, and has been for
 a while".
 
 As the tool rings the bell itself, no standalone `printf '\a'` hooks for the same events are needed.
@@ -182,18 +181,18 @@ and rings the terminal bell.
 
 We use two tmux options, separating status from final glyph:
 
-- **`@agent_pane_status`**, per pane, holds the state name. Written from `$TMUX_PANE` by `set`.
+- **`@agent_pane_status`**, per pane, holds the state name of the agent in that pane. Written from `$TMUX_PANE` by `set`.
 - **`@agent_status`**, per window, holds the glyph. The maximum by rank over that window's panes,
-  recomputed after every write. The only thing the format string reads.
+  recomputed after every write. This is what's interpolated in the format string.
 
 They have different names because tmux option inheritance returns the window's value when reading a
 pane without a value.
 
 Looking at a window clears it. Switching to a window, or to another pane inside it, drops that
-window's `waiting`, `error` and `done`; `working` survives, or an agent you glance at would go blank
-while it is still running. A turn that ends on the window you are **already** watching is cleared on
-the spot: the bell rings and no glyph appears, because you are looking at the pane that would have
-explained it. Watched means the window is the current window of a session with a client attached, so
+window's `waiting`, `error` and `done`; `working` survives, because otherwise an agent you glance at
+would go blank while it is still running. A turn that ends on the window you are **already** watching
+is cleared on the spot: the bell rings and no glyph appears, because you are looking at the pane that
+would have explained it. Watched means the window is the current window of a session with a client attached, so
 a turn ending while you are detached keeps its glyph until you come back.
 
 ## The bell, and colour

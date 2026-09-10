@@ -41,7 +41,9 @@ jobs:
           cp "target/${{ matrix.target }}/release/tmux-agent-status" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
           cp share/tmux/tmux-agent-status.conf "dist/$name/share/tmux/"
-          cp -R share/agents/* "dist/$name/share/agents/"
+          # -L, not -R alone: share/agents/claude-code/hooks.json is a symlink into
+          # plugins/, which the tarball does not carry.
+          cp -RL share/agents/* "dist/$name/share/agents/"
           tar -C dist -czf "$name.tar.gz" "$name"
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
