@@ -202,7 +202,21 @@ For the end states (`waiting`, `error` and `done`, thus not `working`) a termina
 With `monitor-bell on`, tmux gives you the window highlight, in whatever way you configure it.
 To not interfere with your own highlight format, this tool deliberately does not colour or name windows.
 
-If you want `error` to stand out further, the shipped snippet shows an opt-in one-liner for it.
+If you want `error` to stand out further, paste this in front of the name segment, in both formats:
+
+```tmux
+#{?#{==:#{@agent_status},❗},#[fg=colour160#,bold#,nodim],}
+```
+
+For example:
+
+```tmux
+set -g window-status-format '#I:#{?#{==:#{@agent_status},❗},#[fg=colour160#,bold#,nodim],}#{=/25/…:#{window_name}}#{?@agent_status, #{@agent_status},}#{?window_flags,#{window_flags}, }'
+```
+
+The style runs to the end of the entry, so the name and flags turn red, and on that window it replaces
+the `window-status-bell-style` colour. `#,` escapes a comma inside `#{...}`.
+It is also documented in the [shipped snippet](./share/tmux/tmux-agent-status.conf).
 
 ## Interoperability
 
