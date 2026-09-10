@@ -53,7 +53,8 @@ home.file.".tmux/tmux-agent-status.conf".source =
 ```
 
 Agent-specific drop-in files are under `${pkg}/share/agents/<agent>/`. Copy the one
-for your agent to the location its documentation describes.
+for your agent to the location its documentation describes; see the
+[supported agents table](agents/README.md) for the full list and per-agent docs.
 
 Then add the following line to `.tmux.conf`:
 ```tmux
@@ -103,13 +104,24 @@ cp "tmux-agent-status-$tag-$target/share/tmux/tmux-agent-status.conf" "$tmux_con
 chmod 644 "$tmux_conf_dir/tmux-agent-status.conf"
 ```
 
+The tarball also carries `share/agents/<agent>/`. Copy the file for your agent to
+the location [its page](agents/README.md) describes, for example:
+
+```sh
+mkdir -p ~/.codex
+cp "tmux-agent-status-$tag-$target/share/agents/codex/hooks.json" ~/.codex/hooks.json
+```
+
 ## cargo
 
 ```sh
 cargo install --git https://github.com/gerbenoostra/tmux-agent-status
 ```
 
-This installs the binary only; take the tmux snippet from the checkout or the release tarball.
+This installs the binary only. The tmux snippet (`share/tmux/tmux-agent-status.conf`) and the
+agent drop-in files (`share/agents/<agent>/`) are not installed by cargo; take them from a checkout
+or from the release tarball, and copy the one for your agent to the location
+[its page](agents/README.md) describes.
 
 ## From source
 
@@ -127,3 +139,6 @@ chmod 755 "$bin_dir/tmux-agent-status"
 cp share/tmux/tmux-agent-status.conf "$tmux_conf_dir/tmux-agent-status.conf"
 chmod 644 "$tmux_conf_dir/tmux-agent-status.conf"
 ```
+
+The agent drop-in files are in the checkout under `share/agents/<agent>/`; copy the one for your
+agent to the location [its page](agents/README.md) describes.

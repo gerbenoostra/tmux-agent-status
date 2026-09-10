@@ -2,16 +2,16 @@
   "version": 1,
   "hooks": {
     "sessionStart": [
-      { "type": "command", "command": "tmux-agent-status reset" }
+      { "type": "command", "command": "tmux-agent-status reset >/dev/null 2>&1 || true; printf '{}\n'" }
     ],
     "sessionEnd": [
-      { "type": "command", "command": "tmux-agent-status finish" }
+      { "type": "command", "command": "tmux-agent-status finish >/dev/null 2>&1 || true; printf '{}\n'" }
     ],
     "userPromptSubmitted": [
-      { "type": "command", "command": "tmux-agent-status set working" }
+      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
     ],
     "notification": [
-      { "type": "command", "command": "tmux-agent-status set waiting" }
+      { "type": "command", "command": "tmux-agent-status set waiting >/dev/null 2>&1 || true; printf '{}\n'" }
     ],
     "agentStop": [
       { "type": "command", "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'" }

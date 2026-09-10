@@ -93,11 +93,13 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>) -> Result<(), String> {
     let from_stdin = extract_stdin(&mut args);
     let agent = extract_agent(&mut args)?.ok_or("notify requires --agent")?;
 
-    if is_disabled() {
-        return Ok(());
-    }
-
     let payload = if from_stdin {
+        // `--stdin` takes the whole payload, so a leftover positional is a typo
+        // in the hook line and nothing else. The argv path is loud about them;
+        // this one must be too.
+        if args.len() > 1 {
+            return Err(format!("unexpected arguments: {}", args.join(" ")));
+        }
         if std::io::stdin().is_terminal() {
             debug("notify: --stdin with a terminal is a no-op");
             return Ok(());
@@ -117,6 +119,14 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>) -> Result<(), String> {
             _ => return Err(format!("unexpected arguments: {}", args.join(" "))),
         }
     };
+
+    // Checked after the payload is consumed, not before: the agent is writing
+    // into a pipe, and a payload larger than the pipe buffer would block that
+    // write and then take an EPIPE on our exit. Being disabled must be
+    // invisible to the agent, which means draining what it sent us.
+    if is_disabled() {
+        return Ok(());
+    }
 
     match notify::dispatch(&agent, &payload) {
         Some(state) => hook(command::set(state, pane)),
@@ -154,17 +164,27 @@ fn run_hook(f: impl FnOnce() -> io::Result<()>) -> ExitCode {
 }
 
 fn is_disabled() -> bool {
-    env::var_os("TMUX_AGENT_STATUS_DISABLED").is_some_and(|v| !v.is_empty())
+    flag("TMUX_AGENT_STATUS_DISABLED")
 }
 
-/// Log a diagnostic to stderr when `TMUX_AGENT_STATUS_DEBUG=1` is set.
+/// Log a diagnostic to stderr when `TMUX_AGENT_STATUS_DEBUG` is set.
 ///
 /// Never used on a hot path that agents call repeatedly; reserved for shape B
 /// `notify` dropping an unrecognised event.
 fn debug(message: &str) {
-    if env::var_os("TMUX_AGENT_STATUS_DEBUG").is_some_and(|v| v == "1") {
+    if flag("TMUX_AGENT_STATUS_DEBUG") {
         eprintln!("tmux-agent-status: {message}");
     }
+}
+
+/// Whether a `TMUX_AGENT_STATUS_*` switch is on.
+///
+/// Any non-empty value counts, for every switch in the namespace. The
+/// documented spelling is `=1`, but a user who writes `=true` means the same
+/// thing, and a switch that silently ignores them cannot be told apart from one
+/// that had nothing to report.
+fn flag(name: &str) -> bool {
+    env::var_os(name).is_some_and(|value| !value.is_empty())
 }
 
 fn usage_error(message: &str) -> ExitCode {

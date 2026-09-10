@@ -22,14 +22,12 @@ fn mistral_vibe(value: &serde_json::Value) -> Option<State> {
     let event = value.get("hook_event_name")?.as_str()?;
     match event {
         "pre_tool" => Some(State::Working),
-        "post_tool" => {
-            let status = value.get("tool_status")?.as_str()?;
-            if status == "failure" {
-                Some(State::Error)
-            } else {
-                Some(State::Working)
-            }
-        }
+        // A failing tool call is not a failing turn. `error` means the turn
+        // aborted (001), and an agent whose grep found nothing is still
+        // working; mapping it to `error` would ring the bell several times a
+        // turn for a healthy one. Vibe publishes no turn-abort event, so its
+        // `error` column stays empty.
+        "post_tool" => Some(State::Working),
         "post_agent" => Some(State::Done),
         _ => None,
     }
@@ -53,9 +51,10 @@ mod tests {
     }
 
     #[test]
-    fn mistral_vibe_post_tool_failure_is_error() {
+    fn mistral_vibe_post_tool_failure_stays_working() {
+        // A failed tool call is an ordinary part of a turn, not an aborted one.
         let payload = r#"{"hook_event_name":"post_tool","tool_status":"failure"}"#;
-        assert_eq!(dispatch("mistral-vibe", payload), Some(State::Error));
+        assert_eq!(dispatch("mistral-vibe", payload), Some(State::Working));
     }
 
     #[test]
@@ -89,15 +88,19 @@ mod tests {
     }
 
     #[test]
-    fn mistral_vibe_post_tool_missing_status_is_dropped() {
-        let payload = r#"{"hook_event_name":"post_tool"}"#;
-        assert_eq!(dispatch("mistral-vibe", payload), None);
-    }
-
-    #[test]
-    fn mistral_vibe_post_tool_non_string_status_is_dropped() {
-        let payload = r#"{"hook_event_name":"post_tool","tool_status":false}"#;
-        assert_eq!(dispatch("mistral-vibe", payload), None);
+    fn mistral_vibe_post_tool_ignores_the_tool_status() {
+        // Every tool outcome is the same turn still running, so a missing or
+        // malformed `tool_status` costs nothing.
+        for payload in [
+            r#"{"hook_event_name":"post_tool"}"#,
+            r#"{"hook_event_name":"post_tool","tool_status":false}"#,
+        ] {
+            assert_eq!(
+                dispatch("mistral-vibe", payload),
+                Some(State::Working),
+                "payload {payload}"
+            );
+        }
     }
 
     #[test]

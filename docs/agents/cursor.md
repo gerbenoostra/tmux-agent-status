@@ -9,10 +9,11 @@ bidirectional JSON over stdio.
 | State | Cursor event | Command | Notes |
 | --- | --- | --- | --- |
 | reset | `sessionStart` | `tmux-agent-status reset` | |
-| working | `beforeSubmitPrompt` | `tmux-agent-status set working` | also fires on tool execution |
+| working | `beforeSubmitPrompt`, `postToolUseFailure` | `tmux-agent-status set working` | also fires on tool execution |
 | done | `stop` | `tmux-agent-status set done` | |
 | waiting | — | — | no confirmed dedicated waiting event |
-| error | `postToolUseFailure` | `tmux-agent-status set error` | |
+| error | — | — | `postToolUseFailure` is a tool result, not a turn abort |
+| finish | `sessionEnd` | `tmux-agent-status finish` | resolves a lingering `working`, no bell |
 
 `subagentStart` and `subagentStop` are deliberately **not** mapped to `done`; a
 subagent stopping does not end the parent turn.
@@ -48,6 +49,11 @@ read `done` or be empty.
   Cursor's parser does not choke on empty stdout.
 - **No confirmed `waiting` event.** If a future Cursor release adds a
   blocked-on-user hook, add it to `hooks.json` and update this page.
+- **`postToolUseFailure` is not `error`.** A failed tool call is an ordinary
+  part of a turn - a grep that matched nothing, a test run that failed - and the
+  turn is still running, so it maps to `working`. Mapping it to `error` would
+  paint ❗ and ring the bell several times during a healthy turn. Cursor
+  publishes no turn-abort event, so its `error` column stays empty.
 - **`TMUX_PANE` inheritance is undocumented.** Use `--pane #{pane_id}` or set
   `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
 

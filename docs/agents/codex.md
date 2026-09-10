@@ -7,11 +7,12 @@ Shape A agent with a drop-in JSON hook file. Codex reads `hooks.json` from
 
 | State | Codex event | Command | Notes |
 | --- | --- | --- | --- |
-| reset | `SessionStart` (`startup\|resume\|clear\|fork`) | `tmux-agent-status reset` | |
+| reset | `SessionStart` (`startup\|resume\|clear\|compact`) | `tmux-agent-status reset` | |
 | working | `UserPromptSubmit`, `PostToolUse` | `tmux-agent-status set working` | |
 | done | `Stop` | `tmux-agent-status set done` | |
 | waiting | `PermissionRequest` | `tmux-agent-status set waiting` | permission prompt |
 | error | — | — | no published error event; inferred from missing clean `Stop` |
+| finish | `SessionEnd` | `tmux-agent-status finish` | resolves a lingering `working`, no bell |
 
 `SubagentStart` and `SubagentStop` are deliberately **not** mapped to `done`; a
 subagent stopping does not end the parent turn.
@@ -40,9 +41,11 @@ read `done` or be empty.
 ## Quirks
 
 - **Hooks are on by default.** Disable with `[features] hooks = false`.
-- **`Stop`/`SubagentStop` expect JSON on stdout.** The drop-in file appends
-  `printf '{}\n'` so Codex's parser does not choke. The status commands themselves
-  write nothing to stdout.
+- **Stdout is parsed as JSON.** Codex reads a hook's stdout when it exits 0, so
+  every entry in the drop-in file appends `printf '{}\n'`. The status commands
+  themselves write nothing to stdout; the wrapper is what keeps an empty stdout
+  from reaching the parser. `PermissionRequest` is the one that matters most: a
+  permission hook that returns nothing may be read as a decision.
 - **`SessionEnd` is delayed up to 30 minutes on idle disconnect.** A crashed session
   can leave the glyph stranded for a while; this is a known Codex limit.
 - **No `error` event.** A turn that aborts leaves `working` until `SessionEnd`

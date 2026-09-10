@@ -1,6 +1,8 @@
 # 005 - Agents beyond Claude Code
 
-Status: completed - infrastructure, all selected Shape A agents, and two Shape B agents are implemented and verified.
+Status: completed - infrastructure, all selected Shape A agents, and two Shape B agents are
+implemented and verified. Review follow-ups are in `009`, which corrected four drop-in files and the
+mapping-table test that let them drift.
 
 Covers *how a second, third and fourth agent get a glyph*. The states, the rank, the rollup and the
 "absent glyph means no signal" principle are 001 and do not change here. 002 deferred this on

@@ -9,10 +9,10 @@ notify --agent mistral-vibe --stdin`.
 | State | Vibe event | Command | Notes |
 | --- | --- | --- | --- |
 | reset | — | — | no `session_start` hook type documented |
-| working | `pre_tool` | `notify --stdin` | any tool call starts/continues a turn |
+| working | `pre_tool`, `post_tool` | `notify --stdin` | any tool call starts/continues a turn |
 | done | `post_agent` | `notify --stdin` | assistant turn ended with no pending tools |
 | waiting | — | — | no blocked-on-you event documented |
-| error | `post_tool` with `tool_status = failure` | `notify --stdin` | inferred from tool result |
+| error | — | — | `post_tool` `tool_status = failure` is a tool result, not a turn abort |
 
 ## Drop-in file
 
@@ -46,6 +46,11 @@ ends cleanly it should read `done` or be empty.
   clears any stranded glyph.
 - **No confirmed `waiting` event.** `ask_user_question` is a tool call, so it only
   drives `working`.
+- **A failed tool call is not an `error`.** `post_tool` with
+  `tool_status = "failure"` means a grep matched nothing or a test run failed;
+  the turn is still running, so it maps to `working`. Mapping it to `error` would
+  paint ❗ and ring the bell several times during a healthy turn. Vibe publishes
+  no turn-abort event, so its `error` column stays empty.
 - **Subagents inherit hooks transitively.** There is no distinct subagent stop
   event; the parent's own `post_agent` is the correct `done` signal.
 - **`TMUX_PANE` inheritance is undocumented.** If Vibe's hook runner is not a

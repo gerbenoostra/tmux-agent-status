@@ -26,11 +26,11 @@
       }
     },
     {
-      "name": "tmux-agent-status-finish",
+      "name": "tmux-agent-status-done",
       "trigger": "AgentStop",
       "action": {
         "type": "command",
-        "command": "tmux-agent-status finish"
+        "command": "tmux-agent-status set done"
       }
     }
   ]

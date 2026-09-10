@@ -10,10 +10,10 @@ that says the event does not exist.
 | [Codex CLI](codex.md) | A | yes | no | `SubagentStart`/`SubagentStop` | unknown | inferred | `PermissionRequest` | yes | yes | unknown | yes | yes | 2026-09-09 |
 | [GitHub Copilot CLI](copilot.md) | A | yes | no | yes | unknown | `errorOccurred` | `notification` | yes | unknown | unknown | yes | yes | 2026-09-09 |
 | [Droid](droid.md) | A | yes | no | `SubagentStop` only | unknown | inferred | `Notification` | yes | yes | unknown | yes | yes | 2026-09-09 |
-| [Cursor](cursor.md) | A | yes | no | yes | unknown | inferred | unknown | yes | yes | unknown | yes | yes | 2026-09-09 |
-| [Grok CLI](grok.md) | A | yes | project hooks need `/hooks-trust` | inferred from tool | unknown | inferred | unknown | lenient | yes | unknown | yes | yes | 2026-09-09 |
+| [Cursor](cursor.md) | A | yes | no | yes | unknown | no | unknown | yes | yes | unknown | yes | yes | 2026-09-09 |
+| [Grok CLI](grok.md) | A | yes | project hooks need `/hooks-trust` | inferred from tool | unknown | no | unknown | lenient | yes | unknown | yes | yes | 2026-09-09 |
 | [Kiro](kiro.md) | A | yes | no | no stop event | yes | no | no | no | yes | unknown | CLI: `AgentSpawn` | no | 2026-09-09 |
-| [Mistral Vibe](mistral-vibe.md) | B | yes (TOML) | trusted-folder gate | no distinct signal | unknown | inferred | no | strict | yes | unknown | no | no | 2026-09-09 |
+| [Mistral Vibe](mistral-vibe.md) | B | yes (TOML) | trusted-folder gate | no distinct signal | unknown | no | no | strict | yes | unknown | no | no | 2026-09-09 |
 | [Gemini CLI](gemini.md) | B | manual settings.json merge | manual merge | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | 2026-09-09 |
 | OpenCode | C | N/A | N/A | unknown | yes | `session.error` | `permission.asked` | N/A | N/A | N/A | yes | inferred | deferred |
 | Antigravity | C | N/A | N/A | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unsupported |
@@ -34,7 +34,9 @@ map to `done` or stay `working`.
 - **Multi-session per pane**: whether the agent can run several sessions in one
 pane. Shape A agents cannot roll them up; the matrix records the limitation.
 - **`error` event**: a published turn-abort event, or "inferred" if it must be
-derived from tool results or the absence of a clean stop.
+derived from the absence of a clean stop. A failing tool call is not one: the
+turn is still running, so tool-failure events map to `working` and the agent's
+cell reads "no".
 - **`waiting` repeats**: a blocked-on-you event that fires repeatedly, including
 idle nags. Without the repeat, `waiting` is rarely useful.
 - **Stdout parsed**: whether the agent reads the hook's stdout as JSON. Strict

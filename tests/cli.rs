@@ -8,25 +8,30 @@ use std::process::{Command, Output, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
 
-fn run(args: &[&str]) -> Output {
-    Command::new(BIN)
-        .args(args)
+/// The binary outside tmux, with every `TMUX_AGENT_STATUS_*` variable cleared.
+///
+/// Every per-agent page recommends exporting `TMUX_AGENT_STATUS_PANE`, and the
+/// other two switches change what the binary does at all: inherited state must
+/// never decide what a test proves.
+fn command(args: &[&str]) -> Command {
+    let mut cmd = Command::new(BIN);
+    cmd.args(args)
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")
+        .env_remove("TMUX_AGENT_STATUS_PANE")
         .env_remove("TMUX_AGENT_STATUS_DISABLED")
         .env_remove("TMUX_AGENT_STATUS_DEBUG")
-        .stdin(Stdio::null())
-        .output()
-        .expect("the binary runs")
+        .stdin(Stdio::null());
+    cmd
+}
+
+fn run(args: &[&str]) -> Output {
+    command(args).output().expect("the binary runs")
 }
 
 fn run_env(args: &[&str], key: &str, value: &str) -> Output {
-    Command::new(BIN)
-        .args(args)
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
+    command(args)
         .env(key, value)
-        .stdin(Stdio::null())
         .output()
         .expect("the binary runs")
 }
@@ -225,10 +230,7 @@ fn notify_with_unparseable_payload_is_silent_no_op() {
 #[test]
 fn notify_stdin_reads_payload() {
     let payload = r#"{"hook_event_name":"pre_tool"}"#;
-    let mut child = Command::new(BIN)
-        .args(["notify", "--agent", "mistral-vibe", "--stdin"])
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
+    let mut child = command(&["notify", "--agent", "mistral-vibe", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -268,14 +270,11 @@ fn notify_rejects_extra_arguments() {
 
 #[test]
 fn notify_disabled_is_a_no_op() {
-    let out = Command::new(BIN)
-        .args(["notify", "--agent", "mistral-vibe", "{}"])
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
-        .env("TMUX_AGENT_STATUS_DISABLED", "1")
-        .stdin(Stdio::null())
-        .output()
-        .expect("the binary runs");
+    let out = run_env(
+        &["notify", "--agent", "mistral-vibe", "{}"],
+        "TMUX_AGENT_STATUS_DISABLED",
+        "1",
+    );
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
     assert!(out.stderr.is_empty());
@@ -283,19 +282,16 @@ fn notify_disabled_is_a_no_op() {
 
 #[test]
 fn notify_debug_logs_dropped_payloads() {
-    let out = Command::new(BIN)
-        .args([
+    let out = run_env(
+        &[
             "notify",
             "--agent",
             "mistral-vibe",
             r#"{"hook_event_name":"unknown"}"#,
-        ])
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
-        .env("TMUX_AGENT_STATUS_DEBUG", "1")
-        .stdin(Stdio::null())
-        .output()
-        .expect("the binary runs");
+        ],
+        "TMUX_AGENT_STATUS_DEBUG",
+        "1",
+    );
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
     let err = stderr(&out);
@@ -308,8 +304,15 @@ fn notify_debug_logs_dropped_payloads() {
 fn notify_stdin_with_terminal_is_a_no_op() {
     // Allocate a pseudo-terminal and hand the slave fd to the child as stdin.
     // The binary must detect the terminal and return without reading.
+    //
+    // The master fd stays open for the whole wait on purpose: closing it first
+    // makes a read on the slave fail with EIO immediately, so the child exits
+    // either way and the test passes with the `is_terminal()` guard removed.
+    // With the master held open a read would block forever, which is exactly
+    // the hung agent this guards against, so the wait is bounded instead.
     use std::fs::File;
     use std::os::fd::FromRawFd;
+    use std::time::{Duration, Instant};
 
     let mut master: libc::c_int = -1;
     let mut slave: libc::c_int = -1;
@@ -325,20 +328,93 @@ fn notify_stdin_with_terminal_is_a_no_op() {
     assert_eq!(rc, 0, "openpty failed");
 
     let slave_file = unsafe { File::from_raw_fd(slave) };
-    let child = Command::new(BIN)
-        .args(["notify", "--agent", "mistral-vibe", "--stdin"])
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
+    let mut child = command(&["notify", "--agent", "mistral-vibe", "--stdin"])
         .stdin(slave_file)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("the binary spawns");
 
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        match child.try_wait().expect("the child can be waited on") {
+            Some(status) => break Some(status),
+            None if Instant::now() >= deadline => break None,
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    };
+
+    if status.is_none() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
     unsafe {
         let _ = libc::close(master);
     }
+    assert!(
+        status.is_some(),
+        "--stdin with a terminal stdin blocked instead of returning"
+    );
 
+    let out = child.wait_with_output().expect("the binary runs");
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn notify_stdin_rejects_extra_arguments() {
+    // A stray word in a hook line is a typo, and the argv path is loud about
+    // them; `--stdin` swallowing them silently is the one place a typo hides.
+    let out = run(&["notify", "--agent", "mistral-vibe", "--stdin", "junk"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("unexpected arguments: notify junk"));
+}
+
+#[test]
+fn debug_accepts_any_non_empty_value() {
+    // `TMUX_AGENT_STATUS_DISABLED` takes any non-empty value, and one namespace
+    // with two spellings is a switch you cannot tell from silence.
+    for value in ["1", "true", "yes"] {
+        let out = run_env(
+            &[
+                "notify",
+                "--agent",
+                "mistral-vibe",
+                r#"{"hook_event_name":"unknown"}"#,
+            ],
+            "TMUX_AGENT_STATUS_DEBUG",
+            value,
+        );
+        assert!(out.status.success(), "{}", stderr(&out));
+        assert!(
+            stderr(&out).contains("dropped payload"),
+            "DEBUG={value} logged nothing"
+        );
+    }
+}
+
+#[test]
+fn disabled_notify_still_drains_stdin() {
+    // Being disabled must be invisible to the agent. A payload larger than the
+    // pipe buffer blocks the agent's write until someone reads it, so exiting
+    // early would hand the agent an EPIPE on a hook it was told is a no-op.
+    let payload = format!(
+        r#"{{"hook_event_name":"pre_tool","pad":"{}"}}"#,
+        "x".repeat(256 * 1024)
+    );
+    let mut child = command(&["notify", "--agent", "mistral-vibe", "--stdin"])
+        .env("TMUX_AGENT_STATUS_DISABLED", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary spawns");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin is piped");
+        stdin
+            .write_all(payload.as_bytes())
+            .expect("a disabled notify must still read what the agent sends");
+    }
     let out = child.wait_with_output().expect("the binary runs");
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());

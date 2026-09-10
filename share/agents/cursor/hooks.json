@@ -16,7 +16,7 @@
       { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
     ],
     "postToolUseFailure": [
-      { "type": "command", "command": "tmux-agent-status set error >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
     ],
     "stop": [
       { "type": "command", "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'" }

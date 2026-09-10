@@ -62,8 +62,13 @@ pub fn current_pane() -> Option<String> {
 ///
 /// `None` means the caller is not inside tmux and no override was given, so the
 /// command should silently do nothing.
+///
+/// An empty override is no override. Every per-agent page documents
+/// `--pane #{pane_id}` or `--pane "$TMUX_PANE"`, and both expand to nothing
+/// outside tmux; tmux reads an empty `-t` as *the current pane*, so an unfiltered
+/// empty value paints the glyph on whatever pane the server happens to be on.
 pub fn resolve_pane(explicit: Option<&str>) -> Option<String> {
-    if let Some(pane) = explicit {
+    if let Some(pane) = explicit.filter(|pane| !pane.is_empty()) {
         return Some(pane.to_owned());
     }
     if let Ok(pane) = std::env::var("TMUX_AGENT_STATUS_PANE") {
@@ -173,6 +178,14 @@ fn tmux(args: &[&str]) -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_explicit_pane_is_no_pane() {
+        // Whatever the environment holds, an empty `--pane` must never reach
+        // tmux: `-t ""` resolves to the current pane rather than failing.
+        assert_ne!(resolve_pane(Some("")), Some(String::new()));
+        assert_eq!(resolve_pane(Some("%7")), Some("%7".to_owned()));
+    }
 
     #[test]
     fn parse_pane_line_splits_on_tab() {

@@ -13,6 +13,7 @@ files, then `.github/hooks/*.json` (repo scope), then `~/.copilot/hooks/*.json`
 | done | `agentStop` | `tmux-agent-status set done` | |
 | waiting | `notification` | `tmux-agent-status set waiting` | captures `permission_prompt` and `agent_idle` |
 | error | `errorOccurred` | `tmux-agent-status set error` | |
+| finish | `sessionEnd` | `tmux-agent-status finish` | resolves a lingering `working`, no bell |
 
 ## Drop-in file
 
@@ -45,8 +46,9 @@ read `done` or be empty.
 - **Subagent events are explicit.** `subagentStart`/`subagentStop` exist; a
   subagent stopping does not end the parent turn, so they are deliberately not
   mapped to `done`.
-- **Stdout parsing.** Copilot CLI parses hook stdout as JSON. The shipped file
-  wraps the `done`, `error`, and subagent entries with `printf '{}\n'`.
+- **Stdout parsing.** Copilot CLI parses hook stdout as JSON per event, so
+  every entry in the shipped file appends `printf '{}\n'`. The status commands
+  write nothing to stdout themselves.
 - **`TMUX_PANE` inheritance is undocumented.** Use `--pane #{pane_id}` or set
   `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
 

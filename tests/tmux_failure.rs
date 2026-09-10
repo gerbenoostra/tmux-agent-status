@@ -37,25 +37,32 @@ fn write_fake_tmux(dir: &std::path::Path, script: &str) {
     fs::set_permissions(&path, perms).expect("chmod");
 }
 
-fn run(args: &[&str], path: &str) -> Output {
-    Command::new(BIN)
-        .args(args)
+/// The binary, in a pane, with every `TMUX_AGENT_STATUS_*` variable cleared.
+///
+/// Every per-agent page recommends exporting `TMUX_AGENT_STATUS_PANE`, so a
+/// developer who took that advice would otherwise change the pane these tests
+/// assert on; an exported `TMUX_AGENT_STATUS_DISABLED` would turn most of this
+/// file into a vacuous pass. Inherited state must not decide what a test proves.
+fn command(args: &[&str], path: &str) -> Command {
+    let mut cmd = Command::new(BIN);
+    cmd.args(args)
         .env("TMUX", TMUX)
         .env("TMUX_PANE", TMUX_PANE)
         .env("PATH", path)
-        .stdin(Stdio::null())
-        .output()
-        .expect("the binary runs")
+        .env_remove("TMUX_AGENT_STATUS_PANE")
+        .env_remove("TMUX_AGENT_STATUS_DISABLED")
+        .env_remove("TMUX_AGENT_STATUS_DEBUG")
+        .stdin(Stdio::null());
+    cmd
+}
+
+fn run(args: &[&str], path: &str) -> Output {
+    command(args, path).output().expect("the binary runs")
 }
 
 fn run_disabled(args: &[&str], path: &str) -> Output {
-    Command::new(BIN)
-        .args(args)
-        .env("TMUX", TMUX)
-        .env("TMUX_PANE", TMUX_PANE)
+    command(args, path)
         .env("TMUX_AGENT_STATUS_DISABLED", "1")
-        .env("PATH", path)
-        .stdin(Stdio::null())
         .output()
         .expect("the binary runs")
 }
@@ -249,14 +256,7 @@ fn disabled_runs_no_tmux_command() {
 fn hook_is_silent_when_tmux_is_not_on_path() {
     // `Command::new("tmux")` fails before it can run anything. The hook wrapper
     // still turns this into a silent exit 0.
-    let out = Command::new(BIN)
-        .args(["set", "done"])
-        .env("TMUX", TMUX)
-        .env("TMUX_PANE", TMUX_PANE)
-        .env("PATH", "/nonexistent")
-        .stdin(Stdio::null())
-        .output()
-        .expect("the binary runs");
+    let out = run(&["set", "done"], "/nonexistent");
     assert_ok_and_silent(&out);
 }
 
@@ -278,14 +278,7 @@ fn hook_is_silent_when_tmux_is_not_executable() {
     // spawn error than a missing binary.
     let dir = fake_tmux_dir();
     fs::write(dir.join("tmux"), "#!/bin/sh\nexit 0\n").expect("write tmux stub");
-    let out = Command::new(BIN)
-        .args(["set", "done"])
-        .env("TMUX", TMUX)
-        .env("TMUX_PANE", TMUX_PANE)
-        .env("PATH", dir.display().to_string())
-        .stdin(Stdio::null())
-        .output()
-        .expect("the binary runs");
+    let out = run(&["set", "done"], &dir.display().to_string());
     assert_ok_and_silent(&out);
 }
 
@@ -297,13 +290,8 @@ fn tmux_agent_status_pane_overrides_tmux_pane() {
         &dir,
         &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", log.display()),
     );
-    let out = Command::new(BIN)
-        .args(["set", "done"])
-        .env("TMUX", TMUX)
-        .env("TMUX_PANE", TMUX_PANE)
+    let out = command(&["set", "done"], &format!("{}:", dir.display()))
         .env("TMUX_AGENT_STATUS_PANE", "%override")
-        .env("PATH", format!("{}:", dir.display()))
-        .stdin(Stdio::null())
         .output()
         .expect("the binary runs");
     assert_ok_and_silent(&out);
@@ -315,6 +303,58 @@ fn tmux_agent_status_pane_overrides_tmux_pane() {
 }
 
 #[test]
+fn an_empty_pane_flag_falls_back_to_tmux_pane() {
+    // `--pane #{pane_id}` and `--pane "$TMUX_PANE"` are what every per-agent
+    // page documents, and both expand to nothing outside tmux. tmux reads an
+    // empty `-t` as the *current* pane, so an empty flag must be no flag at all.
+    let dir = fake_tmux_dir();
+    let log = dir.join("calls");
+    write_fake_tmux(
+        &dir,
+        &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", log.display()),
+    );
+    let out = run(
+        &["set", "done", "--pane", ""],
+        &format!("{}:", dir.display()),
+    );
+    assert_ok_and_silent(&out);
+    let calls = fs::read_to_string(&log).expect("fake tmux logged calls");
+    assert!(
+        calls.contains(&format!(
+            "set-option -p -t {TMUX_PANE} @agent_pane_status done"
+        )),
+        "calls: {calls}"
+    );
+    assert!(
+        !calls.contains("set-option -p -t @agent_pane_status"),
+        "an empty pane must never be passed to tmux: {calls}"
+    );
+}
+
+#[test]
+fn an_empty_pane_flag_outside_tmux_runs_no_tmux_command() {
+    let dir = fake_tmux_dir();
+    let log = dir.join("calls");
+    write_fake_tmux(
+        &dir,
+        &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", log.display()),
+    );
+    let out = command(
+        &["set", "done", "--pane", ""],
+        &format!("{}:", dir.display()),
+    )
+    .env_remove("TMUX")
+    .env_remove("TMUX_PANE")
+    .output()
+    .expect("the binary runs");
+    assert_ok_and_silent(&out);
+    assert!(
+        !log.exists(),
+        "an empty pane outside tmux must not invoke tmux"
+    );
+}
+
+#[test]
 fn empty_tmux_agent_status_pane_falls_back_to_tmux_pane() {
     let dir = fake_tmux_dir();
     let log = dir.join("calls");
@@ -322,13 +362,8 @@ fn empty_tmux_agent_status_pane_falls_back_to_tmux_pane() {
         &dir,
         &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", log.display()),
     );
-    let out = Command::new(BIN)
-        .args(["set", "done"])
-        .env("TMUX", TMUX)
-        .env("TMUX_PANE", TMUX_PANE)
+    let out = command(&["set", "done"], &format!("{}:", dir.display()))
         .env("TMUX_AGENT_STATUS_PANE", "")
-        .env("PATH", format!("{}:", dir.display()))
-        .stdin(Stdio::null())
         .output()
         .expect("the binary runs");
     assert_ok_and_silent(&out);
@@ -351,12 +386,8 @@ fn empty_tmux_pane_means_not_in_tmux() {
         &dir,
         &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", log.display()),
     );
-    let out = Command::new(BIN)
-        .args(["set", "done"])
-        .env("TMUX", TMUX)
+    let out = command(&["set", "done"], &format!("{}:", dir.display()))
         .env("TMUX_PANE", "")
-        .env("PATH", format!("{}:", dir.display()))
-        .stdin(Stdio::null())
         .output()
         .expect("the binary runs");
     assert_ok_and_silent(&out);

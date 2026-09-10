@@ -9,7 +9,7 @@ IDE, CLI, and Web on `.kiro/hooks/*.json`.
 | --- | --- | --- | --- |
 | reset | `AgentSpawn` (CLI) / `SessionStart` (IDE) | `tmux-agent-status reset` | CLI uses `AgentSpawn`; no `SessionEnd` on CLI |
 | working | `PreToolUse` | `tmux-agent-status set working` | also `PostToolUse` to refresh the glyph |
-| done | `AgentStop` | `tmux-agent-status finish` | CLI has no explicit session-end event |
+| done | `AgentStop` | `tmux-agent-status set done` | rings the bell; the CLI has no session-end event, so there is no `finish` row |
 | waiting | — | — | no recurring blocked-on-user event |
 | error | — | — | no published error event; inferred only from hook exit code |
 
@@ -39,8 +39,10 @@ should read `done` or be empty.
 
 ## Quirks
 
-- **No `SessionEnd` on the CLI.** `AgentStop` is the clean-exit signal. If Kiro
-  crashes, the last glyph may strand until the next `AgentSpawn` in that pane.
+- **No `SessionEnd` on the CLI.** `AgentStop` ends the turn and is mapped to
+  `set done`, which rings the bell. There is no session-end trigger to map to
+  `finish`, so if Kiro crashes the last glyph may strand until the next
+  `AgentSpawn` in that pane.
 - **Multi-subagent TUI.** Kiro can run several subagents in one pane, but the
   hook table has no per-subagent stop event. The last event wins, which is a
   known limit for shape A agents.

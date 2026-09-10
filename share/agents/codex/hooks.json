@@ -2,24 +2,64 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear|fork",
-        "hooks": [{ "type": "command", "command": "tmux-agent-status reset" }]
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status reset >/dev/null 2>&1 || true; printf '{}\n'"
+          }
+        ]
       }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status finish >/dev/null 2>&1 || true; printf '{}\n'"
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'"
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'"
+          }
+        ]
+      }
     ],
     "PermissionRequest": [
-      { "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status set waiting >/dev/null 2>&1 || true; printf '{}\n'"
+          }
+        ]
+      }
     ],
     "SubagentStart": [
-      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'"
+          }
+        ]
+      }
     ],
     "SubagentStop": [
       {

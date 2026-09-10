@@ -10,9 +10,10 @@ table; the drop-in directory is the self-contained route.
 | --- | --- | --- | --- |
 | reset | `SessionStart` | `tmux-agent-status reset` | |
 | working | `PreToolUse`, `PostToolUse` | `tmux-agent-status set working` | also refreshes the glyph |
-| done | `Stop` | `tmux-agent-status finish` | |
+| done | `Stop` | `tmux-agent-status set done` | rings the bell; `finish` never does |
 | waiting | — | — | no blocked-on-user event documented |
-| error | — | — | inferred from `PostToolUse` `tool_status`; no published error event |
+| error | — | — | no published error event; a failed tool call is not a turn abort |
+| finish | `SessionEnd` | `tmux-agent-status finish` | resolves a lingering `working`, no bell |
 
 ## Drop-in file
 
@@ -39,9 +40,11 @@ read `done` or be empty.
 
 ## Quirks
 
-- **No `error` event.** A failed tool call can be inferred from `PostToolUse`
-  payload (`tool_status`/`toolResult`), but the drop-in file stays conservative
-  and maps only the confirmed lifecycle events.
+- **No `error` event.** `PostToolUse` carries `tool_status`/`toolResult`, but a
+  failed tool call is an ordinary part of a turn that is still running, not an
+  aborted turn, so it maps to `working` like any other tool event. Grok's only
+  real abort signal is `stopReason` in the headless `--output-format json`
+  output, which no hook sees.
 - **No `waiting` event.** Grok does not publish a blocked-on-user hook, so
   permission prompts or idle nags cannot drive the glyph.
 - **Subagents.** There is no dedicated subagent stop event. A `spawn_subagent`
