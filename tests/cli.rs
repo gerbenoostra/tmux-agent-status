@@ -182,6 +182,52 @@ fn disabled_does_not_hide_usage_errors() {
 }
 
 #[test]
+fn json_flag_prints_empty_object_on_hook_commands() {
+    for args in [
+        ["set", "done", "--json"].as_slice(),
+        ["reset", "--json"].as_slice(),
+        ["finish", "--json"].as_slice(),
+        ["clear-window", "--json"].as_slice(),
+    ] {
+        let out = run(args);
+        assert!(out.status.success(), "{args:?}: {}", stderr(&out));
+        assert!(out.stderr.is_empty(), "{args:?}");
+        assert_eq!(stdout(&out), "{}\n", "{args:?}");
+    }
+}
+
+#[test]
+fn json_flag_prints_empty_object_when_disabled() {
+    for args in [
+        ["set", "done", "--json"].as_slice(),
+        ["reset", "--json"].as_slice(),
+        ["finish", "--json"].as_slice(),
+        ["clear-window", "--json"].as_slice(),
+    ] {
+        let out = run_env(args, "TMUX_AGENT_STATUS_DISABLED", "1");
+        assert!(out.status.success(), "{args:?}: {}", stderr(&out));
+        assert!(out.stderr.is_empty(), "{args:?}");
+        assert_eq!(stdout(&out), "{}\n", "{args:?}");
+    }
+}
+
+#[test]
+fn json_flag_does_not_hide_usage_errors() {
+    let out = run(&["set", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("set requires a state"));
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn json_flag_works_with_pane_flag() {
+    let out = run(&["set", "done", "--pane", "%0", "--json"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stderr.is_empty());
+    assert_eq!(stdout(&out), "{}\n");
+}
+
+#[test]
 fn help_mentions_disabled_and_debug() {
     let out = run(&["--help"]);
     let text = stdout(&out);
@@ -216,6 +262,46 @@ fn notify_with_unknown_agent_is_silent_no_op() {
     let out = run(&["notify", "--agent", "no-such-agent", "{}"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn notify_json_flag_prints_empty_object() {
+    let out = run(&[
+        "notify",
+        "--agent",
+        "mistral-vibe",
+        r#"{"hook_event_name":"post_agent"}"#,
+        "--json",
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "{}\n");
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn notify_json_flag_prints_empty_object_for_unknown_agent() {
+    let out = run(&["notify", "--agent", "no-such-agent", "{}", "--json"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "{}\n");
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn notify_json_flag_prints_empty_object_when_disabled() {
+    let out = run_env(
+        &[
+            "notify",
+            "--agent",
+            "mistral-vibe",
+            r#"{"hook_event_name":"post_agent"}"#,
+            "--json",
+        ],
+        "TMUX_AGENT_STATUS_DISABLED",
+        "1",
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "{}\n");
     assert!(out.stderr.is_empty());
 }
 

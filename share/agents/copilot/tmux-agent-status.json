@@ -2,28 +2,28 @@
   "version": 1,
   "hooks": {
     "sessionStart": [
-      { "type": "command", "command": "tmux-agent-status reset >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status reset --json" }
     ],
     "sessionEnd": [
-      { "type": "command", "command": "tmux-agent-status finish >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status finish --json" }
     ],
     "userPromptSubmitted": [
-      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set working --json" }
     ],
     "notification": [
-      { "type": "command", "command": "tmux-agent-status set waiting >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set waiting --json" }
     ],
     "agentStop": [
-      { "type": "command", "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set done --json" }
     ],
     "errorOccurred": [
-      { "type": "command", "command": "tmux-agent-status set error >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set error --json" }
     ],
     "subagentStart": [
-      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set working --json" }
     ],
     "subagentStop": [
-      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set working --json" }
     ]
   }
 }

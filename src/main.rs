@@ -1,7 +1,7 @@
 //! Argument dispatch and exit codes. All behaviour lives in the library.
 
 use std::env;
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal, Read, Write};
 use std::process::ExitCode;
 
 use tmux_agent_status::command;
@@ -13,6 +13,7 @@ const USAGE_ERROR: u8 = 2;
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
+    let json = extract_json(&mut args);
     let pane = match extract_pane(&mut args) {
         Ok(pane) => pane,
         Err(err) => return usage_error(&err),
@@ -21,17 +22,18 @@ fn main() -> ExitCode {
 
     match args.as_slice() {
         [cmd, state] if cmd == "set" => match state.parse::<State>() {
-            Ok(state) => run_hook(|| command::set(state, pane_ref)),
+            Ok(state) => run_hook(|| command::set(state, pane_ref), json),
             Err(err) => usage_error(&err.to_string()),
         },
         [cmd, ..] if cmd == "set" => usage_error("set requires a state"),
-        [cmd] if cmd == "reset" => run_hook(|| command::reset(pane_ref)),
-        [cmd] if cmd == "finish" => run_hook(|| command::finish(pane_ref)),
-        [cmd] if cmd == "clear-window" => run_hook(|| command::clear_window(pane_ref)),
-        [cmd, positional] if cmd == "clear-window" => {
-            run_hook(|| command::clear_window(pane_ref.or(Some(positional.as_str()))))
-        }
-        [cmd, ..] if cmd == "notify" => match run_notify(args, pane_ref) {
+        [cmd] if cmd == "reset" => run_hook(|| command::reset(pane_ref), json),
+        [cmd] if cmd == "finish" => run_hook(|| command::finish(pane_ref), json),
+        [cmd] if cmd == "clear-window" => run_hook(|| command::clear_window(pane_ref), json),
+        [cmd, positional] if cmd == "clear-window" => run_hook(
+            || command::clear_window(pane_ref.or(Some(positional.as_str()))),
+            json,
+        ),
+        [cmd, ..] if cmd == "notify" => match run_notify(args, pane_ref, json) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => usage_error(&err),
         },
@@ -83,13 +85,21 @@ fn extract_stdin(args: &mut Vec<String>) -> bool {
     true
 }
 
+fn extract_json(args: &mut Vec<String>) -> bool {
+    let Some(pos) = args.iter().position(|arg| arg == "--json") else {
+        return false;
+    };
+    args.remove(pos);
+    true
+}
+
 /// Run the shape-B `notify` subcommand: parse the JSON payload and call the
 /// matching hook command.
 ///
 /// Errors are usage errors because they mean the hook line itself is wrong. An
 /// unrecognised payload is not an error: it is silently dropped so upstream
 /// changes do not break the agent.
-fn run_notify(mut args: Vec<String>, pane: Option<&str>) -> Result<(), String> {
+fn run_notify(mut args: Vec<String>, pane: Option<&str>, json: bool) -> Result<(), String> {
     let from_stdin = extract_stdin(&mut args);
     let agent = extract_agent(&mut args)?.ok_or("notify requires --agent")?;
 
@@ -102,6 +112,9 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>) -> Result<(), String> {
         }
         if std::io::stdin().is_terminal() {
             debug("notify: --stdin with a terminal is a no-op");
+            if json {
+                let _ = writeln!(io::stdout(), "{{}}");
+            }
             return Ok(());
         }
         let mut buf = String::new();
@@ -125,16 +138,23 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>) -> Result<(), String> {
     // write and then take an EPIPE on our exit. Being disabled must be
     // invisible to the agent, which means draining what it sent us.
     if is_disabled() {
+        if json {
+            let _ = writeln!(io::stdout(), "{{}}");
+        }
         return Ok(());
     }
 
     match notify::dispatch(&agent, &payload) {
-        Some(state) => hook(command::set(state, pane)),
+        Some(state) => {
+            hook(command::set(state, pane));
+        }
         None => {
             debug(&format!("notify: dropped payload for {agent}"));
-            ExitCode::SUCCESS
         }
     };
+    if json {
+        let _ = writeln!(io::stdout(), "{{}}");
+    }
     Ok(())
 }
 
@@ -156,11 +176,17 @@ fn hook(result: io::Result<()>) -> ExitCode {
 /// Run a hook command unless the user opted out of every write.
 ///
 /// `TMUX_AGENT_STATUS_DISABLED=1` turns every write into a silent no-op.
-fn run_hook(f: impl FnOnce() -> io::Result<()>) -> ExitCode {
-    if is_disabled() {
-        return ExitCode::SUCCESS;
+/// `--json` prints `{}` on stdout when the hook exits successfully, so an
+/// agent that parses hook stdout as JSON gets a valid empty object without a
+/// wrapper in the command.
+fn run_hook(f: impl FnOnce() -> io::Result<()>, json: bool) -> ExitCode {
+    if !is_disabled() {
+        let _ = f();
     }
-    hook(f())
+    if json {
+        let _ = writeln!(io::stdout(), "{{}}");
+    }
+    ExitCode::SUCCESS
 }
 
 fn is_disabled() -> bool {
@@ -200,21 +226,24 @@ fn help() -> String {
 tmux-agent-status - agent lifecycle events as one glyph on the tmux window entry
 
 usage:
-  tmux-agent-status set <state> [--pane <id>]
+  tmux-agent-status set <state> [--pane <id>] [--json]
                               write this pane's state and recompute the window
-  tmux-agent-status reset [--pane <id>]
+  tmux-agent-status reset [--pane <id>] [--json]
                               clear this pane's state and recompute the window
-  tmux-agent-status finish [--pane <id>]
+  tmux-agent-status finish [--pane <id>] [--json]
                               silently resolve this pane's session to done
-  tmux-agent-status clear-window [<pane>] [--pane <id>]
+  tmux-agent-status clear-window [<pane>] [--pane <id>] [--json]
                               clear the non-sticky states of every pane of that
                               pane's window, defaulting to $TMUX_PANE
-  tmux-agent-status notify --agent <name> [<payload>]
+  tmux-agent-status notify --agent <name> [<payload>] [--json]
                               map a JSON payload from a shape-B agent
-  tmux-agent-status notify --agent <name> --stdin
+  tmux-agent-status notify --agent <name> --stdin [--json]
                               read the JSON payload from stdin
   tmux-agent-status --version      version, and the executable that is actually running
   tmux-agent-status --help         this text
+
+Use --json with a hook command to print '{{}}' on stdout on success, for agents
+that parse hook stdout as JSON.
 
 The pane is resolved in this order: --pane, $TMUX_AGENT_STATUS_PANE, $TMUX_PANE.
 

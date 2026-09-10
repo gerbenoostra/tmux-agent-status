@@ -1,25 +1,25 @@
 {
   "hooks": {
     "sessionStart": [
-      { "type": "command", "command": "tmux-agent-status reset >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status reset --json" }
     ],
     "sessionEnd": [
-      { "type": "command", "command": "tmux-agent-status finish >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status finish --json" }
     ],
     "beforeSubmitPrompt": [
-      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set working --json" }
     ],
     "subagentStart": [
-      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set working --json" }
     ],
     "subagentStop": [
-      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set working --json" }
     ],
     "postToolUseFailure": [
-      { "type": "command", "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set working --json" }
     ],
     "stop": [
-      { "type": "command", "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'" }
+      { "type": "command", "command": "tmux-agent-status set done --json" }
     ]
   }
 }

@@ -4,7 +4,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "tmux-agent-status reset >/dev/null 2>&1 || true; printf '{}\n'"
+          "command": "tmux-agent-status reset --json"
         }
       ]
     }
@@ -14,7 +14,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "tmux-agent-status finish >/dev/null 2>&1 || true; printf '{}\n'"
+          "command": "tmux-agent-status finish --json"
         }
       ]
     }
@@ -24,7 +24,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'"
+          "command": "tmux-agent-status set working --json"
         }
       ]
     }
@@ -34,7 +34,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'"
+          "command": "tmux-agent-status set working --json"
         }
       ]
     }
@@ -45,7 +45,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "tmux-agent-status set waiting >/dev/null 2>&1 || true; printf '{}\n'"
+          "command": "tmux-agent-status set waiting --json"
         }
       ]
     }
@@ -55,7 +55,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "tmux-agent-status set waiting >/dev/null 2>&1 || true; printf '{}\n'"
+          "command": "tmux-agent-status set waiting --json"
         }
       ]
     }
@@ -65,7 +65,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'"
+          "command": "tmux-agent-status set done --json"
         }
       ]
     }

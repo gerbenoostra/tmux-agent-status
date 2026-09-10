@@ -71,9 +71,10 @@ fn walk(value: &serde_json::Value, path: &Path) {
 }
 
 fn validate_command(cmd: &str, path: &Path) {
-    // Commands may be followed by shell redirections or a `printf` wrapper.
-    // Only the leading tmux-agent-status arguments are validated.
-    let head = cmd
+    // Commands may be followed by shell redirections, a `printf` wrapper, or the
+    // `--json` flag. Only the leading tmux-agent-status arguments are validated;
+    // `--json` is an output-formatting detail for agents that parse stdout.
+    let mut head = cmd
         .split(|c: char| {
             c.is_whitespace() || c == '>' || c == '<' || c == '|' || c == ';' || c == '&'
         })
@@ -82,6 +83,9 @@ fn validate_command(cmd: &str, path: &Path) {
 
     if head.is_empty() {
         panic!("{}: command too short: {cmd}", path.display());
+    }
+    if head.last() == Some(&"--json") {
+        head.pop();
     }
 
     match head[0] {
@@ -122,7 +126,9 @@ fn expected_command(state: &str) -> Option<String> {
 }
 
 /// The `tmux-agent-status ...` commands a drop-in file actually invokes, with
-/// the redirection and `printf` wrapper stripped off.
+/// shell redirections, the `printf` wrapper, and the trailing `--json` flag
+/// stripped off. `--json` is an output-formatting detail for agents that parse
+/// stdout; the mapping table documents the base command.
 fn commands_in_file(path: &Path) -> Vec<String> {
     let text =
         fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
@@ -136,9 +142,10 @@ fn commands_in_file(path: &Path) -> Vec<String> {
 fn collect(value: &serde_json::Value, found: &mut Vec<String>) {
     match value {
         serde_json::Value::String(s) => {
-            if s.starts_with("tmux-agent-status ") {
-                let head = s.split(['>', '<', '|', ';', '&']).next().unwrap_or(s);
-                found.push(head.trim().to_owned());
+            if let Some(cmd) = s.strip_prefix("tmux-agent-status ") {
+                let head = cmd.split(['>', '<', '|', ';', '&']).next().unwrap_or(cmd);
+                let head = head.trim().strip_suffix("--json").unwrap_or(head).trim();
+                found.push(format!("tmux-agent-status {head}"));
             }
         }
         serde_json::Value::Array(arr) => arr.iter().for_each(|v| collect(v, found)),
