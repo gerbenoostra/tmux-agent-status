@@ -228,6 +228,15 @@ different option prefix can stay installed alongside it.
 The one shared resource is the format string specifying the window name, where this tool appends one
 term to.
 
+## Disabling
+
+Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every subcommand into a no-op that exits 0. No tmux
+options are written, no bell rings - the binary returns success immediately. Any non-empty value
+counts; the documented spelling is `=1`.
+
+Useful for CI, demo recordings, nested test sessions, or any environment where the hooks fire but
+you do not want the glyphs.
+
 ## Known limits
 
 - An agent that dies without firing `Stop` or a session-end event keeps 🤖 until the next agent
