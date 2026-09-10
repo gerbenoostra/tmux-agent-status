@@ -285,6 +285,19 @@ fn set_writes_the_pane_state_and_the_window_glyph() {
 }
 
 #[test]
+fn notify_payload_sets_window_status_via_agent_mapping() {
+    // Shape B end-to-end: a JSON payload from an agent hook maps to a state.
+    let server = Server::start();
+    let pane = server.first_pane();
+    let payload = r#"{"hook_event_name":"pre_tool"}"#;
+
+    assert_ok(&server.agent_status(&pane, &["notify", "--agent", "mistral-vibe", payload]));
+
+    assert_eq!(server.pane_statuses(&pane), ["working"]);
+    assert_eq!(server.window_status(&pane), "🤖");
+}
+
+#[test]
 fn pane_flag_overrides_missing_tmux_pane() {
     let server = Server::start();
     let pane = server.first_pane();
