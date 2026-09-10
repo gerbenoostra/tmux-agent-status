@@ -20,7 +20,7 @@ not end the parent turn.
 
 ## Drop-in file
 
-Copy `share/agents/droid/hooks.json` to `~/.factory/hooks.json` for a user-wide hook,
+Copy [`share/agents/droid/hooks.json`](../../share/agents/droid/hooks.json) to `~/.factory/hooks.json` for a user-wide hook,
 or to `.factory/hooks.json` for a project-local hook. Droid's file holds the event
 names at the top level, with no wrapping `hooks` key; if you already have a
 `hooks.json`, merge these event entries into it at the top level. Nesting them

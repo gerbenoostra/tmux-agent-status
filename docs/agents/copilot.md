@@ -17,7 +17,7 @@ files, then `.github/hooks/*.json` (repo scope), then `~/.copilot/hooks/*.json`
 
 ## Drop-in file
 
-Copy `share/agents/copilot/tmux-agent-status.json` to `.github/hooks/tmux-agent-status.json`
+Copy [`share/agents/copilot/tmux-agent-status.json`](../../share/agents/copilot/tmux-agent-status.json) to `.github/hooks/tmux-agent-status.json`
 for a repo-wide hook, or to `~/.copilot/hooks/tmux-agent-status.json` for a user-wide
 hook. No enable step is required.
 

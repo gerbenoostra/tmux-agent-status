@@ -62,7 +62,7 @@ After installing the command line tool, there are three things left:
 After installing, verify the binary is available: `tmux-agent-status --version` should print the version and the executable that is actually running.
 
 **2. Source the tmux snippet.**
-It ships at `share/tmux/tmux-agent-status.conf` in the package [here](./share/tmux/tmux-agent-status.conf).
+It ships at [`share/tmux/tmux-agent-status.conf`](./share/tmux/tmux-agent-status.conf) in the package.
 Import it from your tmux configuration using the path where you installed it. For example, if you placed it in `~/.tmux`:
 
 ```tmux

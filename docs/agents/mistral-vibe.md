@@ -16,7 +16,7 @@ notify --agent mistral-vibe --stdin`.
 
 ## Drop-in file
 
-Copy `share/agents/mistral-vibe/hooks.toml` to `./.vibe/hooks.toml` (project) or
+Copy [`share/agents/mistral-vibe/hooks.toml`](../../share/agents/mistral-vibe/hooks.toml) to `./.vibe/hooks.toml` (project) or
 `~/.vibe/hooks.toml` (user). Project-level `hooks.toml` only loads when the working
 directory is in the trusted-folders list (`~/.vibe/trusted_folders.toml`); there is
 no separate feature flag.

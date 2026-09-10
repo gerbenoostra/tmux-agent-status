@@ -36,7 +36,7 @@ itself. To revert:
  is the same hook set as a file, for a user who did not install
 the plugin.
 
-Claude Code has no hooks drop-in directory, thus you need to **merge** `share/agents/claude-code/hooks.json`
+Claude Code has no hooks drop-in directory, thus you need to **merge** [`share/agents/claude-code/hooks.json`](../../share/agents/claude-code/hooks.json)
 into your `~/.claude/settings.json`. Take the whole file if your Claude settings has no `hooks` key;
 if you already have one, add these eight events inside it. Do not append the file as a second top-level
 object and do not end up with two `hooks` keys - JSON's last one silently wins and the hooks you had are gone.

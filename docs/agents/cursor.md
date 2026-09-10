@@ -20,7 +20,7 @@ subagent stopping does not end the parent turn.
 
 ## Drop-in file
 
-Copy `share/agents/cursor/hooks.json` to `~/.cursor/hooks.json` for a user-wide hook,
+Copy [`share/agents/cursor/hooks.json`](../../share/agents/cursor/hooks.json) to `~/.cursor/hooks.json` for a user-wide hook,
 or to `<project>/.cursor/hooks.json` for a project-local hook.
 
 ```sh

@@ -17,7 +17,7 @@ table; the drop-in directory is the self-contained route.
 
 ## Drop-in file
 
-Copy `share/agents/grok/tmux-agent-status.json` to `~/.grok/hooks/tmux-agent-status.json`
+Copy [`share/agents/grok/tmux-agent-status.json`](../../share/agents/grok/tmux-agent-status.json) to `~/.grok/hooks/tmux-agent-status.json`
 for a user-wide hook, or to `<project>/.grok/hooks/tmux-agent-status.json` for a
 project hook. Project hooks require running `/hooks-trust` the first time the
 project is opened.

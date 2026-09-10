@@ -118,7 +118,7 @@ cp "tmux-agent-status-$tag-$target/share/agents/codex/hooks.json" ~/.codex/hooks
 cargo install --git https://github.com/gerbenoostra/tmux-agent-status
 ```
 
-This installs the binary only. The tmux snippet (`share/tmux/tmux-agent-status.conf`) and the
+This installs the binary only. The tmux snippet ([`share/tmux/tmux-agent-status.conf`](../share/tmux/tmux-agent-status.conf)) and the
 agent drop-in files (`share/agents/<agent>/`) are not installed by cargo; take them from a checkout
 or from the release tarball, and copy the one for your agent to the location
 [its page](agents/README.md) describes.

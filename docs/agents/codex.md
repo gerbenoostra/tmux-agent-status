@@ -19,7 +19,7 @@ subagent stopping does not end the parent turn.
 
 ## Drop-in file
 
-Copy `share/agents/codex/hooks.json` to `~/.codex/hooks.json` for a user-wide hook,
+Copy [`share/agents/codex/hooks.json`](../../share/agents/codex/hooks.json) to `~/.codex/hooks.json` for a user-wide hook,
 or to `<repo>/.codex/hooks.json` for a project-local hook. The `hooks` object merges
 with any existing one; do not duplicate the top-level `hooks` key.
 

@@ -36,7 +36,7 @@ once the tool has run.
 
 ## Drop-in file
 
-Copy `share/agents/devin/hooks.v1.json` to `<repo>/.devin/hooks.v1.json`. In
+Copy [`share/agents/devin/hooks.v1.json`](../../share/agents/devin/hooks.v1.json) to `<repo>/.devin/hooks.v1.json`. In
 that file the hook map **is** the whole file: there is no top-level `hooks` key,
 unlike every other location Devin reads.
 
@@ -53,7 +53,7 @@ so a file at the repo root covers every subdirectory you start Devin from.
 There is no user-level `hooks.v1.json`; a user-wide hook set has to be merged
 under a `"hooks"` key into `~/.config/devin/config.json`
 (`%APPDATA%\devin\config.json` on Windows), which is a file you maintain. The
-drop-in file (`share/agents/devin/hooks.v1.json`) is what should be merged: its
+drop-in file ([`share/agents/devin/hooks.v1.json`](../../share/agents/devin/hooks.v1.json)) is what should be merged: its
 top-level object is the `hooks` object, so nest the whole drop-in under `"hooks"`
 in your config. Merge it into the `hooks` object you already have rather than
 adding a second one; JSON's last key silently wins.
