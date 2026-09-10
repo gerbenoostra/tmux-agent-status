@@ -52,28 +52,11 @@ so a file at the repo root covers every subdirectory you start Devin from.
 
 There is no user-level `hooks.v1.json`; a user-wide hook set has to be merged
 under a `"hooks"` key into `~/.config/devin/config.json`
-(`%APPDATA%\devin\config.json` on Windows), which is a file you maintain. Take
-the contents of the drop-in and nest them:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "tmux-agent-status reset >/dev/null 2>&1 || true; printf '{}\n'"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-...and so on for the other six events. Merge it into the `hooks` object you
-already have rather than adding a second one; JSON's last key silently wins.
+(`%APPDATA%\devin\config.json` on Windows), which is a file you maintain. The
+drop-in file (`share/agents/devin/hooks.v1.json`) is what should be merged: its
+top-level object is the `hooks` object, so nest the whole drop-in under `"hooks"`
+in your config. Merge it into the `hooks` object you already have rather than
+adding a second one; JSON's last key silently wins.
 
 ## Prove it fired
 
@@ -112,9 +95,8 @@ should read `done` or be empty.
   parent's `Stop` means `done`.
 - **Stdout is parsed as JSON** on `PreToolUse`, `PermissionRequest`,
   `UserPromptSubmit`, `SessionStart` and `Stop`, so every entry in the drop-in
-  appends `printf '{}\n'`. The status commands write nothing to stdout
-  themselves; the wrapper is what keeps an empty stdout from reaching the
-  parser.
+  uses `--json`. The status commands write nothing to stdout themselves;
+  `--json` prints `{}` so an empty stdout never reaches the parser.
 - **`SessionEnd` needs a clean exit.** A killed terminal or `kill -9` skips the
   hook and strands the glyph until the next session's `reset`.
 - **`TMUX_PANE` inheritance is undocumented.** Hooks are plain shell commands in

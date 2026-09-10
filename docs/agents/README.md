@@ -1,8 +1,7 @@
 # Supported agents
 
-This table is the single source of truth for which agents drive the glyph, how,
-and what is known to be missing. Blank cells link to the upstream doc or issue
-that says the event does not exist.
+This table defines which agents drive the glyph, how, and what is known to be missing.
+Blank cells link to the upstream doc or issue that says the event does not exist.
 
 | Agent | Shape | Drop-in file | Needs enabling | Subagent events | Multi-session per pane | `error` event | `waiting` repeats | Stdout parsed | Payload on stdin | `TMUX_PANE` inherited | Session start | Session end | Verified |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -23,17 +22,20 @@ that says the event does not exist.
 
 The shape is *what the agent invokes*, not how the config gets installed:
 
-- **A**: hook config with one command per event. The existing CLI is the adapter.
-- **B**: one callback receives a JSON payload. Requires the `notify` subcommand.
+- **A**: hook config with one command per event, calling the `tmux-agent-status` CLI as adapter.
+- **B**: one callback receives a JSON payload, calling the `tmux-agent-status notify` subcommand.
 - **C**: in-process adapter loaded by the agent (agents often call this a
-"plugin"). Deferred until shapes A and B are in.
+"plugin"). Currently not implemented.
 
-Delivery is a separate axis: a manual merge into the agent's settings, a drop-in
-file, or a plugin package that ships the config in its own directory. Claude Code
-is shape A delivered as a plugin, with the same hook set also shipped as a
+Delivery is a separate axis:
+- a manual merge into the agent's settings
+- a drop-in file
+- a plugin package that ships the config in its own directory.
+
+For example, Claude Code is shape A delivered as a plugin, with the same hook set also shipped as a
 drop-in - hence `A (plugin)` in the table.
 
-## Reading the table
+## Table legend
 
 - **Drop-in file**: a file the user copies verbatim into a hooks directory; the
 tool never edits the user's hand-maintained settings.
@@ -49,13 +51,28 @@ cell reads "no".
 - **`waiting` repeats**: a blocked-on-you event that fires repeatedly, including
 idle nags. Without the repeat, `waiting` is rarely useful.
 - **Stdout parsed**: whether the agent reads the hook's stdout as JSON. Strict
-parsers require the documented `printf '{}'` wrapper.
+parsers require the `--json` flag.
 - **Payload on stdin**: whether the event payload arrives on stdin instead of argv.
 - **`TMUX_PANE` inherited**: whether the hook runs as a child of the pane. Unknown
 across the surveyed agents means `--pane` / `TMUX_AGENT_STATUS_PANE` should be used
 defensively.
 - **Session start / end**: whether events map onto `reset` and `finish`. Agents
 without both keep the known limit that a crashed agent can strand `working`.
+
+## Shared hook behaviour
+
+These apply to every agent page:
+
+- **The tool rings the bell itself.** The `set` commands for end states (`done`,
+  `waiting`, `error`) print a terminal bell, so do not add a separate `printf '\a'`
+  hook for the same event. Agents that parse stdout still use `--json` so the
+  parser sees valid JSON; `--json` is not a bell.
+- **A missing binary is silent.** If `tmux-agent-status` is not on the `PATH` the
+  hook inherits, the command exits 0 and no error is raised anywhere; the only
+  symptom is that no glyph ever appears.
+- **`waiting` must repeat to be useful.** Do not narrow the waiting event to
+  permission prompts. The idle nag that fires while the agent is still blocked
+  is what makes `waiting` visible at all.
 
 ## Common setup steps
 

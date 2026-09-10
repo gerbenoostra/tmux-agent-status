@@ -1,7 +1,8 @@
 //! The Claude Code hook set exists three times: as the plugin's `hooks/hooks.json`, which is what
 //! actually runs, as `share/agents/claude-code/hooks.json`, which is what an installed user copies or
-//! merges, and as the README's table, which is what a reader believes. These tests fail when they
-//! stop saying the same thing, and when the plugin's version stops tracking the crate's.
+//! merges, and as `docs/agents/claude-code.md`'s Supported states table, which is what a reader
+//! believes. These tests fail when they stop saying the same thing, and when the plugin's version
+//! stops tracking the crate's.
 //!
 //! Everything here parses files this repository owns, so the parsing is deliberately strict: a
 //! shape it does not recognise is a failure, not something to skip over.
@@ -142,27 +143,40 @@ fn unformat(cell: &str) -> String {
     cell.trim().trim_matches('`').replace("\\|", "|")
 }
 
-fn readme_entries() -> Vec<HookEntry> {
-    let readme = read(&repo_root().join("README.md"));
-    let rows = table_after(&readme, "#### Claude Code");
+fn agent_doc_entries() -> Vec<HookEntry> {
+    let doc = read(&repo_root().join("docs/agents/claude-code.md"));
+    let rows = table_after(&doc, "## Supported states");
     assert_eq!(
         rows[0],
-        ["Event", "Matcher", "Command"],
+        ["State", "Claude Code event", "Command", "Notes"],
         "the Claude Code hook table's header changed"
     );
 
     let mut entries = Vec::new();
     // Row 0 is the header, row 1 the `| --- |` separator.
     for row in &rows[2..] {
-        assert_eq!(row.len(), 3, "hook table row is not three cells: {row:?}");
-        let matcher = if row[1].starts_with("all") {
-            None
-        } else {
-            Some(unformat(&row[1]))
-        };
-        entries.push((unformat(&row[0]), matcher, unformat(&row[2])));
+        assert_eq!(row.len(), 4, "hook table row is not four cells: {row:?}");
+        let command = unformat(&row[2]);
+        let arguments = arguments_of(&command);
+
+        for event_spec in row[1].split(", ") {
+            // The cell wraps both the event and any matcher in backticks; remove them all before
+            // splitting out the matcher.
+            let event_spec = unformat(event_spec).replace('`', "");
+            let (event, matcher) = if let Some((event, matcher)) = event_spec.split_once('(') {
+                let event = event.trim().to_string();
+                let matcher = matcher.trim_end_matches(')').trim().to_string();
+                (event, Some(matcher))
+            } else {
+                (event_spec, None)
+            };
+            entries.push((event, matcher, arguments.clone()));
+        }
     }
-    normalise(entries, "the README's Claude Code table")
+    normalise(
+        entries,
+        "docs/agents/claude-code.md's Supported states table",
+    )
 }
 
 fn manifest_json(path: &Path) -> serde_json::Value {
@@ -171,12 +185,12 @@ fn manifest_json(path: &Path) -> serde_json::Value {
 }
 
 #[test]
-fn manifest_and_readme_watch_the_same_events() {
+fn manifest_and_agent_doc_watch_the_same_events() {
     let manifest = manifest_entries();
-    let readme = readme_entries();
+    let agent_doc = agent_doc_entries();
     assert_eq!(
-        manifest, readme,
-        "plugins/tmux-agent-status/hooks/hooks.json and the README's Claude Code table disagree"
+        manifest, agent_doc,
+        "plugins/tmux-agent-status/hooks/hooks.json and docs/agents/claude-code.md's Supported states table disagree"
     );
     assert_eq!(
         manifest.len(),

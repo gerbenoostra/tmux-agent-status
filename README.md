@@ -44,15 +44,12 @@ The `set` commands go on the agent's turn events. `reset` goes on session start 
 the previous agent left in the pane; `finish` goes on session end and resolves the session to done,
 leaving an `error` alone. Neither of those two rings the bell.
 
-The [docs/agents](docs/agents/README.md) pages give the drop-in file or manual
-config for each supported agent, [Claude Code](docs/agents/claude-code.md)
-included. Claude Code has a plugin that carries the hook set for you; see
-[step 4](#claude-code).
+The [docs/agents](docs/agents/README.md) pages give the manaul config, drop-in file or plugin for each supported agent, [Claude Code](docs/agents/claude-code.md) included.
 
 ## Install
 
-See [docs/install.md](docs/install.md) for the nix flake input, `nix profile`, a prebuilt binary,
-`cargo`, and building from source.
+See [docs/install.md](docs/install.md) on how to install the helper command line tool (nix flake input, `nix profile`, a prebuilt binary,
+`cargo`, and building from source).
 
 After installing the command line tool, there are three things left:
  - include the `tmux-agent-status.conf` into your tmux config to hook onto tmux's events.
@@ -75,10 +72,10 @@ source-file ~/.tmux/tmux-agent-status.conf
 The snippet may live elsewhere; see the [installation path guidance](docs/install.md#choose-installation-paths).
 
 It only adds two tmux hooks. Both call `tmux-agent-status clear-window <pane>`; the optional pane argument defaults to `$TMUX_PANE` for manual calls.
-Confirm with `tmux show-hooks -g | grep tmux-agent-status` and `tmux show-hooks -gw | grep tmux-agent-status`: they sit in different scopes, so one command shows only one of them.
+Can be confirmed with `tmux show-hooks -g | grep tmux-agent-status` and `tmux show-hooks -gw | grep tmux-agent-status`.
 
-**3. Paste the format term.**
-Into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before the window flags:
+**3. Include the glyph term in your tmux window format.**
+Paste the following format term into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before the window flags:
 
 ```tmux
 #{?@agent_status, #{@agent_status},}
@@ -90,19 +87,36 @@ For example:
 set -g window-status-format '#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@agent_status},}#{?window_flags,#{window_flags}, }'
 ```
 
-The name segment stays whatever you already had. Confirm it renders by setting a glyph by hand:
-`tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.
+The name segment stays whatever you already had.
+You can confirm it renders by setting a glyph by hand: `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.
 
-If you want to highlight or colour the window title when the bell has rung, add something like this to `~/.tmux.conf`:
+**Optional: terminal & tmux bell and the tmux highlight.**
+The tool writes a `\a` to the tmux pane. You can configure tmux with what you want to be done with it:
+
+| Setting | What it decides | Suggested |
+| --- | --- | --- |
+| `monitor-bell` | Whether tmux notices the bell at all. `off` means no highlight, and nothing reaches your terminal either. | `on` (tmux default) |
+| `bell-action` | Which windows may pass a bell on to your terminal. `other` ignores the window you are currently on, which is exactly where an agent finishes while your terminal sits behind another tab, desktop or monitor. `any` passes those on too. | `any` (tmux default) |
+| `visual-bell` | Whether the bell stays a bell. `on` replaces it with a tmux message, so your terminal never sees it. | `off` (tmux default) |
+| `window-status-bell-style` | How a window that rang is painted until you visit it. It only ever applies to windows you are *not* on: tmux drops the flag of the current window immediately. | to taste |
+
 ```tmux
 setw -g monitor-bell on
-set -g bell-action other
+set -g bell-action any
+set -g visual-bell off
 setw -g window-status-bell-style 'fg=magenta,bold,nodim'
 ```
-The above example:
-1) monitors the bell to highlight windows
-2) only highlights the non-active windows (=other)
-3) specifies which formatting should be applied.
+
+The price of `any` is that every other bell from the window you are on reaches the terminal as well:
+a shell completion beep, vim hitting the end of a search, and an agent finishing in the window you
+are already watching. The benefit is that you also get a bell on tabs in your terminal if the
+active tmux window rang. If you are in one terminal tab, and in another you have a tmux session with an agent,
+and that agent is in the active window, it will get a terminal bell with `any`, and no terminal bell otherwise.
+
+What your terminal then does with that bell is its own business, and it is often not a sound.
+Ghostty, for example, prefixes the tab title with 🔔 and asks for attention while it is unfocused,
+and stays silent unless you enable a sound in `bell-features`. So the bell tells you *which tab*,
+and the glyph tells you *which window*.
 
 **4. Register the agent hooks.**
 
@@ -110,72 +124,10 @@ Claude Code has a plugin, for other agents manually edit its configuration.
 
 ### Configure agents
 
-#### Claude Code
+Follow [docs/agents/README.md](docs/agents/README.md) for instructions to watch your agent of choice, it refers to a page per agent.
 
-There are two options, either the plugin or manually editing the hooks.
-
-**Using the plugin.**
-
-```
-/plugin marketplace add gerbenoostra/tmux-agent-status
-/plugin install tmux-agent-status
-```
-
-Restart the session and the eight hooks below are live.
-
-You can uninstall/revert using:
-```
-/plugin uninstall tmux-agent-status
-/plugin marketplace remove tmux-agent-status
-```
-
-The plugin only contains the hook configuration. Your `~/.claude/settings.json` will be untouched, except
-for the `enabledPlugins` and `extraKnownMarketplaces` by Claude Code.
-
-The plugin also ships `/tmux-agent-status:doctor`, a read-only check of all four setup steps.
-
-**Manual config edit.**
-[`plugins/tmux-agent-status/hooks/hooks.json`](./plugins/tmux-agent-status/hooks/hooks.json) is the
-required hook definition in the shape of claude's `settings.json`. It ships as
-[`share/agents/claude-code/hooks.json`](./share/agents/claude-code/hooks.json) too, which is what an
-installed user has without a checkout - a symlink onto the same file here, a real file once packaged.
-**Merge its `hooks` object into** `~/.claude/settings.json`: if you have no `hooks` key, take the file whole; if you already
-have one, add these eight events inside it. Do not append the file as a second top-level object, and
-do not end up with two `hooks` keys - JSON's last one silently wins and the hooks you had are gone.
-
-**The watched events**
-These are the hooks being watched:
-
-| Event | Matcher | Command |
-| --- | --- | --- |
-| `SessionStart` | `startup\|resume\|clear\|fork` | `reset` |
-| `SessionEnd` | all | `finish` |
-| `UserPromptSubmit` | all | `set working` |
-| `PostToolUse` | all | `set working` |
-| `PreToolUse` | `AskUserQuestion\|ExitPlanMode` | `set waiting` |
-| `Notification` | all, **not** narrowed | `set waiting` |
-| `Stop` | all | `set done` |
-| `StopFailure` | all | `set error` |
-
-`SessionStart` and `SessionEnd` do not ring or report a turn. The former clears this pane's previous
-status, while the latter resolves the ending session. `Notification` must **not** be narrowed to
-permission prompts and to also catch idle events that indicate "still blocked, and has been for
-a while".
-
-As the tool rings the bell itself, no standalone `printf '\a'` hooks for the same events are needed.
-
-Instead of relying on the hooks for the bell (and thus highlight), you can also use Claude's own `\a` bell events by configuring them as follows:
-```json
-{
-  "preferredNotifChannel": "terminal_bell",
-  "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true
-}
-```
-
-The agent hook will not raise errors if the `tmux-agent-status` command cannot be found. You'll only notice it as
-no glyph appearing on the window.
-
+For example, see [docs/agents/claude-code.md](docs/agents/claude-code.md) for the plugin, the manual hook merge,
+the event mapping of Claude.
 
 ## How it works
 
@@ -202,7 +154,9 @@ a turn ending while you are detached keeps its glyph until you come back.
 ## The bell, and colour
 
 For the end states (`waiting`, `error` and `done`, thus not `working`) a terminal bell (`\a`) is printed.
-With `monitor-bell on`, tmux gives you the window highlight, in whatever way you configure it.
+With `monitor-bell on`, tmux gives you the window highlight, in whatever way you configure it, and
+`bell-action` decides whether the bell also reaches your terminal: see the table in
+[setup step 3](#set-up).
 To not interfere with your own highlight format, this tool deliberately does not colour or name windows.
 
 If you want `error` to stand out further, paste this in front of the name segment, in both formats:

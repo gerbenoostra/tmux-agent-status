@@ -42,10 +42,10 @@ read `done` or be empty.
 
 - **Hooks are on by default.** Disable with `[features] hooks = false`.
 - **Stdout is parsed as JSON.** Codex reads a hook's stdout when it exits 0, so
-  every entry in the drop-in file appends `printf '{}\n'`. The status commands
-  themselves write nothing to stdout; the wrapper is what keeps an empty stdout
-  from reaching the parser. `PermissionRequest` is the one that matters most: a
-  permission hook that returns nothing may be read as a decision.
+  every entry in the drop-in file uses `--json`. The status commands themselves
+  write nothing to stdout; `--json` prints `{}` so an empty stdout never reaches
+  the parser. `PermissionRequest` is the one that matters most: a permission hook
+  that returns nothing may be read as a decision.
 - **`SessionEnd` is delayed up to 30 minutes on idle disconnect.** A crashed session
   can leave the glyph stranded for a while; this is a known Codex limit.
 - **No `error` event.** A turn that aborts leaves `working` until `SessionEnd`

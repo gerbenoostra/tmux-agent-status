@@ -1,8 +1,6 @@
 # Claude Code
 
-Shape A agent, and the reference one: it is the agent this tool was built against, so it is the only
-supported agent where every state has a published event. Claude Code reads hooks from a plugin's own
-directory or from `~/.claude/settings.json`.
+Shape A agent: Claude Code reads hooks from a plugin's own directory or from `~/.claude/settings.json`.
 
 ## Supported states
 
@@ -15,9 +13,6 @@ directory or from `~/.claude/settings.json`.
 | error | `StopFailure` | `tmux-agent-status set error` | a real turn-abort event, which most agents lack |
 | finish | `SessionEnd` | `tmux-agent-status finish` | resolves a lingering `working`, no bell |
 
-`Notification` is deliberately **not** narrowed to permission prompts: the idle nag arrives on the
-same event, and the repeat is what makes `waiting` useful at all.
-
 ## The plugin
 
 The recommended route. It carries the hook set in its own directory, so nothing of yours is edited:
@@ -27,7 +22,7 @@ The recommended route. It carries the hook set in its own directory, so nothing 
 /plugin install tmux-agent-status
 ```
 
-Restart the session and the six hook entries above are live. Your `~/.claude/settings.json` stays
+Restart the session and the eight hook entries above are live. Your `~/.claude/settings.json` stays
 untouched apart from the `enabledPlugins` and `extraKnownMarketplaces` entries Claude Code records
 itself. To revert:
 
@@ -36,17 +31,15 @@ itself. To revert:
 /plugin marketplace remove tmux-agent-status
 ```
 
-## Drop-in file
+## Manual configuration
 
-`share/agents/claude-code/hooks.json` is the same hook set as a file, for a user who did not install
-the plugin. In the repository it is a symlink onto the plugin's own `hooks/hooks.json`, so the two
-cannot drift; every packaging route dereferences it, and nix, the release tarball and the crate all
-carry a real file.
+ is the same hook set as a file, for a user who did not install
+the plugin.
 
-Claude Code has no hooks drop-in directory, so this is a **merge**, not a copy. Take the file whole
-if `~/.claude/settings.json` has no `hooks` key; if you already have one, add these eight events
-inside it. Do not append the file as a second top-level object and do not end up with two `hooks`
-keys - JSON's last one silently wins and the hooks you had are gone.
+Claude Code has no hooks drop-in directory, thus you need to **merge** `share/agents/claude-code/hooks.json`
+into your `~/.claude/settings.json`. Take the whole file if your Claude settings has no `hooks` key;
+if you already have one, add these eight events inside it. Do not append the file as a second top-level
+object and do not end up with two `hooks` keys - JSON's last one silently wins and the hooks you had are gone.
 
 See [docs/install.md](../install.md) for where `share/agents/` lands for Nix, prebuilt tarballs and
 `cargo install`.
@@ -66,13 +59,21 @@ empty. With the plugin installed, `/tmux-agent-status:doctor` checks all four se
 
 - **`StopFailure` is a genuine error event.** Nearly every other surveyed agent leaves the `error`
   column empty and has to infer an abort, or cannot see one at all.
-- **No `printf '{}'` wrapper is needed.** Claude Code does not require JSON on stdout for these
-  events, and the hook commands write nothing to stdout anyway; the bell goes to `/dev/tty`.
-- **The bell is ours.** No standalone `printf '\a'` hook for the same events is needed. To use
-  Claude Code's own notification channel instead, see the
-  [README](../../README.md#claude-code).
-- **A missing binary is silent.** If `tmux-agent-status` is not on the `PATH` the hooks inherit, no
-  error is raised anywhere; you simply never see a glyph.
+- **Claude's own notification channel.** If you prefer Claude Code's built-in `\a` bell events to
+  the hook's bell, see [below](#using-claude-codes-own-notification-channel).
+
+## Using Claude Code's own notification channel
+
+Instead of relying on the hooks for the bell (and thus the highlight), you can also use Claude's own
+`\a` bell events by configuring them as follows:
+
+```json
+{
+  "preferredNotifChannel": "terminal_bell",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true
+}
+```
 
 ## Opt-out and debug
 

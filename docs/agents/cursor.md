@@ -45,8 +45,8 @@ read `done` or be empty.
   that clearly do not block Cursor's own flow. Events that ask for a decision
   (such as `beforeShellExecution`) are intentionally omitted so the status hook
   never denies a tool call.
-- **Stdout is parsed as JSON.** Every hook entry is wrapped with `printf '{}\n'` so
-  Cursor's parser does not choke on empty stdout.
+- **Stdout is parsed as JSON.** Every hook entry uses `--json` so Cursor's parser
+  does not choke on empty stdout; `--json` prints `{}` on success.
 - **No confirmed `waiting` event.** If a future Cursor release adds a
   blocked-on-user hook, add it to `hooks.json` and update this page.
 - **`postToolUseFailure` is not `error`.** A failed tool call is an ordinary

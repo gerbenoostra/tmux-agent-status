@@ -47,8 +47,8 @@ read `done` or be empty.
   subagent stopping does not end the parent turn, so they are deliberately not
   mapped to `done`.
 - **Stdout parsing.** Copilot CLI parses hook stdout as JSON per event, so
-  every entry in the shipped file appends `printf '{}\n'`. The status commands
-  write nothing to stdout themselves.
+  every entry in the shipped file uses `--json`. The status commands write nothing
+  to stdout themselves; `--json` prints `{}` so the parser never sees empty stdout.
 - **`TMUX_PANE` inheritance is undocumented.** Use `--pane #{pane_id}` or set
   `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
 
