@@ -20,9 +20,17 @@ that says the event does not exist.
 
 ## Shapes
 
+The shape is *what the agent invokes*, not how the config gets installed:
+
 - **A**: hook config with one command per event. The existing CLI is the adapter.
 - **B**: one callback receives a JSON payload. Requires the `notify` subcommand.
-- **C**: in-process plugin or extension. Deferred until shapes A and B are in.
+- **C**: in-process adapter loaded by the agent (agents often call this a
+"plugin"). Deferred until shapes A and B are in.
+
+Delivery is a separate axis: a manual merge into the agent's settings, a drop-in
+file, or a plugin package that ships the config in its own directory. Claude Code
+is shape A delivered as a plugin, with the same hook set also shipped as a
+drop-in - hence `A (plugin)` in the table.
 
 ## Reading the table
 

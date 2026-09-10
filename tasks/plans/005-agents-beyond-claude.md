@@ -9,7 +9,7 @@ Covers *how a second, third and fourth agent get a glyph*. The states, the rank,
 purpose: "adding a second agent is what shows whether the shape is right".
 
 Research (committed in `tasks/research/`) surveyed eleven agents and placed them into the three
-delivery shapes. Shape C is deferred; this plan now implements the shared infrastructure, all
+integration shapes. Shape C is deferred; this plan now implements the shared infrastructure, all
 Shape A agents found, and the two Shape B agents.
 
 007 has since shipped `reset` and `finish`, so the session boundaries this plan argued for are
@@ -23,14 +23,21 @@ that is **data**, not a code path. Done when all five are true:
 1. A capability matrix in the docs says, per agent, which of the four states it can express and why
    the rest are blank.
 2. Two agents beyond Claude Code work end to end on a real tmux, and they are of two different
-   delivery shapes, not two of the same.
+   integration shapes, not two of the same.
 3. No agent's setup requires the user to write shell glue, a JSON parser or a `jq` dependency.
 4. An unrecognised event writes nothing and exits 0. A wrong glyph is worse than no glyph.
 5. Adding the next agent is a table entry, a fixture, a docs page, and nothing else.
 
-## Three delivery shapes
+## Three integration shapes
 
 Every agent surveyed fits one of three. The design is about not growing a fourth.
+
+**Shape is not delivery.** The shape is *what the agent invokes*; how the config reaches the user is
+a second, independent axis: a manual merge into the agent's own settings, a drop-in file the user
+copies (see below), or a plugin package that ships the config in its own directory (004). Claude
+Code is shape A delivered as a plugin, and the same hook set is also shipped as a drop-in; Mistral
+Vibe is shape B with a drop-in, Gemini CLI shape B with a manual merge. Shape C is the exception: it
+is a shape, not a route, because what is installed is a process of ours that holds session state.
 
 **A. Hook config with one command per event.** The agent reads a JSON (or TOML) file mapping event
 names to commands. Nothing new is needed: the existing CLI *is* the adapter.
@@ -60,10 +67,11 @@ nothing to test.
 
 Decided: **stdin is read only when `--stdin` is passed.** See "Reading stdin can hang the agent".
 
-**C. In-process plugin or extension.** The agent loads a JS/TS module that subscribes to an event
-stream and shells out. More work to ship (a file in the agent's plugin directory, and its API is a
-moving target), but it is the only shape that can see the agent's own session state, which is where
-`error` and multi-session correctness actually come from.
+**C. In-process adapter.** The agent loads a JS/TS module - most agents call this a "plugin", which
+is not 004's sense of the word - that subscribes to an event stream and shells out. More work to
+ship (a file in the agent's plugin directory, and its API is a moving target), but it is the only
+shape that can see the agent's own session state, which is where `error` and multi-session
+correctness actually come from.
 
 Shape C is also the first non-Rust code this repository would run, and that is a cost with a name:
 
