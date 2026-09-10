@@ -5,7 +5,7 @@ use std::io::{self, IsTerminal, Read};
 use std::process::ExitCode;
 
 use tmux_agent_status::command;
-use tmux_agent_status::notify::{self, Action};
+use tmux_agent_status::notify;
 use tmux_agent_status::state::State;
 
 /// A wrong invocation: a bug in the caller's hook config, and so a loud one.
@@ -103,9 +103,10 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>) -> Result<(), String> {
             return Ok(());
         }
         let mut buf = String::new();
-        std::io::stdin()
-            .read_to_string(&mut buf)
-            .map_err(|e| format!("cannot read stdin: {e}"))?;
+        // A read failure here is not a hook-config error: stdin was promised
+        // but could not be consumed. Treat it as an empty, unrecognised payload
+        // and exit 0 so the agent is not blocked.
+        let _ = std::io::stdin().read_to_string(&mut buf);
         buf
     } else {
         match args.as_slice() {
@@ -118,9 +119,7 @@ fn run_notify(mut args: Vec<String>, pane: Option<&str>) -> Result<(), String> {
     };
 
     match notify::dispatch(&agent, &payload) {
-        Some(Action::Set(state)) => hook(command::set(state, pane)),
-        Some(Action::Reset) => hook(command::reset(pane)),
-        Some(Action::Finish) => hook(command::finish(pane)),
+        Some(state) => hook(command::set(state, pane)),
         None => {
             debug(&format!("notify: dropped payload for {agent}"));
             ExitCode::SUCCESS
@@ -162,7 +161,6 @@ fn is_disabled() -> bool {
 ///
 /// Never used on a hot path that agents call repeatedly; reserved for shape B
 /// `notify` dropping an unrecognised event.
-#[allow(dead_code)]
 fn debug(message: &str) {
     if env::var_os("TMUX_AGENT_STATUS_DEBUG").is_some_and(|v| v == "1") {
         eprintln!("tmux-agent-status: {message}");
