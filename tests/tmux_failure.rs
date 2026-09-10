@@ -105,6 +105,19 @@ fn boundary_commands_are_silent_when_list_panes_fails() {
 }
 
 #[test]
+fn set_is_silent_when_tmux_lists_no_panes() {
+    // An empty list-panes output means the window has no panes; the rollup code
+    // must still handle the empty-slice branch.
+    let dir = fake_tmux_dir();
+    write_fake_tmux(
+        &dir,
+        "#!/bin/sh\nif [ \"$1\" = \"list-panes\" ]; then exit 0; fi\nexit 0\n",
+    );
+    let out = run(&["set", "done"], &format!("{}:", dir.display()));
+    assert_ok_and_silent(&out);
+}
+
+#[test]
 fn set_is_silent_when_list_panes_ignores_the_format() {
     // The tabs in the format are ours, so a line without them is a tmux that
     // did not answer the question asked. Unreadable *values* degrade to "not
@@ -177,6 +190,19 @@ exit 1\n",
 }
 
 #[test]
+fn set_is_silent_when_setting_the_window_status_fails() {
+    let dir = fake_tmux_dir();
+    write_fake_tmux(
+        &dir,
+        "#!/bin/sh\n\
+if [ \"$1\" = \"set-option\" ] && [ \"$2\" = \"-w\" ]; then exit 1; fi\n\
+exit 0\n",
+    );
+    let out = run(&["set", "done"], &format!("{}:", dir.display()));
+    assert_ok_and_silent(&out);
+}
+
+#[test]
 fn clearing_commands_are_silent_when_clearing_a_pane_fails() {
     let dir = fake_tmux_dir();
     write_fake_tmux(
@@ -217,4 +243,125 @@ fn disabled_runs_no_tmux_command() {
     }
 
     assert!(!log.exists(), "disabled must not invoke tmux");
+}
+
+#[test]
+fn hook_is_silent_when_tmux_is_not_on_path() {
+    // `Command::new("tmux")` fails before it can run anything. The hook wrapper
+    // still turns this into a silent exit 0.
+    let out = Command::new(BIN)
+        .args(["set", "done"])
+        .env("TMUX", TMUX)
+        .env("TMUX_PANE", TMUX_PANE)
+        .env("PATH", "/nonexistent")
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert_ok_and_silent(&out);
+}
+
+#[test]
+fn set_is_silent_when_tmux_prints_invalid_utf8() {
+    // `String::from_utf8` can fail; the error path still exits 0 from a hook.
+    let dir = fake_tmux_dir();
+    write_fake_tmux(
+        &dir,
+        "#!/bin/sh\nif [ \"$1\" = \"list-panes\" ]; then python3 -c \"import sys; sys.stdout.buffer.write(b'\\xff\\n')\"; exit 0; fi\nexit 0\n",
+    );
+    let out = run(&["set", "done"], &format!("{}:", dir.display()));
+    assert_ok_and_silent(&out);
+}
+
+#[test]
+fn hook_is_silent_when_tmux_is_not_executable() {
+    // A file called tmux that exists but cannot be executed hits a different
+    // spawn error than a missing binary.
+    let dir = fake_tmux_dir();
+    fs::write(dir.join("tmux"), "#!/bin/sh\nexit 0\n").expect("write tmux stub");
+    let out = Command::new(BIN)
+        .args(["set", "done"])
+        .env("TMUX", TMUX)
+        .env("TMUX_PANE", TMUX_PANE)
+        .env("PATH", dir.display().to_string())
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert_ok_and_silent(&out);
+}
+
+#[test]
+fn tmux_agent_status_pane_overrides_tmux_pane() {
+    let dir = fake_tmux_dir();
+    let log = dir.join("calls");
+    write_fake_tmux(
+        &dir,
+        &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", log.display()),
+    );
+    let out = Command::new(BIN)
+        .args(["set", "done"])
+        .env("TMUX", TMUX)
+        .env("TMUX_PANE", TMUX_PANE)
+        .env("TMUX_AGENT_STATUS_PANE", "%override")
+        .env("PATH", format!("{}:", dir.display()))
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert_ok_and_silent(&out);
+    let calls = fs::read_to_string(&log).expect("fake tmux logged calls");
+    assert!(
+        calls.contains("set-option -p -t %override @agent_pane_status done"),
+        "calls: {calls}"
+    );
+}
+
+#[test]
+fn empty_tmux_agent_status_pane_falls_back_to_tmux_pane() {
+    let dir = fake_tmux_dir();
+    let log = dir.join("calls");
+    write_fake_tmux(
+        &dir,
+        &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", log.display()),
+    );
+    let out = Command::new(BIN)
+        .args(["set", "done"])
+        .env("TMUX", TMUX)
+        .env("TMUX_PANE", TMUX_PANE)
+        .env("TMUX_AGENT_STATUS_PANE", "")
+        .env("PATH", format!("{}:", dir.display()))
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert_ok_and_silent(&out);
+    let calls = fs::read_to_string(&log).expect("fake tmux logged calls");
+    assert!(
+        calls.contains(&format!(
+            "set-option -p -t {TMUX_PANE} @agent_pane_status done"
+        )),
+        "calls: {calls}"
+    );
+}
+
+#[test]
+fn empty_tmux_pane_means_not_in_tmux() {
+    // The binary must treat an empty TMUX_PANE as "not inside tmux" and not
+    // attempt to invoke tmux at all.
+    let dir = fake_tmux_dir();
+    let log = dir.join("calls");
+    write_fake_tmux(
+        &dir,
+        &format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", log.display()),
+    );
+    let out = Command::new(BIN)
+        .args(["set", "done"])
+        .env("TMUX", TMUX)
+        .env("TMUX_PANE", "")
+        .env("PATH", format!("{}:", dir.display()))
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert_ok_and_silent(&out);
+    assert!(
+        !log.exists(),
+        "must not invoke tmux when TMUX_PANE is empty"
+    );
 }

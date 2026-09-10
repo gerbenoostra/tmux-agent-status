@@ -243,3 +243,104 @@ fn notify_stdin_reads_payload() {
     assert!(out.stdout.is_empty());
     assert!(out.stderr.is_empty());
 }
+
+#[test]
+fn notify_payload_is_mapped_and_run_as_hook_command() {
+    // `post_agent` maps to `done`. No tmux is available in the test process, so
+    // the pane resolution short-circuits and the command exits 0.
+    let out = run(&[
+        "notify",
+        "--agent",
+        "mistral-vibe",
+        r#"{"hook_event_name":"post_agent"}"#,
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn notify_rejects_extra_arguments() {
+    let out = run(&["notify", "--agent", "mistral-vibe", "one", "two"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("unexpected arguments: notify one two"));
+}
+
+#[test]
+fn notify_disabled_is_a_no_op() {
+    let out = Command::new(BIN)
+        .args(["notify", "--agent", "mistral-vibe", "{}"])
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .env("TMUX_AGENT_STATUS_DISABLED", "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn notify_debug_logs_dropped_payloads() {
+    let out = Command::new(BIN)
+        .args([
+            "notify",
+            "--agent",
+            "mistral-vibe",
+            r#"{"hook_event_name":"unknown"}"#,
+        ])
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .env("TMUX_AGENT_STATUS_DEBUG", "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stdout.is_empty());
+    let err = stderr(&out);
+    assert!(err.contains("dropped payload"));
+    assert!(err.contains("mistral-vibe"));
+}
+
+#[cfg(unix)]
+#[test]
+fn notify_stdin_with_terminal_is_a_no_op() {
+    // Allocate a pseudo-terminal and hand the slave fd to the child as stdin.
+    // The binary must detect the terminal and return without reading.
+    use std::fs::File;
+    use std::os::fd::FromRawFd;
+
+    let mut master: libc::c_int = -1;
+    let mut slave: libc::c_int = -1;
+    let rc = unsafe {
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut::<libc::termios>(),
+            std::ptr::null_mut::<libc::winsize>(),
+        )
+    };
+    assert_eq!(rc, 0, "openpty failed");
+
+    let slave_file = unsafe { File::from_raw_fd(slave) };
+    let child = Command::new(BIN)
+        .args(["notify", "--agent", "mistral-vibe", "--stdin"])
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .stdin(slave_file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary spawns");
+
+    unsafe {
+        let _ = libc::close(master);
+    }
+
+    let out = child.wait_with_output().expect("the binary runs");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
+}
