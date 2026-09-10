@@ -64,7 +64,7 @@ immediately if the pane is already focused, so a `done` on the window you are al
 never renders at all. **Focused means a client is attached.** tmux calls a detached session's
 current window active, but nobody is looking at it, so a turn that ends while you are away must
 leave its glyph to be seen on the next attach. An attached client whose terminal window is hidden
-is a further case, and is 006.
+is a further case, and is 008.
 
 **A fifth state, `stale` 💤, comes later - not in the first version.** Sticky `working` has one
 failure mode: an agent that dies without firing `Stop` or `StopFailure` leaves a permanent 🤖.

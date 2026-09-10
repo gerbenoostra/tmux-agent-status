@@ -1,6 +1,6 @@
 # 005 - Agents beyond Claude Code
 
-Status: in progress - infrastructure and agent support being added.
+Status: completed - infrastructure, all selected Shape A agents, and two Shape B agents are implemented and verified.
 
 Covers *how a second, third and fourth agent get a glyph*. The states, the rank, the rollup and the
 "absent glyph means no signal" principle are 001 and do not change here. 002 deferred this on
