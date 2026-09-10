@@ -1,0 +1,73 @@
+{
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status reset >/dev/null 2>&1 || true; printf '{}\n'"
+        }
+      ]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status finish >/dev/null 2>&1 || true; printf '{}\n'"
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'"
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set working >/dev/null 2>&1 || true; printf '{}\n'"
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "^(ask_user_question|exit_plan_mode)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set waiting >/dev/null 2>&1 || true; printf '{}\n'"
+        }
+      ]
+    }
+  ],
+  "PermissionRequest": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set waiting >/dev/null 2>&1 || true; printf '{}\n'"
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set done >/dev/null 2>&1 || true; printf '{}\n'"
+        }
+      ]
+    }
+  ]
+}

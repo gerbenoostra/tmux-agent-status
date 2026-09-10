@@ -11,6 +11,7 @@ that says the event does not exist.
 | [GitHub Copilot CLI](copilot.md) | A | yes | no | yes | unknown | `errorOccurred` | `notification` | yes | unknown | unknown | yes | yes | 2026-09-09 |
 | [Droid](droid.md) | A | yes | no | `SubagentStop` only | unknown | inferred | `Notification` | yes | yes | unknown | yes | yes | 2026-09-09 |
 | [Cursor](cursor.md) | A | yes | no | yes | unknown | no | unknown | yes | yes | unknown | yes | yes | 2026-09-09 |
+| [Devin CLI](devin.md) | A | yes (project only) | no | `run_subagent` tool only | unknown | no | unknown | yes | yes | unknown | yes | yes | 2026-09-10 |
 | [Grok CLI](grok.md) | A | yes | project hooks need `/hooks-trust` | inferred from tool | unknown | no | unknown | lenient | yes | unknown | yes | yes | 2026-09-09 |
 | [Kiro](kiro.md) | A | yes | no | no stop event | yes | no | no | no | yes | unknown | CLI: `AgentSpawn` | no | 2026-09-09 |
 | [Mistral Vibe](mistral-vibe.md) | B | yes (TOML) | trusted-folder gate | no distinct signal | unknown | no | no | strict | yes | unknown | no | no | 2026-09-09 |

@@ -251,7 +251,16 @@ survey, not a queue.
 
 Research results of OpenCode, Codex CLI, Gemini CLI, Copilot CLI, Droid, and Cursor are in (../research/agent-hook-systems-01.md).
 Research results of Grok CLI,  Amp,  Kiro, Mistral Vibe, and Antigravity are in (../research/agent-hook-systems-02.md).
-Research results of Devin CLI are in (../research/agent-hook-systems-03-devin.md).
+Research results of Devin CLI are in (../research/agent-hook-systems-03-devin.md). Devin was
+surveyed after the rest, on 2026-09-10; it is Shape A with a standalone drop-in and is implemented
+in step 4. Two of that survey's suggestions are deliberately not implemented: a `PostToolUse` hook
+that shells out to `python3` to read `tool_response.error` (that is the shell glue and the JSON
+parser this plan rules out, and 009 settled that a failed tool call is not an aborted turn), and an
+`--agent devin` flag on `set`/`reset`, which only `notify` takes. The `waiting` mapping is not
+from the survey either: it matches `PreToolUse` on `^(ask_user_question|exit_plan_mode)$`, Devin's
+own lower-case tool names, because a blanket `PreToolUse -> working` overwrites the `waiting` a
+`PermissionRequest` just wrote. Every row was driven on Devin CLI v3000.10.21 in a real pane
+except `PermissionRequest`, which the run auto-approved.
 
 ## Agents that publish nothing
 
@@ -309,7 +318,7 @@ daemon" rule rule out. An absent glyph already has a defined meaning.
 4. Shape A agents. Each gets a mapping table, a shipped drop-in file under `share/agents/<agent>/`
    when the agent supports one, the packaging changes that deliver it, and a `docs/agents/<agent>.md`
    page. No new subcommand is needed; the existing `set`/`reset`/`finish` commands are the adapter.
-   Agents: Codex CLI, GitHub Copilot CLI, Droid, Cursor, Grok CLI, Kiro.
+   Agents: Codex CLI, GitHub Copilot CLI, Droid, Cursor, Grok CLI, Kiro, Devin CLI.
 5. Shape B agents. Add the `notify --agent <name>` subcommand with JSON payload mapping, plus the
    per-agent docs and fixtures. Agents: Gemini CLI (manual settings.json merge), Mistral Vibe.
 6. Re-read the two tables against each other; if they needed different shapes, fix the shape before
