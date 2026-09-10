@@ -8,7 +8,7 @@ Covers *how a second, third and fourth agent get a glyph*. The states, the rank,
 "absent glyph means no signal" principle are 001 and do not change here. 002 deferred this on
 purpose: "adding a second agent is what shows whether the shape is right".
 
-Research (committed in `tasks/research/`) surveyed eleven agents and placed them into the three
+Research (committed in `tasks/research/`) surveyed twelve agents and placed them into the three
 integration shapes. Shape C is deferred; this plan now implements the shared infrastructure, all
 Shape A agents found, and the two Shape B agents.
 
@@ -251,6 +251,7 @@ survey, not a queue.
 
 Research results of OpenCode, Codex CLI, Gemini CLI, Copilot CLI, Droid, and Cursor are in (../research/agent-hook-systems-01.md).
 Research results of Grok CLI,  Amp,  Kiro, Mistral Vibe, and Antigravity are in (../research/agent-hook-systems-02.md).
+Research results of Devin CLI are in (../research/agent-hook-systems-03-devin.md).
 
 ## Agents that publish nothing
 
