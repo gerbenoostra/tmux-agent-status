@@ -94,3 +94,51 @@ jobs:
       - run: nix build .#tmux-agent-status
       # The packaging path is only proven by running what came out of it.
       - run: ./result/bin/tmux-agent-status --version
+      - name: Assert every shipped agent file is in the Nix output
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r f; do
+            rel="${f#share/agents/}"
+            if [[ ! -e "result/share/agents/$rel" ]]; then
+              echo "missing in Nix output: $rel" >&2
+              missing=1
+            fi
+          done < <(find share/agents -type f -o -type l)
+          exit "$missing"
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+      - run: cargo build --release --locked
+      - name: Assert every shipped agent file is in the release tarball
+        run: |
+          set -euo pipefail
+          target="$(rustc -vV | sed -n 's|host: ||p')"
+          name="tmux-agent-status-${GITHUB_REF_NAME:-ci}-${target}"
+          mkdir -p "dist/$name/share/tmux" "dist/$name/share/agents"
+          cp "target/release/tmux-agent-status" "dist/$name/"
+          cp README.md LICENSE "dist/$name/"
+          cp share/tmux/tmux-agent-status.conf "dist/$name/share/tmux/"
+          # -L, not -R alone: share/agents/claude-code/hooks.json is a symlink
+          # into plugins/, which the tarball does not carry.
+          cp -RL share/agents/* "dist/$name/share/agents/"
+          tar -C dist -czf "$name.tar.gz" "$name"
+
+          expected=$(mktemp)
+          actual=$(mktemp)
+          find share/agents -type f -o -type l | sed 's|^share/agents/||' | sort > "$expected"
+          tar -tzf "$name.tar.gz" \
+            | grep '/share/agents/.' \
+            | sed 's|^[^/]*/share/agents/||' \
+            | grep -v '/$' \
+            | sort -u > "$actual"
+
+          if ! diff -u "$expected" "$actual"; then
+            echo "release tarball agent files do not match share/agents/" >&2
+            exit 1
+          fi
