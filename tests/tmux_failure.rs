@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
+mod support;
+
 const TMUX_PANE: &str = "%0";
 const TMUX: &str = "/tmp/tmux-agent-status-test";
 
@@ -44,7 +45,7 @@ fn write_fake_tmux(dir: &std::path::Path, script: &str) {
 /// assert on; an exported `TMUX_AGENT_STATUS_DISABLED` would turn most of this
 /// file into a vacuous pass. Inherited state must not decide what a test proves.
 fn command(args: &[&str], path: &str) -> Command {
-    let mut cmd = Command::new(BIN);
+    let mut cmd = Command::new(support::BIN);
     cmd.args(args)
         .env("TMUX", TMUX)
         .env("TMUX_PANE", TMUX_PANE)

@@ -10,6 +10,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod support;
+
 /// One watched event, in the form both sources can be reduced to.
 ///
 /// `matcher` is `None` for "all", which the manifest expresses by omitting the key and the README
@@ -32,7 +34,6 @@ fn normalise(mut entries: Vec<HookEntry>, source: &str) -> Vec<HookEntry> {
     entries
 }
 
-const STATES: [&str; 4] = ["working", "waiting", "done", "error"];
 const EXPECTED_EVENTS: usize = 8;
 
 fn repo_root() -> PathBuf {
@@ -48,22 +49,8 @@ fn read(path: &Path) -> String {
 }
 
 /// The arguments passed to the binary, rejecting anything outside the exact hook command surface.
-fn arguments_of(command: &str) -> String {
-    let arguments = command
-        .strip_prefix("tmux-agent-status ")
-        .unwrap_or_else(|| panic!("hook command does not invoke `tmux-agent-status`: {command}"));
-    if let Some(state) = arguments.strip_prefix("set ") {
-        assert!(
-            STATES.contains(&state),
-            "hook command sets an unknown state: {command}"
-        );
-    } else {
-        assert!(
-            ["reset", "finish"].contains(&arguments),
-            "hook command has unknown arguments: {command}"
-        );
-    }
-    arguments.to_string()
+fn arguments_of(source: &str, command: &str) -> String {
+    support::command::parse_command(source, command).arguments()
 }
 
 fn manifest_entries() -> Vec<HookEntry> {
@@ -97,45 +84,15 @@ fn manifest_entries() -> Vec<HookEntry> {
                 let command = hook["command"]
                     .as_str()
                     .unwrap_or_else(|| panic!("`{event}` has a hook with no command"));
-                entries.push((event.clone(), matcher.clone(), arguments_of(command)));
+                entries.push((
+                    event.clone(),
+                    matcher.clone(),
+                    arguments_of("hooks.json", command),
+                ));
             }
         }
     }
     normalise(entries, "hooks.json")
-}
-
-/// Split one table row into cells on the `|` separators, leaving the `\|` a markdown cell needs to
-/// carry a literal pipe - the `PreToolUse` matcher is exactly that case.
-fn split_cells(row: &str) -> Vec<String> {
-    let mut cells = vec![String::new()];
-    let mut escaped = false;
-    for c in row.chars() {
-        match c {
-            '|' if !escaped => cells.push(String::new()),
-            _ => {
-                escaped = c == '\\' && !escaped;
-                cells.last_mut().expect("never empty").push(c);
-            }
-        }
-    }
-    cells.iter().map(|c| c.trim().to_string()).collect()
-}
-
-/// The first markdown table after the given heading, as rows of trimmed cells.
-fn table_after(markdown: &str, heading: &str) -> Vec<Vec<String>> {
-    let section = markdown
-        .split_once(heading)
-        .unwrap_or_else(|| panic!("README has no `{heading}` heading"))
-        .1;
-    let mut rows = Vec::new();
-    for line in section.lines().skip_while(|l| !l.starts_with('|')) {
-        if !line.starts_with('|') {
-            break;
-        }
-        rows.push(split_cells(line.trim_matches('|')));
-    }
-    assert!(!rows.is_empty(), "no table found after `{heading}`");
-    rows
 }
 
 /// A README cell holding a value: backticks stripped, an escaped pipe restored.
@@ -145,7 +102,7 @@ fn unformat(cell: &str) -> String {
 
 fn agent_doc_entries() -> Vec<HookEntry> {
     let doc = read(&repo_root().join("docs/agents/claude-code.md"));
-    let rows = table_after(&doc, "## Supported states");
+    let rows = support::markdown::table_after(&doc, "## Supported states");
     assert_eq!(
         rows[0],
         ["State", "Claude Code event", "Command", "Notes"],
@@ -157,7 +114,10 @@ fn agent_doc_entries() -> Vec<HookEntry> {
     for row in &rows[2..] {
         assert_eq!(row.len(), 4, "hook table row is not four cells: {row:?}");
         let command = unformat(&row[2]);
-        let arguments = arguments_of(&command);
+        let arguments = arguments_of(
+            "docs/agents/claude-code.md's Supported states table",
+            &command,
+        );
 
         for event_spec in row[1].split(", ") {
             // The cell wraps both the event and any matcher in backticks; remove them all before

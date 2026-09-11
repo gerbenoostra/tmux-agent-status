@@ -6,7 +6,7 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
-const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
+mod support;
 
 /// The binary outside tmux, with every `TMUX_AGENT_STATUS_*` variable cleared.
 ///
@@ -14,7 +14,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
 /// other two switches change what the binary does at all: inherited state must
 /// never decide what a test proves.
 fn command(args: &[&str]) -> Command {
-    let mut cmd = Command::new(BIN);
+    let mut cmd = Command::new(support::BIN);
     cmd.args(args)
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")

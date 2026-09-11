@@ -82,16 +82,7 @@ fn run() -> Result<ExitCode, MainError> {
         "notify" => run_notify(pargs),
         _ => {
             let free = free_strings(pargs)?;
-            if free.is_empty() {
-                Err(MainError::from(format!(
-                    "unexpected arguments: {subcommand}"
-                )))
-            } else {
-                Err(MainError::from(format!(
-                    "unexpected arguments: {subcommand} {}",
-                    free.join(" ")
-                )))
-            }
+            Err(unexpected_arguments(&subcommand, free))
         }
     }
 }
@@ -105,12 +96,7 @@ fn run_set(mut pargs: Arguments) -> Result<ExitCode, MainError> {
         return Err(MainError::from("set requires a state"));
     }
     if free.len() > 1 {
-        let mut all = vec!["set".to_string()];
-        all.extend(free);
-        return Err(MainError::from(format!(
-            "unexpected arguments: {}",
-            all.join(" ")
-        )));
+        return Err(unexpected_arguments("set", free));
     }
 
     let state = free[0].parse::<State>()?;
@@ -121,7 +107,7 @@ fn run_set(mut pargs: Arguments) -> Result<ExitCode, MainError> {
 fn run_reset(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
-    reject_extra(pargs, "reset")?;
+    reject_extra_with_prefix(pargs, "reset")?;
     let pane = pane.as_deref();
     Ok(run_hook(|| command::reset(pane), json))
 }
@@ -129,23 +115,22 @@ fn run_reset(mut pargs: Arguments) -> Result<ExitCode, MainError> {
 fn run_finish(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
-    reject_extra(pargs, "finish")?;
+    reject_extra_with_prefix(pargs, "finish")?;
     let pane = pane.as_deref();
     Ok(run_hook(|| command::finish(pane), json))
 }
 
 fn run_clear_window(mut pargs: Arguments) -> Result<ExitCode, MainError> {
+    // The pane is accepted as an optional positional argument because tmux
+    // hooks pass `#{pane_id}`, which expands to "" when no pane is available.
+    // `--pane ""` is treated as absent; a positional lets the same hook line
+    // work without `--pane` having to parse an empty value.
     let pane_flag = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     let free = free_strings(pargs)?;
 
     if free.len() > 1 {
-        let mut all = vec!["clear-window".to_string()];
-        all.extend(free);
-        return Err(MainError::from(format!(
-            "unexpected arguments: {}",
-            all.join(" ")
-        )));
+        return Err(unexpected_arguments("clear-window", free));
     }
 
     let positional = free.first().map(|s| s.as_str());
@@ -165,12 +150,7 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, MainError> {
 
     let payload = if from_stdin {
         if !free.is_empty() {
-            let mut all = vec!["notify".to_string()];
-            all.extend(free);
-            return Err(MainError::from(format!(
-                "unexpected arguments: {}",
-                all.join(" ")
-            )));
+            return Err(unexpected_arguments("notify", free));
         }
         if std::io::stdin().is_terminal() {
             debug("notify: --stdin with a terminal is a no-op");
@@ -189,14 +169,7 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, MainError> {
         match free.as_slice() {
             [] => return Err(MainError::from("notify requires a payload or --stdin")),
             [payload] => payload.clone(),
-            _ => {
-                let mut all = vec!["notify".to_string()];
-                all.extend(free);
-                return Err(MainError::from(format!(
-                    "unexpected arguments: {}",
-                    all.join(" ")
-                )));
-            }
+            _ => return Err(unexpected_arguments("notify", free)),
         }
     };
 
@@ -242,15 +215,16 @@ fn free_strings(pargs: Arguments) -> Result<Vec<String>, MainError> {
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn reject_extra(pargs: Arguments, command: &str) -> Result<(), MainError> {
+fn unexpected_arguments(command: &str, args: Vec<String>) -> MainError {
+    let mut all = vec![command.to_string()];
+    all.extend(args);
+    MainError::from(format!("unexpected arguments: {}", all.join(" ")))
+}
+
+fn reject_extra_with_prefix(pargs: Arguments, command: &str) -> Result<(), MainError> {
     let free = free_strings(pargs)?;
     if !free.is_empty() {
-        let mut all = vec![command.to_string()];
-        all.extend(free);
-        return Err(MainError::from(format!(
-            "unexpected arguments: {}",
-            all.join(" ")
-        )));
+        return Err(unexpected_arguments(command, free));
     }
     Ok(())
 }
