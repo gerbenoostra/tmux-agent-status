@@ -1,5 +1,5 @@
 ---
-description: Read-only check of the tmux-agent-status setup - binary, tmux snippet, format term, hooks.
+description: Read-only check of the tmux-agent-status setup - binary, tmux snippet, format, bell path, hooks.
 allowed-tools: Bash(printenv TMUX), Bash(tmux-agent-status --version), Bash(command -v tmux-agent-status), Bash(tmux show-hooks:*), Bash(tmux show-options:*), Bash(tmux display-message:*), Read(~/.claude/settings.json)
 disable-model-invocation: true
 ---
@@ -83,7 +83,30 @@ Report both values, and whether `@agent_status` appears in **each**.
   #{?@agent_status, #{@agent_status},}
   ```
 
-**4. The agent hooks.**
+**4. The bell path.**
+Run all three:
+
+```sh
+tmux show-options -g bell-action
+tmux show-options -gw monitor-bell
+tmux show-options -g visual-bell
+```
+
+Report each value and its effect:
+
+- `bell-action other`: bells from the current window of the session are dropped. This includes an
+  agent running in the window tmux calls current while its terminal tab, desktop or monitor is
+  hidden. Recommend `set -g bell-action any`, while warning that this also forwards shell, editor
+  and other bells from the current window.
+- `monitor-bell off`: tmux ignores pane bells, so no highlight appears and no bell reaches the
+  terminal. Recommend `setw -g monitor-bell on`.
+- `visual-bell on`: tmux replaces the bell with a message instead of passing it to the terminal.
+  Recommend `set -g visual-bell off` if the user wants the terminal to receive it.
+
+These are user preferences, not settings this plugin may write. Passing this check means
+`bell-action any`, `monitor-bell on` and `visual-bell off`.
+
+**5. The agent hooks.**
 This plugin owns them: installing it is what registers the eight Claude Code events. Say so.
 
 Then read `~/.claude/settings.json` and check whether its `hooks` section *also* contains
@@ -108,5 +131,7 @@ add what to change and where. Finish with what to expect once it is fixed - 🤖
 with no agent renders exactly as it did before.
 
 If every step passes and the user still sees no glyph, the likely cause is that the turn ended on
-the window they were already watching: that state is cleared on the spot by design, and the bell is
-the only signal. Say that rather than inventing a further check.
+the window they were already watching: that state is cleared on the spot by design. When the bell
+path in step 4 passes, the terminal-side bell is the remaining signal. If that path does not pass,
+name its failing setting rather than claiming a signal could have reached the terminal or inventing
+a further check.
