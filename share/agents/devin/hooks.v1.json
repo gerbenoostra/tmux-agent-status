@@ -1,0 +1,73 @@
+{
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status reset --json"
+        }
+      ]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status finish --json"
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set working --json"
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set working --json"
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "^(ask_user_question|exit_plan_mode)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set waiting --json"
+        }
+      ]
+    }
+  ],
+  "PermissionRequest": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set waiting --json"
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "tmux-agent-status set done --json"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "tmux-agent-status-reset",
+      "trigger": "agentSpawn",
+      "action": {
+        "type": "command",
+        "command": "tmux-agent-status reset"
+      }
+    },
+    {
+      "name": "tmux-agent-status-working-prompt",
+      "trigger": "userPromptSubmit",
+      "action": {
+        "type": "command",
+        "command": "tmux-agent-status set working"
+      }
+    },
+    {
+      "name": "tmux-agent-status-working-pre",
+      "trigger": "preToolUse",
+      "action": {
+        "type": "command",
+        "command": "tmux-agent-status set working"
+      }
+    },
+    {
+      "name": "tmux-agent-status-working-post",
+      "trigger": "postToolUse",
+      "action": {
+        "type": "command",
+        "command": "tmux-agent-status set working"
+      }
+    },
+    {
+      "name": "tmux-agent-status-done",
+      "trigger": "stop",
+      "action": {
+        "type": "command",
+        "command": "tmux-agent-status set done"
+      }
+    }
+  ]
+}

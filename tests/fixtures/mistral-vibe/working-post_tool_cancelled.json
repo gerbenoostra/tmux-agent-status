@@ -1,0 +1,15 @@
+{
+  "session_id": "sess-1",
+  "parent_session_id": "",
+  "transcript_path": "/tmp/transcript.md",
+  "cwd": "/home/user/project",
+  "hook_event_name": "post_tool",
+  "tool_name": "bash",
+  "tool_call_id": "call-3",
+  "tool_input": "cat",
+  "tool_status": "cancelled",
+  "tool_output": "",
+  "tool_output_text": "",
+  "tool_error": "",
+  "duration_ms": 10
+}

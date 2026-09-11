@@ -1,8 +1,9 @@
 # Installing tmux-agent-status
 
-Below we list the different installation options.
-After installing you need to finish with the configuration setup steps in the [README](../README.md):
-the binary on its own does nothing until tmux and your agent know about it.
+Below we list the different installation options of the helper tool (`tmux-agent-status` cli).
+After installing, you need to finish with the configuration setup steps in the [README](../README.md)
+to capture agent events, trigger tmux events, and present the glyph.
+The binary on its own does nothing until tmux and your agent know about it.
 
 ## Choose installation paths
 
@@ -20,7 +21,7 @@ are examples, not requirements:
   generally requires administrator permissions.
 
 Whichever directory you choose must be on the `PATH` inherited by the agent hooks. The tmux snippet
-can live anywhere readable by tmux; its `source-file` line must use the same path. The prebuilt and
+can live anywhere readable by tmux; its `source-file` line can just import from there. The prebuilt and
 source examples use variables so either location can be changed:
 
 ```sh
@@ -44,7 +45,7 @@ and add it to the home-manager module:
 home.packages = [ inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status ];
 ```
 
-**2. The tmux snippet, at a stable path.**
+**2. The tmux snippet and agent drop-ins, at stable paths.**
 
 Place the tmux-agent-status configuration at a deliberate path such that it can be imported from `.tmux.conf`:
 ```nix
@@ -52,23 +53,14 @@ home.file.".tmux/tmux-agent-status.conf".source =
   "${inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status}/share/tmux/tmux-agent-status.conf";
 ```
 
-Then add the following line to `.tmux.conf`:
+Then in step 2, use the following line in `.tmux.conf` to register the tmux hooks:
 ```tmux
 source-file ~/.tmux/tmux-agent-status.conf
 ```
 
-**Steps 3 and 4.**
-Define a format term and configure agent hooks manually, as described in the [README](../README.md).
-
-Verify the tool and hooks are installed:
-
-```sh
-tmux-agent-status --version
-tmux show-hooks -g | grep tmux-agent-status    # session-window-changed
-tmux show-hooks -gw | grep tmux-agent-status   # window-pane-changed
-```
-
-Note that if your agent's hook cannot find `tmux-agent-status` on `PATH`, it will silently fail.
+For step 4, the agent configs are in the package at
+`${inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status}/share/agents/<agent>/`.
+Copy or merge the appropriate file as described on [your agent's page](agents/README.md).
 
 ## nix profile
 
@@ -76,8 +68,13 @@ Note that if your agent's hook cannot find `tmux-agent-status` on `PATH`, it wil
 nix profile install github:gerbenoostra/tmux-agent-status
 ```
 
-The snippet is then at
-`~/.nix-profile/share/tmux/tmux-agent-status.conf`, which `source-file` can read directly.
+Then in step 2, use the following line in `.tmux.conf` to register the tmux hooks:
+```tmux
+source-file ~/.nix-profile/share/tmux/tmux-agent-status.conf
+```
+
+For step 4, the agent configs are under `~/.nix-profile/share/agents/<agent>/`. Copy or merge the
+appropriate file as described on [your agent's page](agents/README.md).
 
 ## Prebuilt binary
 
@@ -100,13 +97,34 @@ cp "tmux-agent-status-$tag-$target/share/tmux/tmux-agent-status.conf" "$tmux_con
 chmod 644 "$tmux_conf_dir/tmux-agent-status.conf"
 ```
 
+Then in step 2, use the following line in `.tmux.conf` to register the tmux hooks:
+```tmux
+source-file ~/.tmux/tmux-agent-status.conf
+```
+
+The tarball also carries `share/agents/<agent>/`. For step 4, copy the file for your agent to the location [its page](agents/README.md) describes, for example:
+
+```sh
+mkdir -p ~/.codex
+cp "tmux-agent-status-$tag-$target/share/agents/codex/hooks.json" ~/.codex/hooks.json
+```
+
 ## cargo
 
 ```sh
 cargo install --git https://github.com/gerbenoostra/tmux-agent-status
 ```
 
-This installs the binary only; take the tmux snippet from the checkout or the release tarball.
+This installs the binary only. Take the tmux snippet and agent configs from a checkout or release
+tarball. Copy `share/tmux/tmux-agent-status.conf` to `~/.tmux/tmux-agent-status.conf`, then use that
+path for step 2:
+
+```tmux
+source-file ~/.tmux/tmux-agent-status.conf
+```
+
+For step 4, use `share/agents/<agent>/` from the same checkout or extracted tarball. Copy or merge
+the appropriate file as described on [your agent's page](agents/README.md).
 
 ## From source
 
@@ -124,3 +142,12 @@ chmod 755 "$bin_dir/tmux-agent-status"
 cp share/tmux/tmux-agent-status.conf "$tmux_conf_dir/tmux-agent-status.conf"
 chmod 644 "$tmux_conf_dir/tmux-agent-status.conf"
 ```
+
+For step 2, source the copied snippet from `.tmux.conf`:
+
+```tmux
+source-file ~/.tmux/tmux-agent-status.conf
+```
+
+For step 4, the agent configs are in the checkout under `share/agents/<agent>/`. Copy or merge the
+appropriate file as described on [your agent's page](agents/README.md).

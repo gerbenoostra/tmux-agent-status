@@ -20,6 +20,9 @@ rustPlatform.buildRustPackage {
   postInstall = ''
     install -Dm644 share/tmux/tmux-agent-status.conf \
       $out/share/tmux/tmux-agent-status.conf
+    for f in share/agents/*/*; do
+      install -Dm644 "$f" "$out/$f"
+    done
   '';
 
   meta = {

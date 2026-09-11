@@ -39,6 +39,22 @@ Alternatively, `cargo install --path .` copies the local version into Cargo's co
 directory, normally `~/.cargo/bin`. It must be rerun after every edit and can still shadow another
 installation.
 
+## Debugging tmux hooks
+Your tmux is configured with two tmux hooks, both call `tmux-agent-status clear-window <pane>`, which clears the status
+; the optional pane argument defaults to `$TMUX_PANE` for manual calls.
+pane without a value.
+
+## Debugging dropped events
+
+Set `TMUX_AGENT_STATUS_DEBUG=1` to log diagnostic messages to stderr. When the `notify`
+subcommand receives a payload that does not match any known event mapping, it silently ignores it
+(exits 0, writes nothing). With this flag, those dropped events are printed to stderr with a
+`tmux-agent-status:` prefix, so you can tell what arrived and why it was ignored.
+
+This is useful when capturing fixtures for a new agent, chasing an upstream payload change, or
+verifying that a mapping table entry is spelled correctly. Never logs to stdout, which agents may
+parse. Any non-empty value counts; the documented spelling is `=1`.
+
 ## Packaging
 
 **Does my packaging work?**
