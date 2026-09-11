@@ -7,6 +7,7 @@ description = "Agent lifecycle events as one glyph on the tmux window entry"
 repository = "https://github.com/gerbenoostra/tmux-agent-status"
 license = "MIT"
 readme = "README.md"
+exclude = ["tasks/"]
 keywords = ["tmux", "agent", "status", "hook"]
 categories = ["command-line-utilities"]
 
