@@ -47,9 +47,5 @@ cp /path/to/share/agents/droid/hooks.json ~/.factory/hooks.json
   the status commands print nothing, which is safe.
 - **`TMUX_PANE` inheritance is undocumented.** Use `--pane #{pane_id}` or set
   `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
-
-## Opt-out and debug
-
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
-exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr
-(shape B agents only).
+- For disabling hooks and logging dropped events, see the
+  [shared opt-out and debug settings](README.md#opt-out-and-debug).

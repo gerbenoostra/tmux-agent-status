@@ -1,6 +1,6 @@
 # Supported agents
 
-The tool works for any agent that allow hooks on lifecycle events. These should be maped to the following commands:
+The tool works for any agent that allows hooks on lifecycle events. These should be mapped to the following commands:
 ```
 tmux-agent-status reset
 tmux-agent-status set working
@@ -20,14 +20,14 @@ Blank cells link to the upstream doc or issue that says the event does not exist
 
 | Agent | Shape | Drop-in file | Needs enabling | Subagent events | Multi-session per pane | `error` event | `waiting` repeats | Stdout parsed | Payload on stdin | `TMUX_PANE` inherited | Session start | Session end | Verified |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| [Claude Code](claude-code.md) | A (plugin) | yes, via plugin | no | no | no | `StopFailure` | `Notification` | yes | yes | yes | yes | yes | plugin API |
+| [Claude Code](claude-code.md) | A (plugin) | yes, via plugin | no | no | no | `StopFailure` | `Notification` | lenient | yes | yes | yes | yes | yes | plugin API |
 | [Codex CLI](codex.md) | A | yes | hook trust (first run) | `SubagentStart`/`SubagentStop` | unknown | inferred | `PermissionRequest` | yes | yes | unknown | yes | yes | 2026-09-10 |
 | [GitHub Copilot CLI](copilot.md) | A | yes | folder trust (repo scope) | yes | unknown | `errorOccurred` | `notification` | yes | unknown | unknown | yes | yes | 2026-09-10 |
 | [Droid](droid.md) | A | yes | no | `SubagentStop` only | unknown | inferred | `Notification` | yes | yes | unknown | yes | yes | 2026-09-10 |
 | [Cursor](cursor.md) | A | yes | no | yes | unknown | no | unknown | yes | yes | unknown | yes | yes | 2026-09-10 |
 | [Devin CLI](devin.md) | A | yes (project only) | no | `run_subagent` tool only | unknown | no | unknown | yes | yes | unknown | yes | yes | 2026-09-10 |
 | [Grok CLI](grok.md) | A | yes | project hooks need `/hooks-trust` | `SubagentStart`/`SubagentStop` -> `working` | unknown | no (`StopFailure` unverified) | no (`Notification` trigger undocumented) | lenient | yes | unknown | yes | yes | 2026-09-11 |
-| [Kiro](kiro.md) | A | no (manual merge into agent config) | no | no stop event | yes | no | no | unconfirmed | yes | unknown | CLI: `agentSpawn` | no | 2026-09-10 |
+| [Kiro](kiro.md) | A | yes (v3 engine only) | no | no stop event | yes | no | no | unconfirmed | yes | unknown | CLI: `agentSpawn` | no | 2026-09-10 |
 | [Mistral Vibe](mistral-vibe.md) | B | yes (TOML) | trusted-folder gate | no distinct signal | unknown | no | no | strict | yes | unknown | no | no | 2026-09-09 |
 | [Gemini CLI](gemini.md) | B | manual settings.json merge | manual merge | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | 2026-09-09 |
 | OpenCode | C | N/A | N/A | unknown | yes | `session.error` | `permission.asked` | N/A | N/A | N/A | yes | inferred | deferred |

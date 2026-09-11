@@ -186,10 +186,10 @@ It is also documented in the [shipped snippet](./share/tmux/tmux-agent-status.co
 
 ## Interoperability
 
-The tool deliberately stays as independent and small as possible. It doesn't require any deamon processes, nor
-spawns subporcesses. It should also not interfere with your other agent or custom tmux configuration.
+The tool deliberately stays as independent and small as possible. It doesn't require any daemon processes, nor
+spawns subprocesses. It should also not interfere with your other agent or custom tmux configuration.
 
-The only footprint within tmux are the two variables `@agent_pane_status` and `@agent_status` .
+The only footprint within tmux are the two variables `@agent_pane_status` and `@agent_status`.
 
 Then you can use the format string in a way you like.
 

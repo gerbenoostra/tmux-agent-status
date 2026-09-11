@@ -90,7 +90,7 @@ correctly from `~/.grok/hooks/`, and that copying the same file into an *untrust
   the row once confirmed instead of us shipping another unverified mapping (the exact defect `005`
   and `009` both warn about).
 
-### Kiro - the one real mismatch, drop-in likely wrong for the default engine
+### Kiro - drop-in kept from online docs, default engine differs
 
 Installed via the official `curl -fsSL https://cli.kiro.dev/install | bash` (`kiro-cli 2.21.2`,
 confirmed genuine - it is the Amazon Q Developer CLI lineage, using `~/.aws/amazonq/cli-agents/` and
@@ -98,41 +98,29 @@ AWS SSO/SigV4 internals). Every auth-gated command failed cleanly and fast excep
 --no-interactive`, which started opening a browser login flow before being killed - no credentials
 were exchanged.
 
-**High-confidence mismatch**, found by running `strings` on the actual 1.5GB `kiro-cli-chat` binary:
+The `docs/agents/kiro.md` page and `share/agents/kiro/tmux-agent-status.json` are kept as the
+drop-in-file shape described in kiro.dev's online documentation. Running `strings` on the installed
+1.5GB `kiro-cli-chat` binary found the default engine uses a different vocabulary and delivery
+shape:
 
-- The real, hardcoded trigger set for the CLI's default engine is
-  `["agentSpawn","userPromptSubmit","preToolUse","postToolUse","stop"]` - **camelCase**, and there is
-  no `AgentStop`, only `stop`. The shipped `share/agents/kiro/tmux-agent-status.json` and
-  `docs/agents/kiro.md` both use PascalCase (`AgentSpawn`, `PreToolUse`, `PostToolUse`, `AgentStop`).
-- No reference to a standalone `.kiro/hooks/*.json` drop-in directory exists anywhere in the binary.
-  Hooks instead appear to load from a `"hooks"` field embedded inside a per-agent config JSON, under
-  `~/.aws/amazonq/cli-agents/*.json` or a workspace agent file - a materially different install shape
-  than "drop a file in a hooks directory."
-- kiro.dev's current public docs (`/docs/hooks/`, `/docs/hooks/types/`) describe exactly the
-  PascalCase, standalone-file system the drop-in was written from - but that appears to belong to
-  Kiro's `--v3` ("next generation") engine, which `kiro-cli` does not default to, and which could not
-  be reached without logging in.
-- `~/.config/kiro/hooks/` (the doc's documented user scope) is also unconfirmed; a CLI 2.13 changelog
-  points at `~/.kiro/hooks/` instead, and even that may be `--v3`-only.
+- The default-engine trigger set is
+  `["agentSpawn","userPromptSubmit","preToolUse","postToolUse","stop"]` - **camelCase**, with no
+  `AgentStop`.
+- No reference to a standalone `.kiro/hooks/*.json` drop-in directory exists in the default-engine
+  binary; hooks appear to load from a `"hooks"` field embedded in a per-agent config JSON under
+  `~/.aws/amazonq/cli-agents/*.json` or a workspace agent file.
+- kiro.dev's public docs (`/docs/hooks/`, `/docs/hooks/types/`) describe the standalone-file,
+  PascalCase system that the shipped drop-in was written from. That appears to belong to Kiro's
+  `--v3` ("next generation") engine, which `kiro-cli` does not default to and which could not be
+  reached without logging in.
 
-**Fixed, within what could actually be confirmed:**
-- `share/agents/kiro/tmux-agent-status.json` now uses the confirmed camelCase trigger names
-  (`agentSpawn`, `preToolUse`, `postToolUse`, `stop`), taken directly from the installed binary's own
-  trigger set. The per-hook object shape (`name`/`trigger`/`action.command`) was left unchanged -
-  there's no evidence either way on that shape, only on the trigger names.
-- `docs/agents/kiro.md` no longer presents this as a drop-in file to copy verbatim. It now documents
-  the CLI's default engine as reading hooks from a `"hooks"` field embedded in a per-agent config JSON
-  (`~/.aws/amazonq/cli-agents/*.json`), and tells the reader to merge the shipped file's `hooks` array
-  into their own agent config by hand, rather than shipping an untested guess at that embedded format.
-- The page's intro and the `docs/agents/README.md` matrix row both flag that this was verified against
-  `kiro-cli` 2.21.2's default (v2) engine only, and that whether `--v3` reaches the standalone-file,
-  PascalCase system kiro.dev's own docs describe is still open - explicitly not "unconfirmed" the way
-  the other five agents' looser ends are, but "known to differ from what was previously shipped."
+**Fixed:**
+- The `docs/agents/README.md` matrix row lists Kiro as having a drop-in file, qualified as
+  "v3 engine only". The default-engine embedded-config caveat stays on the Kiro page.
 
 **Still open:** someone who can authenticate to Kiro needs to confirm (a) whether `--v3` is reachable
 and really matches kiro.dev's PascalCase/standalone-file docs, and (b) the exact shape of the
-default engine's agent-config `"hooks"` field, since the merge instructions above assume our existing
-per-hook object shape carries over unchanged.
+default engine's agent-config `"hooks"` field.
 
 ## What's still not verified anywhere
 
@@ -144,11 +132,11 @@ accounts/API keys for each service or a volunteer who already has them.
 
 ## What was fixed and how
 
-All doc/file corrections above are applied: `docs/agents/{codex,copilot,cursor,grok,kiro}.md`,
-`docs/agents/README.md`'s matrix row and Verified date for all six agents tested this round, and
-`share/agents/kiro/tmux-agent-status.json`'s trigger names. `tests/agent_configs.rs` (the drop-in/docs
-drift validator from `009`) still passes - it checks command syntax and state coverage, which the
-Kiro trigger-name rewrite didn't change. Droid needed no changes.
+All doc/file corrections above are applied: `docs/agents/{codex,copilot,cursor,grok}.md`,
+`docs/agents/README.md`'s matrix row and Verified date for all six agents tested this round.
+`share/agents/kiro/tmux-agent-status.json` and `docs/agents/kiro.md` are kept as the online-
+documentation drop-in shape, with the default-engine caveat noted on the page. `tests/agent_configs.rs`
+(the drop-in/docs drift validator from `009`) still passes. Droid needed no changes.
 
 No new event mappings were added anywhere (Grok's `waiting`/`error`, Kiro's default-engine hook
 delivery shape) where the only evidence was a real-but-unverified event name - consistent with `005`'s

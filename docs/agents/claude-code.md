@@ -45,6 +45,8 @@ See [docs/install.md](../install.md) for where `share/agents/` lands for Nix, pr
 
 - **`StopFailure` is a genuine error event.** Nearly every other surveyed agent leaves the `error`
   column empty and has to infer an abort, or cannot see one at all.
+- **The plugin hook runner accepts empty stdout.** The status commands write nothing to stdout, so
+  no `--json` wrapper is needed in the plugin's hook set.
 - **Claude's own notification channel.** If you prefer Claude Code's built-in `\a` bell events to
   the hook's bell, see [below](#using-claude-codes-own-notification-channel).
 
