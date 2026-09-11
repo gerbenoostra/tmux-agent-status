@@ -411,8 +411,8 @@ returns `#I:#W#{?window_flags,#{window_flags}, }`, which is also the fallback if
 at all.
 
 That default then goes through the same splice as any other value, and the step writes a **new
-pair** of lines - both options, because a term in only one of them makes the glyph vanish the moment the
-window becomes current:
+pair** of lines - both options, because a term in only one of them makes the glyph vanish the
+moment the window becomes current:
 
 ```tmux
 # >>> tmux-agent-status >>>
