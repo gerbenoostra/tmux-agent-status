@@ -101,12 +101,36 @@ fn no_command_is_a_usage_error() {
 
 #[test]
 fn unexpected_arguments_are_a_usage_error() {
-    let out = run(&["surprise", "extra"]);
-    assert!(!out.status.success());
-    assert_eq!(out.status.code(), Some(2));
-    let err = stderr(&out);
-    assert!(err.contains("unexpected arguments: surprise extra"));
-    assert!(err.contains("usage:"));
+    for args in [["surprise"].as_slice(), ["surprise", "extra"].as_slice()] {
+        let out = run(args);
+        assert!(!out.status.success());
+        assert_eq!(out.status.code(), Some(2));
+        let err = stderr(&out);
+        assert!(err.contains(&format!("unexpected arguments: {}", args.join(" "))));
+        assert!(err.contains("usage:"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_arguments_are_usage_errors() {
+    use std::os::unix::ffi::OsStringExt;
+
+    for prefix in [
+        [].as_slice(),
+        ["surprise"].as_slice(),
+        ["set", "done"].as_slice(),
+        ["reset"].as_slice(),
+        ["clear-window"].as_slice(),
+        ["notify", "--agent", "mistral-vibe"].as_slice(),
+    ] {
+        let out = command(prefix)
+            .arg(std::ffi::OsString::from_vec(vec![0xff]))
+            .output()
+            .expect("the binary runs");
+        assert_eq!(out.status.code(), Some(2));
+        assert!(stderr(&out).contains("UTF-8"));
+    }
 }
 
 #[test]
@@ -117,6 +141,13 @@ fn set_without_a_state_is_a_usage_error() {
     let err = stderr(&out);
     assert!(err.contains("set requires a state"));
     assert!(err.contains("usage:"));
+}
+
+#[test]
+fn set_rejects_extra_arguments() {
+    let out = run(&["set", "done", "extra"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("unexpected arguments: set done extra"));
 }
 
 #[test]
@@ -134,9 +165,24 @@ fn boundary_commands_reject_arguments() {
 
 #[test]
 fn pane_flag_requires_a_value() {
-    let out = run(&["reset", "--pane"]);
+    for args in [
+        ["set", "done", "--pane"].as_slice(),
+        ["reset", "--pane"].as_slice(),
+        ["finish", "--pane"].as_slice(),
+        ["clear-window", "--pane"].as_slice(),
+        ["notify", "--agent", "mistral-vibe", "{}", "--pane"].as_slice(),
+    ] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(2));
+        assert!(stderr(&out).contains("--pane requires a value"));
+    }
+}
+
+#[test]
+fn clear_window_rejects_extra_arguments() {
+    let out = run(&["clear-window", "%0", "%1"]);
     assert_eq!(out.status.code(), Some(2));
-    assert!(stderr(&out).contains("--pane requires a value"));
+    assert!(stderr(&out).contains("unexpected arguments: clear-window %0 %1"));
 }
 
 #[test]
@@ -386,8 +432,7 @@ fn notify_debug_logs_dropped_payloads() {
 }
 
 #[cfg(unix)]
-#[test]
-fn notify_stdin_with_terminal_is_a_no_op() {
+fn notify_stdin_with_terminal(json: bool) {
     // Allocate a pseudo-terminal and hand the slave fd to the child as stdin.
     // The binary must detect the terminal and return without reading.
     //
@@ -414,7 +459,11 @@ fn notify_stdin_with_terminal_is_a_no_op() {
     assert_eq!(rc, 0, "openpty failed");
 
     let slave_file = unsafe { File::from_raw_fd(slave) };
-    let mut child = command(&["notify", "--agent", "mistral-vibe", "--stdin"])
+    let mut args = vec!["notify", "--agent", "mistral-vibe", "--stdin"];
+    if json {
+        args.push("--json");
+    }
+    let mut child = command(&args)
         .stdin(slave_file)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -443,8 +492,20 @@ fn notify_stdin_with_terminal_is_a_no_op() {
     );
 
     let out = child.wait_with_output().expect("the binary runs");
-    assert!(out.stdout.is_empty());
+    assert_eq!(stdout(&out), if json { "{}\n" } else { "" });
     assert!(out.stderr.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn notify_stdin_with_terminal_is_a_no_op() {
+    notify_stdin_with_terminal(false);
+}
+
+#[cfg(unix)]
+#[test]
+fn notify_stdin_with_terminal_supports_json() {
+    notify_stdin_with_terminal(true);
 }
 
 #[test]

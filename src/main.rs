@@ -351,13 +351,5 @@ states: {}
 fn version() -> String {
     // The dev loop deliberately shadows the installed binary through PATH, and
     // a shadow you cannot see is a shadow that wastes an afternoon.
-    let exe = std::env::current_exe()
-        .map(|path| path.display().to_string())
-        .unwrap_or("<unknown>".to_owned());
-    format!(
-        "{} {}\nrunning from {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        exe
-    )
+    tmux_agent_status::version::text(std::env::current_exe())
 }
