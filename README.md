@@ -87,7 +87,6 @@ For example:
 ```tmux
 setw -g monitor-bell on
 set -g bell-action any
-set -g visual-bell off
 setw -g window-status-bell-style 'fg=magenta,bold,nodim'
 ```
 
