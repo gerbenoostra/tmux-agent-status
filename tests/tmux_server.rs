@@ -8,7 +8,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
+mod support;
 
 /// What an idle pane runs. The tool resolves panes from `$TMUX_PANE` and never
 /// inspects processes, so a pane does not have to look like an agent.
@@ -90,10 +90,22 @@ impl Server {
 
     /// Run the binary as a hook would: inside this server, from this pane.
     fn agent_status(&self, pane: &str, args: &[&str]) -> Output {
-        Command::new(BIN)
+        Command::new(support::BIN)
             .args(args)
             .env("TMUX", format!("{},0,0", self.socket_path()))
             .env("TMUX_PANE", pane)
+            .stdin(Stdio::null())
+            .output()
+            .expect("the binary runs")
+    }
+
+    /// Run the binary with no $TMUX_PANE, using $TMUX_AGENT_STATUS_PANE instead.
+    fn agent_status_pane_env(&self, pane: &str, args: &[&str]) -> Output {
+        Command::new(support::BIN)
+            .args(args)
+            .env("TMUX", format!("{},0,0", self.socket_path()))
+            .env("TMUX_AGENT_STATUS_PANE", pane)
+            .env_remove("TMUX_PANE")
             .stdin(Stdio::null())
             .output()
             .expect("the binary runs")
@@ -151,7 +163,7 @@ impl Server {
             "-P",
             "-F",
             "#{window_id}",
-            &format!("'{BIN}' {arguments}; {IDLE}"),
+            &format!("'{}' {arguments}; {IDLE}", support::BIN),
         ])
         .trim_end()
         .to_owned()
@@ -240,7 +252,7 @@ impl Drop for Server {
 
 /// `PATH` with the binary under test in front.
 fn bin_dir_first_on_path() -> String {
-    let dir = std::path::Path::new(BIN)
+    let dir = std::path::Path::new(support::BIN)
         .parent()
         .expect("the test binary has a directory");
     let inherited = std::env::var("PATH").unwrap_or_default();
@@ -270,6 +282,42 @@ fn set_writes_the_pane_state_and_the_window_glyph() {
 
     assert_eq!(server.pane_statuses(&pane), ["done"]);
     assert_eq!(server.window_status(&pane), "✅");
+}
+
+#[test]
+fn notify_payload_sets_window_status_via_agent_mapping() {
+    // Shape B end-to-end: a JSON payload from an agent hook maps to a state.
+    let server = Server::start();
+    let pane = server.first_pane();
+    let payload = r#"{"hook_event_name":"pre_tool"}"#;
+
+    assert_ok(&server.agent_status(&pane, &["notify", "--agent", "mistral-vibe", payload]));
+
+    assert_eq!(server.pane_statuses(&pane), ["working"]);
+    assert_eq!(server.window_status(&pane), "🤖");
+}
+
+#[test]
+fn pane_flag_overrides_missing_tmux_pane() {
+    let server = Server::start();
+    let pane = server.first_pane();
+
+    assert_ok(&server.agent_status_pane_env(&pane, &["set", "done"]));
+
+    assert_eq!(server.pane_statuses(&pane), ["done"]);
+    assert_eq!(server.window_status(&pane), "✅");
+}
+
+#[test]
+fn pane_flag_overrides_tmux_pane() {
+    let server = Server::start();
+    let first = server.first_pane();
+    let second = server.split(&first);
+
+    assert_ok(&server.agent_status(&first, &["set", "done", "--pane", second.as_str()]));
+
+    assert_eq!(server.pane_statuses(&first), ["", "done"]);
+    assert_eq!(server.window_status(&first), "✅");
 }
 
 #[test]
@@ -649,7 +697,7 @@ fn finish_does_not_ring() {
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "other"]);
 
-    let commands = format!("set working; '{BIN}' finish");
+    let commands = format!("set working; '{}' finish", support::BIN);
     let window = server.new_window_running_command("quiet-finish", &commands);
 
     wait_for(|| server.window_status(&window), |status| status == "✅");
@@ -672,7 +720,7 @@ fn a_hook_outside_tmux_exits_zero_and_says_nothing() {
         ["clear-window"].as_slice(),
         ["clear-window", "%0"].as_slice(),
     ] {
-        let out = Command::new(BIN)
+        let out = Command::new(support::BIN)
             .args(args)
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
@@ -686,7 +734,7 @@ fn a_hook_outside_tmux_exits_zero_and_says_nothing() {
 
 #[test]
 fn a_hook_with_only_tmux_pane_exits_zero_and_says_nothing() {
-    let out = Command::new(BIN)
+    let out = Command::new(support::BIN)
         .args(["set", "done"])
         .env_remove("TMUX")
         .env("TMUX_PANE", "%0")
@@ -700,7 +748,7 @@ fn a_hook_with_only_tmux_pane_exits_zero_and_says_nothing() {
 
 #[test]
 fn an_unknown_state_is_loud() {
-    let out = Command::new(BIN)
+    let out = Command::new(support::BIN)
         .args(["set", "busy"])
         .stdin(Stdio::null())
         .output()

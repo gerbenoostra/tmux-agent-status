@@ -2,6 +2,8 @@
 
 pub mod bell;
 pub mod command;
+pub mod notify;
 pub mod rollup;
 pub mod state;
 pub mod tmux;
+pub mod version;

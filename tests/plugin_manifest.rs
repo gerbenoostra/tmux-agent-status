@@ -1,13 +1,16 @@
-//! The Claude Code hook set exists twice: as the plugin's `hooks/hooks.json`, which is what
-//! actually runs, and as the README's table, which is what a reader believes. These tests fail
-//! when the two stop saying the same thing, and when the plugin's version stops tracking the
-//! crate's.
+//! The Claude Code hook set exists three times: as the plugin's `hooks/hooks.json`, which is what
+//! actually runs, as `share/agents/claude-code/hooks.json`, which is what an installed user copies or
+//! merges, and as `docs/agents/claude-code.md`'s Supported states table, which is what a reader
+//! believes. These tests fail when they stop saying the same thing, and when the plugin's version
+//! stops tracking the crate's.
 //!
 //! Everything here parses files this repository owns, so the parsing is deliberately strict: a
 //! shape it does not recognise is a failure, not something to skip over.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+
+mod support;
 
 /// One watched event, in the form both sources can be reduced to.
 ///
@@ -31,7 +34,6 @@ fn normalise(mut entries: Vec<HookEntry>, source: &str) -> Vec<HookEntry> {
     entries
 }
 
-const STATES: [&str; 4] = ["working", "waiting", "done", "error"];
 const EXPECTED_EVENTS: usize = 8;
 
 fn repo_root() -> PathBuf {
@@ -47,22 +49,8 @@ fn read(path: &Path) -> String {
 }
 
 /// The arguments passed to the binary, rejecting anything outside the exact hook command surface.
-fn arguments_of(command: &str) -> String {
-    let arguments = command
-        .strip_prefix("tmux-agent-status ")
-        .unwrap_or_else(|| panic!("hook command does not invoke `tmux-agent-status`: {command}"));
-    if let Some(state) = arguments.strip_prefix("set ") {
-        assert!(
-            STATES.contains(&state),
-            "hook command sets an unknown state: {command}"
-        );
-    } else {
-        assert!(
-            ["reset", "finish"].contains(&arguments),
-            "hook command has unknown arguments: {command}"
-        );
-    }
-    arguments.to_string()
+fn arguments_of(source: &str, command: &str) -> String {
+    support::command::parse_command(source, command).arguments()
 }
 
 fn manifest_entries() -> Vec<HookEntry> {
@@ -96,45 +84,15 @@ fn manifest_entries() -> Vec<HookEntry> {
                 let command = hook["command"]
                     .as_str()
                     .unwrap_or_else(|| panic!("`{event}` has a hook with no command"));
-                entries.push((event.clone(), matcher.clone(), arguments_of(command)));
+                entries.push((
+                    event.clone(),
+                    matcher.clone(),
+                    arguments_of("hooks.json", command),
+                ));
             }
         }
     }
     normalise(entries, "hooks.json")
-}
-
-/// Split one table row into cells on the `|` separators, leaving the `\|` a markdown cell needs to
-/// carry a literal pipe - the `PreToolUse` matcher is exactly that case.
-fn split_cells(row: &str) -> Vec<String> {
-    let mut cells = vec![String::new()];
-    let mut escaped = false;
-    for c in row.chars() {
-        match c {
-            '|' if !escaped => cells.push(String::new()),
-            _ => {
-                escaped = c == '\\' && !escaped;
-                cells.last_mut().expect("never empty").push(c);
-            }
-        }
-    }
-    cells.iter().map(|c| c.trim().to_string()).collect()
-}
-
-/// The first markdown table after the given heading, as rows of trimmed cells.
-fn table_after(markdown: &str, heading: &str) -> Vec<Vec<String>> {
-    let section = markdown
-        .split_once(heading)
-        .unwrap_or_else(|| panic!("README has no `{heading}` heading"))
-        .1;
-    let mut rows = Vec::new();
-    for line in section.lines().skip_while(|l| !l.starts_with('|')) {
-        if !line.starts_with('|') {
-            break;
-        }
-        rows.push(split_cells(line.trim_matches('|')));
-    }
-    assert!(!rows.is_empty(), "no table found after `{heading}`");
-    rows
 }
 
 /// A README cell holding a value: backticks stripped, an escaped pipe restored.
@@ -142,27 +100,43 @@ fn unformat(cell: &str) -> String {
     cell.trim().trim_matches('`').replace("\\|", "|")
 }
 
-fn readme_entries() -> Vec<HookEntry> {
-    let readme = read(&repo_root().join("README.md"));
-    let rows = table_after(&readme, "#### Claude Code");
+fn agent_doc_entries() -> Vec<HookEntry> {
+    let doc = read(&repo_root().join("docs/agents/claude-code.md"));
+    let rows = support::markdown::table_after(&doc, "## Supported states");
     assert_eq!(
         rows[0],
-        ["Event", "Matcher", "Command"],
+        ["State", "Claude Code event", "Command", "Notes"],
         "the Claude Code hook table's header changed"
     );
 
     let mut entries = Vec::new();
     // Row 0 is the header, row 1 the `| --- |` separator.
     for row in &rows[2..] {
-        assert_eq!(row.len(), 3, "hook table row is not three cells: {row:?}");
-        let matcher = if row[1].starts_with("all") {
-            None
-        } else {
-            Some(unformat(&row[1]))
-        };
-        entries.push((unformat(&row[0]), matcher, unformat(&row[2])));
+        assert_eq!(row.len(), 4, "hook table row is not four cells: {row:?}");
+        let command = unformat(&row[2]);
+        let arguments = arguments_of(
+            "docs/agents/claude-code.md's Supported states table",
+            &command,
+        );
+
+        for event_spec in row[1].split(", ") {
+            // The cell wraps both the event and any matcher in backticks; remove them all before
+            // splitting out the matcher.
+            let event_spec = unformat(event_spec).replace('`', "");
+            let (event, matcher) = if let Some((event, matcher)) = event_spec.split_once('(') {
+                let event = event.trim().to_string();
+                let matcher = matcher.trim_end_matches(')').trim().to_string();
+                (event, Some(matcher))
+            } else {
+                (event_spec, None)
+            };
+            entries.push((event, matcher, arguments.clone()));
+        }
     }
-    normalise(entries, "the README's Claude Code table")
+    normalise(
+        entries,
+        "docs/agents/claude-code.md's Supported states table",
+    )
 }
 
 fn manifest_json(path: &Path) -> serde_json::Value {
@@ -171,12 +145,12 @@ fn manifest_json(path: &Path) -> serde_json::Value {
 }
 
 #[test]
-fn manifest_and_readme_watch_the_same_events() {
+fn manifest_and_agent_doc_watch_the_same_events() {
     let manifest = manifest_entries();
-    let readme = readme_entries();
+    let agent_doc = agent_doc_entries();
     assert_eq!(
-        manifest, readme,
-        "plugins/tmux-agent-status/hooks/hooks.json and the README's Claude Code table disagree"
+        manifest, agent_doc,
+        "plugins/tmux-agent-status/hooks/hooks.json and docs/agents/claude-code.md's Supported states table disagree"
     );
     assert_eq!(
         manifest.len(),
@@ -223,5 +197,42 @@ fn marketplace_points_at_the_plugin() {
     assert!(
         dir.join(".claude-plugin/plugin.json").is_file(),
         "the marketplace entry's source {source} holds no plugin manifest"
+    );
+}
+
+/// The shipped drop-in and the plugin's hooks are one file, reached by two paths.
+///
+/// The plugin is only reachable from a checkout or the marketplace; a user who installed the
+/// binary through nix, a tarball or cargo gets `share/agents/claude-code/hooks.json` instead. Two
+/// copies of a hook set drift, and a drifted copy is a glyph that is wrong for exactly the users
+/// who never see the plugin, so the shipped path is a symlink onto the plugin's file rather than a
+/// copy of it. Every packaging route dereferences it - cargo, GNU `install` under nix, and the
+/// release workflow's `cp -RL` - so replacing the link with a real file is the one regression this
+/// guards, and it would be invisible in a diff.
+#[test]
+fn the_shipped_claude_drop_in_is_the_plugin_hook_set() {
+    let plugin = plugin_dir().join("hooks/hooks.json");
+    let shipped = repo_root().join("share/agents/claude-code/hooks.json");
+
+    let link = fs::symlink_metadata(&shipped)
+        .unwrap_or_else(|e| panic!("cannot stat {}: {e}", shipped.display()));
+    assert!(
+        link.file_type().is_symlink(),
+        "{} must stay a symlink onto {}, not become a second copy of it",
+        shipped.display(),
+        plugin.display()
+    );
+    assert_eq!(
+        fs::canonicalize(&shipped).expect("the shipped drop-in link dangles"),
+        fs::canonicalize(&plugin).expect("the plugin hook set is missing"),
+        "{} points somewhere other than the plugin hook set",
+        shipped.display()
+    );
+    assert_eq!(
+        read(&shipped),
+        read(&plugin),
+        "{} and {} must be identical",
+        shipped.display(),
+        plugin.display()
     );
 }

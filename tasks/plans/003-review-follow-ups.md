@@ -31,7 +31,7 @@ Implemented, with two corrections that the first attempt got wrong and review ca
   pane the event arrived on and drops its state whatever it held; siblings keep the ordinary rule.
 
 The case where a client is attached but its terminal window is not on screen is out of scope here
-and is tracked in `006`.
+and is tracked in `008`.
 
 ### 2. `clear_window` lists panes twice
 
@@ -84,8 +84,8 @@ Reviewing the implementation of the items above found six more, all fixed on the
    identical copies. `tmux::pane_statuses` is now `tmux::window`, returning `Window { watched,
    panes }`; `PaneStatus` is back to pane and status.
 3. **A `done` from a pane hidden behind a zoom is dropped.** Verified on 3.6a. Pre-existing for the
-   focus hooks, extended to `set` by item 1 above. Documented in the README and taken up as a third
-   section of `006`, which already owns "tmux thinks you are looking and you are not".
+   focus hooks, extended to `set` by item 1 above. Documented in the README and taken up by
+   `008`, which owns "tmux thinks you are looking and you are not".
 4. **The README's diagnostic recipe had become a trap:** it told a user who sees no glyph to read
    `@agent_status` from the window they are on, which is exactly where it is correctly empty. Recipe
    removed, and the immediate clear is now documented in "How it works" instead of nowhere.

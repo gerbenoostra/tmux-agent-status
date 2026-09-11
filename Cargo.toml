@@ -7,14 +7,16 @@ description = "Agent lifecycle events as one glyph on the tmux window entry"
 repository = "https://github.com/gerbenoostra/tmux-agent-status"
 license = "MIT"
 readme = "README.md"
+exclude = ["tasks/"]
 keywords = ["tmux", "agent", "status", "hook"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+pico-args = "0.5.0"
+serde_json = { version = "1.0.151", default-features = false, features = ["std"] }
 
 [profile.release]
 strip = true
 
 [dev-dependencies]
 libc = "0.2"
-serde_json = { version = "1.0.151", default-features = false, features = ["std"] }
