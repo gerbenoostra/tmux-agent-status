@@ -119,7 +119,9 @@ jobs:
         run: |
           set -euo pipefail
           target="$(rustc -vV | sed -n 's|host: ||p')"
-          name="tmux-agent-status-${GITHUB_REF_NAME:-ci}-${target}"
+          # Not GITHUB_REF_NAME: on a pull_request it is "<pr>/merge", and the
+          # slash turns the name into a path. The name is irrelevant here.
+          name="tmux-agent-status-ci-${target}"
           mkdir -p "dist/$name/share/tmux" "dist/$name/share/agents"
           cp "target/release/tmux-agent-status" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
