@@ -1,25 +1,42 @@
 # Supported agents
 
-This table defines which agents drive the glyph, how, and what is known to be missing.
+The tool works for any agent that allow hooks on lifecycle events. These should be maped to the following commands:
+```
+tmux-agent-status reset
+tmux-agent-status set working
+tmux-agent-status set waiting
+tmux-agent-status set done
+tmux-agent-status set error
+tmux-agent-status finish
+```
+
+The `set` commands go on the agent's turn events. `reset` goes on session start and drops whatever
+the previous agent left in the pane; `finish` goes on session end and resolves the session to done,
+leaving an `error` alone. Neither of those two rings the bell. The cli allows `--json` if the agent
+expects a json response.
+
+The following table shows how this maps to common agents.
 Blank cells link to the upstream doc or issue that says the event does not exist.
 
 | Agent | Shape | Drop-in file | Needs enabling | Subagent events | Multi-session per pane | `error` event | `waiting` repeats | Stdout parsed | Payload on stdin | `TMUX_PANE` inherited | Session start | Session end | Verified |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | [Claude Code](claude-code.md) | A (plugin) | yes, via plugin | no | no | no | `StopFailure` | `Notification` | yes | yes | yes | yes | yes | plugin API |
-| [Codex CLI](codex.md) | A | yes | no | `SubagentStart`/`SubagentStop` | unknown | inferred | `PermissionRequest` | yes | yes | unknown | yes | yes | 2026-09-09 |
-| [GitHub Copilot CLI](copilot.md) | A | yes | no | yes | unknown | `errorOccurred` | `notification` | yes | unknown | unknown | yes | yes | 2026-09-09 |
-| [Droid](droid.md) | A | yes | no | `SubagentStop` only | unknown | inferred | `Notification` | yes | yes | unknown | yes | yes | 2026-09-09 |
-| [Cursor](cursor.md) | A | yes | no | yes | unknown | no | unknown | yes | yes | unknown | yes | yes | 2026-09-09 |
+| [Codex CLI](codex.md) | A | yes | hook trust (first run) | `SubagentStart`/`SubagentStop` | unknown | inferred | `PermissionRequest` | yes | yes | unknown | yes | yes | 2026-09-10 |
+| [GitHub Copilot CLI](copilot.md) | A | yes | folder trust (repo scope) | yes | unknown | `errorOccurred` | `notification` | yes | unknown | unknown | yes | yes | 2026-09-10 |
+| [Droid](droid.md) | A | yes | no | `SubagentStop` only | unknown | inferred | `Notification` | yes | yes | unknown | yes | yes | 2026-09-10 |
+| [Cursor](cursor.md) | A | yes | no | yes | unknown | no | unknown | yes | yes | unknown | yes | yes | 2026-09-10 |
 | [Devin CLI](devin.md) | A | yes (project only) | no | `run_subagent` tool only | unknown | no | unknown | yes | yes | unknown | yes | yes | 2026-09-10 |
-| [Grok CLI](grok.md) | A | yes | project hooks need `/hooks-trust` | inferred from tool | unknown | no | unknown | lenient | yes | unknown | yes | yes | 2026-09-09 |
-| [Kiro](kiro.md) | A | yes | no | no stop event | yes | no | no | no | yes | unknown | CLI: `AgentSpawn` | no | 2026-09-09 |
+| [Grok CLI](grok.md) | A | yes | project hooks need `/hooks-trust` | `SubagentStart`/`SubagentStop` -> `working` | unknown | no (`StopFailure` unverified) | no (`Notification` trigger undocumented) | lenient | yes | unknown | yes | yes | 2026-09-11 |
+| [Kiro](kiro.md) | A | no (manual merge into agent config) | no | no stop event | yes | no | no | unconfirmed | yes | unknown | CLI: `agentSpawn` | no | 2026-09-10 |
 | [Mistral Vibe](mistral-vibe.md) | B | yes (TOML) | trusted-folder gate | no distinct signal | unknown | no | no | strict | yes | unknown | no | no | 2026-09-09 |
 | [Gemini CLI](gemini.md) | B | manual settings.json merge | manual merge | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | 2026-09-09 |
 | OpenCode | C | N/A | N/A | unknown | yes | `session.error` | `permission.asked` | N/A | N/A | N/A | yes | inferred | deferred |
 | Antigravity | C | N/A | N/A | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unsupported |
 
+
 ## Shapes
 
+There are different ways to hook onto lifecycle events, which is captured by "Shape".
 The shape is *what the agent invokes*, not how the config gets installed:
 
 - **A**: hook config with one command per event, calling the `tmux-agent-status` CLI as adapter.
@@ -37,8 +54,7 @@ drop-in - hence `A (plugin)` in the table.
 
 ## Table legend
 
-- **Drop-in file**: a file the user copies verbatim into a hooks directory; the
-tool never edits the user's hand-maintained settings.
+- **Drop-in file**: a file you can copy verbatim into a hooks directory
 - **Needs enabling**: a feature flag or trust step required before the hooks fire.
 - **Subagent events**: whether start/stop events exist and whether a stop should
 map to `done` or stay `working`.
@@ -49,7 +65,7 @@ derived from the absence of a clean stop. A failing tool call is not one: the
 turn is still running, so tool-failure events map to `working` and the agent's
 cell reads "no".
 - **`waiting` repeats**: a blocked-on-you event that fires repeatedly, including
-idle nags. Without the repeat, `waiting` is rarely useful.
+idle nags.
 - **Stdout parsed**: whether the agent reads the hook's stdout as JSON. Strict
 parsers require the `--json` flag.
 - **Payload on stdin**: whether the event payload arrives on stdin instead of argv.
@@ -66,13 +82,29 @@ These apply to every agent page:
 - **The tool rings the bell itself.** The `set` commands for end states (`done`,
   `waiting`, `error`) print a terminal bell, so do not add a separate `printf '\a'`
   hook for the same event. Agents that parse stdout still use `--json` so the
-  parser sees valid JSON; `--json` is not a bell.
+  parser sees valid JSON.
 - **A missing binary is silent.** If `tmux-agent-status` is not on the `PATH` the
   hook inherits, the command exits 0 and no error is raised anywhere; the only
   symptom is that no glyph ever appears.
 - **`waiting` must repeat to be useful.** Do not narrow the waiting event to
   permission prompts. The idle nag that fires while the agent is still blocked
   is what makes `waiting` visible at all.
+
+## Prove it fired
+
+After configuring the hooks, (re)start an agent session in a tmux pane and check
+`@agent_status` from any pane of the same window:
+
+```sh
+tmux display-message -p '#{@agent_status}'
+```
+
+`@agent_status` is the window rollup, so every pane in the window sees the same
+value. After submitting a prompt it should read `🤖`; after the turn stops it
+should read `✅` or be empty. If you have configured custom glyphs, the values
+will match those instead.
+
+If you've configured your tmux format string, it should update too.
 
 ## Common setup steps
 
@@ -83,3 +115,9 @@ Every agent page repeats:
 3. How to prove a hook fired.
 4. `TMUX_AGENT_STATUS_DISABLED=1` and `TMUX_AGENT_STATUS_DEBUG=1`.
 5. Quirks specific to that agent, including stdout parsing and subagent rules.
+
+## Opt-out and debug
+
+Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
+exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr
+(shape B agents only).

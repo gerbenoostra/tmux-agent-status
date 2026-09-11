@@ -2,7 +2,7 @@
 
 | Agent | Shape | Drop-in file? | Needs enabling? | Subagent events? | Multi-session/pane? | error event? | waiting repeats? | Stdout parsed? | Payload on stdin? | TMUX_PANE inherited? | Session start? | Session end? | Surveyed version/date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Grok CLI (xAI Grok Build) | A | Yes — `~/.grok/hooks/*.json` or `<project>/.grok/hooks/*.json` (Claude-compatible JSON) [1][2] | Project hooks need `/hooks-trust`; global hooks are always trusted [1] | Only via `spawn_subagent` tool name in `PreToolUse`/`PostToolUse`, no dedicated subagent-stop event documented [3] | Unknown/not documented (single-session focus in docs) | Not published as a distinct event — inferred from `PostToolUse` tool_status or turn `stopReason` in `--output-format json` [4][1] | Unknown/undocumented | Yes, if hook prints valid JSON on stdout; otherwise passthrough — no strict "must be pure JSON" requirement [1] | Yes, JSON on stdin [1] | Unknown/not documented | Yes (`SessionStart`) [1] | Yes (`SessionEnd`, fires on `/exit` and headless quit) [5][1] | Docs dated 2026, README last synced 2026-07-25 [5] |
+| Grok CLI (xAI Grok Build) | A | Yes — `~/.grok/hooks/*.json` or `<project>/.grok/hooks/*.json` (Claude-compatible JSON) [15] | Project hooks need `/hooks-trust`; global hooks are always trusted [15] | `SubagentStart`/`SubagentStop` -> `working` [15] | Unknown/not documented | `StopFailure` documented but unverified [15] | `Notification` documented but trigger undocumented [15] | `PreToolUse` parses a JSON response; passive events ignore stdout [15] | Yes, JSON on stdin [15] | Unknown/not documented | Yes (`SessionStart`) [15] | Yes (`SessionEnd`) [15] | docs.x.ai, 2026-09-11 [15] |
 | Mistral Vibe (Vibe Code CLI) | A | Yes — `./.vibe/hooks.toml` (project) or `~/.vibe/hooks.toml` (user) [6] | Project hooks load only when the working directory is a trusted folder [6] | Subagents inherit parent's hooks — no separate subagent-stop signal; a `post_agent` fires per assistant turn, not per subagent [6] | Unknown/not documented | Not published as a distinct event; must infer from `post_tool` `tool_status = "failure"` or repeated `post_agent` denies | Not applicable — no waiting/blocked event; `ask_user_question` is a tool call visible via `pre_tool`/`post_tool` only | Yes — `strict = true` turns malformed stdout into a denial; default is a warning [6] | Yes, JSON on stdin (`session_id`, `parent_session_id`, `transcript_path`, `cwd`, `hook_event_name` + type-specific fields) [6] | Unknown/not documented | No dedicated `session_start` hook type documented (only `pre_tool`, `post_tool`, `post_agent`) [6] | No dedicated `session_end` hook type documented [6] | docs.mistral.ai, current as of 2026-09 [6] |
 | Kiro (CLI + IDE, unified hook system) | C (CLI: A-like drop-in file, but richer state incl. subagent/multi-session visibility lives in-app) | Yes — `.kiro/hooks/*.json`, PascalCase triggers, works on IDE, CLI, and Web [7] | No separate flag — hooks activate automatically once the file exists; project trust may still gate execution | No dedicated subagent-stop trigger documented; multi-subagent approvals are surfaced in-TUI, not as hook events [8] | Yes — Kiro CLI can run "multi-subagent TUI" with several subagents' approval prompts in one pane [8] | Not published; command hooks only report success (exit 0) or failure (any other exit code) generically, not a lifecycle "error" state [9] | `PromptSubmit`/blocking hooks don't repeat on their own; no documented recurring "waiting" event | Not JSON-parsed — exit code determines success/failure; stdout is added to agent context as text, not parsed as structured JSON [9] | Yes, JSON via STDIN (session context) [7] | Unknown/not documented | Yes for IDE (`SessionStart`); CLI uses `AgentSpawn` instead [7] | No `SessionEnd`/`AgentEnd` trigger listed in the trigger table — absence confirmed by omission [7] | kiro.dev docs updated Sept 2, 2026 (hooks) / Aug 21, 2026 (examples) [7][10] |
 | Antigravity (Google) | C | Plugin bundle drop-in at `~/.gemini/antigravity-cli/plugins/<name>/hooks.json`, but requires full plugin scaffold (`plugin.json` manifest), not a single-file hook drop-in [11] | Plugin must be installed via `agy plugin install` and enabled (`agy plugin enable`) — disabled by default until explicitly enabled [11] | Not documented in the plugin overview page; plugin bundles can define "background subagents" but no subagent-stop event is described [11] | Unknown/not documented | Not published as an event name in the docs reviewed; a `dcg` integration shows Antigravity's `PreToolUse` hook returning `{"decision":"block", ...}`, implying block/deny semantics rather than a turn-level error event [3] | Unknown/not documented | Unknown — not confirmed in available docs | Unknown/not documented (dcg example shows JSON envelope for `toolCall.name`, format of delivery not specified) [3] | Unknown/not documented | Unknown/not documented — `hooks.json` is described only as "pre/post tool event hooks," no session-start trigger confirmed [11] | Unknown/not documented | antigravity.google/docs, page undated in content but current as of survey date 2026-09-09 [11] |
@@ -11,25 +11,25 @@
 
 ## Grok CLI (xAI Grok Build)
 
-**Shape and routes.** Grok Build supports two overlapping mechanisms: a Claude-compatible drop-in JSON hooks directory (`~/.grok/hooks/*.json` or `<project>/.grok/hooks/*.json`) and an equivalent `[[hooks.<Event>]]` TOML table embedded in `config.toml`/`managed_config.toml`/`requirements.toml`. The richer, more idiomatic route for a plugin author is the drop-in JSON directory — it is the one documented with a "Quick Start," is self-contained, and is what third-party integrations like the `dcg` guard tool target.[1][2][3]
+**Shape and routes.** Grok Build reads JSON hook files from `~/.grok/hooks/*.json` (user) or `<project>/.grok/hooks/*.json` (project). It also reads Claude Code's `~/.claude/settings.json` and Cursor's `.cursor/hooks.json` as compatibility layers. The native format is the same JSON structure as Claude's hooks: an object under `"hooks"` keyed by event name, each mapping to a list of hook entries.[15]
 
-**Config location and drop-in.** Global hooks live at `~/.grok/hooks/*.json`; project-scoped hooks live at `<project>/.grok/hooks/*.json`; a Claude-settings compatibility layer (`~/.claude/settings.json` and `<project>/.claude/settings.json`) is also auto-discovered. Grok also loads plugin-bundled hooks. This is a genuine drop-in shape — the plugin can ship a single JSON file the user copies into `~/.grok/hooks/`.[2]
+**Config location and drop-in.** A genuine drop-in: copy a single JSON file into `~/.grok/hooks/` or `<project>/.grok/hooks/`. Project hooks require trust via `/hooks-trust` or `--trust` on first open; global hooks are always trusted.[15]
 
-**Enabling.** Global hooks under the user's home directory are "always trusted." Project-level hooks require the user to run `/hooks-trust` (or use the Hooks modal) the first time a project with hooks is opened — this is a folder-trust gate, not a separate feature flag file.[2]
+**Enabling.** No feature flag; project hooks require `/hooks-trust`.
 
-**Event vocabulary and payload.** Documented events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `Notification`, `SessionEnd`. The wire payload uses a camelCase envelope with `hookEventName` carrying a snake_case value (e.g., `"pre_tool_use"`), plus tool fields `toolName`/`toolInput`/`toolUseId`/`toolInputTruncated`, and `PostToolUse` additionally carries `toolResult`. A hook's JSON response for blocking events is `{"decision":"allow"}` or `{"decision":"deny","reason":"..."}`.[3][2]
+**Event vocabulary and payload.** Documented events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`, `Stop`, `StopFailure`, `Notification`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact`. The event payload arrives as JSON on stdin with `hookEventName`, `sessionId`, `cwd`, `workspaceRoot`, plus tool fields for tool events. `PreToolUse` is the only blocking event and expects `{"decision":"allow"}` or `{"decision":"deny","reason":"..."}` on stdout; passive events ignore stdout.[15]
 
-**Subagent events.** There is no dedicated "subagent stop" event; subagent invocation is only visible as a `spawn_subagent` tool name inside `PreToolUse`/`PostToolUse`. This means a subagent completing is not distinguishable from any other tool call finishing — the parent session's own `Stop`/`SessionEnd` is what should map to `done`/`finish`.[3]
+**Subagent events.** Dedicated `SubagentStart` and `SubagentStop` events exist. Both map to `working`; a subagent stopping does not end the parent turn. The parent turn's own `Stop` maps to `done`.[15]
 
-**Multi-session per pane.** Not documented; Grok's docs describe headless named sessions (`-s/--session-id`) for scripting multiple parallel invocations, but nothing about multiple interactive TUI sessions sharing one terminal pane.[5]
+**Multi-session per pane.** Not documented.
 
-**Error/waiting events.** No distinct `error` event is published; failure must be inferred from `PostToolUse`'s `tool_status`/`toolResult` or the headless JSON output's `stopReason` field. No `waiting`/blocked-on-user event is documented either — `UserPromptSubmit` only fires once the user has already submitted a prompt, not while blocked.[4][1]
+**Error/waiting events.** `StopFailure` is documented as "A turn ends, or ends with an API error" — the closest thing to an `error` event, but unverified in a real session. `PostToolUseFailure` is a failed tool call inside a running turn and maps to `working`, not `error`. `Notification` is documented as "The agent sends a notification" but its trigger and repeat behavior are not described, so it is not mapped to `waiting`.[15]
 
-**Stdout parsing and exit codes.** Hooks respond via exit code and stdout: exit `0` = allow, exit `2` = deny, any other code fails open (passthrough). This means a `tmux-agent-status` command run as a Grok hook must exit `0` and can print an empty JSON object safely, since non-JSON output is treated as informational for passive hook types.[2]
+**Stdout parsing and exit codes.** Only `PreToolUse` parses stdout as a JSON response; all other events are passive and ignore stdout. Exit code 0 allows, exit code 2 denies for `PreToolUse`; other codes fail open. This means passive `tmux-agent-status` hooks can print nothing safely.[15]
 
-**Payload delivery.** Confirmed as JSON on stdin.[1][2]
+**Payload delivery.** Confirmed as JSON on stdin.[15]
 
-**Session start/end.** Both exist: `SessionStart` and `SessionEnd`, with `SessionEnd` explicitly confirmed to fire "on `/exit` and headless quit" per the changelog. This is a meaningful advantage over agents lacking `SessionEnd` — it substantially reduces stale-glyph risk.[5]
+**Session start/end.** Both exist: `SessionStart` and `SessionEnd`.[15]
 
 **Copy-paste-ready snippet (`~/.grok/hooks/tmux-agent-status.json`):**
 
@@ -39,14 +39,26 @@
     "SessionStart": [
       { "hooks": [{ "type": "command", "command": "tmux-agent-status reset" }] }
     ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+    ],
     "PreToolUse": [
       { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
     ],
     "PostToolUse": [
       { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
     ],
+    "PostToolUseFailure": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+    ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }] }
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }
@@ -55,7 +67,7 @@
 }
 ```
 
-Note: since Grok has no native `error` or `waiting` events, `error` must be approximated inside a `PostToolUse` script that inspects `toolResult`/`tool_status` and calls `tmux-agent-status set error` conditionally, and `waiting` has no first-class trigger at all.
+Note: `StopFailure` and `Notification` are left unmapped because their exact semantics have not been observed in a real session.
 
 **Verdict: Implement as first A.**
 
@@ -156,7 +168,7 @@ There is no `reset`/session-start hook type, so `tmux-agent-status reset` cannot
 
 ## Recommendation
 
-For the **first Shape A agent**, pick **Kiro**: its `.kiro/hooks/*.json` format is unified across IDE/CLI/Web, activates with zero extra enabling step beyond the file's presence, avoids the JSON-stdout-parsing complexity that Grok and Mistral Vibe impose, and its CLI-native `AgentSpawn`/`AgentStop` triggers map directly onto `reset`/`finish`. Grok CLI is a strong second choice — it additionally publishes `SessionEnd` (which Kiro lacks), making it worth a near-term second Shape A integration once Kiro is done.[5][7]
+For the **first Shape A agent**, pick **Kiro**: its `.kiro/hooks/*.json` format is unified across IDE/CLI/Web, activates with zero extra enabling step beyond the file's presence, avoids the JSON-stdout-parsing complexity that Mistral Vibe imposes, and its CLI-native `AgentSpawn`/`AgentStop` triggers map directly onto `reset`/`finish`. Grok CLI is a strong second choice — it additionally publishes `SessionEnd` (which Kiro lacks) and has dedicated `SubagentStart`/`SubagentStop` events, making it worth a near-term second Shape A integration once Kiro is done.[15][7]
 
 For the **first Shape C agent**, none of the five surveyed agents currently has a documented, stable, versioned in-process JS/TS plugin API with a published minimum supported version — Antigravity's plugin bundle is the closest structural fit but its `hooks.json` event vocabulary and any JS/TS subscription surface remain undocumented in the pages retrieved, and no other surveyed agent (Grok CLI, Mistral Vibe, Kiro) exposes an in-process extension model at all — they are all Shape A. Before committing engineering time to a Shape C adapter, it would be worth directly inspecting Antigravity's `hooks.json` schema and any TypeScript SDK by installing the CLI and running `agy plugin list`/inspecting a real plugin bundle, since the authoritative overview page describes the bundle's file layout but not its runtime API contract.[11]
 

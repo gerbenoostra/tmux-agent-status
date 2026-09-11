@@ -27,17 +27,6 @@ or to `<project>/.cursor/hooks.json` for a project-local hook.
 cp /path/to/share/agents/cursor/hooks.json ~/.cursor/hooks.json
 ```
 
-## Prove it fired
-
-Start a Cursor agent session in a tmux pane and check `@agent_pane_status`:
-
-```sh
-tmux display-message -p '#{@agent_pane_status}'
-```
-
-After submitting a prompt it should read `working`; after the turn stops it should
-read `done` or be empty.
-
 ## Quirks
 
 - **Verification is incomplete.** The Cursor hook documentation does not expose the
@@ -45,6 +34,11 @@ read `done` or be empty.
   that clearly do not block Cursor's own flow. Events that ask for a decision
   (such as `beforeShellExecution`) are intentionally omitted so the status hook
   never denies a tool call.
+- **Headless (`-p`) sessions may fire fewer events.** Unconfirmed reports from Cursor's
+  community forum say a headless/print-mode session only fires `sessionStart` and
+  `sessionEnd`, never `beforeSubmitPrompt` or `stop`. Not reproduced against a real
+  session; relevant mainly if you point this hook file at CI or scripted use of
+  `cursor-agent -p` rather than the interactive CLI.
 - **Stdout is parsed as JSON.** Every hook entry uses `--json` so Cursor's parser
   does not choke on empty stdout; `--json` prints `{}` on success.
 - **No confirmed `waiting` event.** If a future Cursor release adds a
@@ -54,11 +48,3 @@ read `done` or be empty.
   turn is still running, so it maps to `working`. Mapping it to `error` would
   paint ❗ and ring the bell several times during a healthy turn. Cursor
   publishes no turn-abort event, so its `error` column stays empty.
-- **`TMUX_PANE` inheritance is undocumented.** Use `--pane #{pane_id}` or set
-  `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
-
-## Opt-out and debug
-
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
-exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr
-(shape B agents only).

@@ -33,9 +33,6 @@ itself. To revert:
 
 ## Manual configuration
 
- is the same hook set as a file, for a user who did not install
-the plugin.
-
 Claude Code has no hooks drop-in directory, thus you need to **merge** [`share/agents/claude-code/hooks.json`](../../share/agents/claude-code/hooks.json)
 into your `~/.claude/settings.json`. Take the whole file if your Claude settings has no `hooks` key;
 if you already have one, add these eight events inside it. Do not append the file as a second top-level
@@ -43,17 +40,6 @@ object and do not end up with two `hooks` keys - JSON's last one silently wins a
 
 See [docs/install.md](../install.md) for where `share/agents/` lands for Nix, prebuilt tarballs and
 `cargo install`.
-
-## Prove it fired
-
-Start a Claude Code session in a tmux pane and check `@agent_pane_status`:
-
-```sh
-tmux display-message -p '#{@agent_pane_status}'
-```
-
-After submitting a prompt it should read `working`; after the turn stops it should read `done` or be
-empty. With the plugin installed, `/tmux-agent-status:doctor` checks all four setup steps for you.
 
 ## Quirks
 
@@ -74,8 +60,3 @@ Instead of relying on the hooks for the bell (and thus the highlight), you can a
   "agentPushNotifEnabled": true
 }
 ```
-
-## Opt-out and debug
-
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that exits 0. Set
-`TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr (shape B agents only).

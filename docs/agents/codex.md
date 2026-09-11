@@ -21,25 +21,19 @@ subagent stopping does not end the parent turn.
 
 Copy [`share/agents/codex/hooks.json`](../../share/agents/codex/hooks.json) to `~/.codex/hooks.json` for a user-wide hook,
 or to `<repo>/.codex/hooks.json` for a project-local hook. The `hooks` object merges
-with any existing one; do not duplicate the top-level `hooks` key.
+with any existing one.
 
 ```sh
 cp /path/to/share/agents/codex/hooks.json ~/.codex/hooks.json
 ```
 
-## Prove it fired
-
-Start a Codex session in a tmux pane and check `@agent_pane_status`:
-
-```sh
-tmux display-message -p '#{@agent_pane_status}'
-```
-
-After submitting a prompt it should read `working`; after the turn stops it should
-read `done` or be empty.
-
 ## Quirks
 
+- **Hooks need to be trusted once.** The first time a hooks file is picked up, Codex gates it behind
+  a "persisted hook trust" prompt; until that prompt is accepted, hooks silently never fire and there
+  is no error. Accept it interactively once, or, for non-interactive automation, pass
+  `--dangerously-bypass-hook-trust` (Codex's own flag name, documented as for automation that already
+  vets its hook sources).
 - **Hooks are on by default.** Disable with `[features] hooks = false`.
 - **Stdout is parsed as JSON.** Codex reads a hook's stdout when it exits 0, so
   every entry in the drop-in file uses `--json`. The status commands themselves
@@ -52,9 +46,3 @@ read `done` or be empty.
   fires, or until you start a new session in that pane.
 - **`TMUX_PANE` inheritance is undocumented.** Use `--pane #{pane_id}` or set
   `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
-
-## Opt-out and debug
-
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
-exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr
-(shape B agents only).

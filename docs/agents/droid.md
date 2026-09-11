@@ -30,16 +30,6 @@ under a `hooks` key gives a config Droid ignores without an error.
 cp /path/to/share/agents/droid/hooks.json ~/.factory/hooks.json
 ```
 
-## Prove it fired
-
-Start a Droid session in a tmux pane and check `@agent_pane_status`:
-
-```sh
-tmux display-message -p '#{@agent_pane_status}'
-```
-
-After submitting a prompt it should read `working`; after the turn stops it should
-read `done` or be empty.
 
 ## Quirks
 

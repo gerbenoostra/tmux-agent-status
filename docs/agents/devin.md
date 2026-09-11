@@ -17,17 +17,10 @@ local glyph.
 | error | — | — | no published turn-abort event; a failed tool call is not one |
 | finish | `SessionEnd` | `tmux-agent-status finish` | resolves a lingering `working`, no bell |
 
-Verified end to end on Devin CLI v3000.10.21: `reset` cleared a stale glyph a
-new session inherited, a turn ran `working`, `ask_user_question` raised
-`waiting`, the answer put it back to `working`, `Stop` rang the bell on `done`,
-and `/exit` left `done` standing. `PermissionRequest` is the one row not
-observed - the run auto-approved every tool it used - so it rests on Devin's
-docs rather than on a run.
 
 The `PreToolUse` matcher is a regex over Devin's **own** tool names, which are
 lower case and shorter than Claude's: `read`, `exec`, `grep`, `glob`,
-`exit_plan_mode`, `ask_user_question`. Claude's `AskUserQuestion|ExitPlanMode`
-matches nothing here.
+`exit_plan_mode`, `ask_user_question`.
 
 `PreToolUse` is matched, not blanket-mapped: an unmatched `PreToolUse` firing
 after `PermissionRequest` would overwrite `waiting` with `working` while the
@@ -58,17 +51,6 @@ top-level object is the `hooks` object, so nest the whole drop-in under `"hooks"
 in your config. Merge it into the `hooks` object you already have rather than
 adding a second one; JSON's last key silently wins.
 
-## Prove it fired
-
-Run `/hooks` inside Devin to see what it loaded. Then, in a tmux pane, check
-`@agent_pane_status`:
-
-```sh
-tmux display-message -p '#{@agent_pane_status}'
-```
-
-After submitting a prompt it should read `working`; after the turn stops it
-should read `done` or be empty.
 
 ## Quirks
 
@@ -99,13 +81,3 @@ should read `done` or be empty.
   `--json` prints `{}` so an empty stdout never reaches the parser.
 - **`SessionEnd` needs a clean exit.** A killed terminal or `kill -9` skips the
   hook and strands the glyph until the next session's `reset`.
-- **`TMUX_PANE` inheritance is undocumented.** Hooks are plain shell commands in
-  a child process, so it should be inherited, but nothing says so. Use
-  `--pane #{pane_id}` or set `TMUX_AGENT_STATUS_PANE` if the glyph lands
-  nowhere.
-
-## Opt-out and debug
-
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
-exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr
-(shape B agents only).

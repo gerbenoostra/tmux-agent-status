@@ -1,6 +1,6 @@
 # tmux-agent-status
 
-A lightweight tool that adds a glyph to the tmux window status, so you know in which window an agent needs you, and why.
+Shows your agent's status as a glyph in your tmux window name.
 
 Example result:
 ```
@@ -8,11 +8,12 @@ Example result:
 ```
 
 To not interfere with your formatting, window naming scripts, or monitor-bell, this tool deliberately
-does not change, colour, or format window names. It just enables the bell and adds a glyph.
+does not change, colour, or format window names. It just enables the bell and provides a glyph. Completely
+compatible with all your other tmux preferences.
 
 ## The four states
 
-The following states are distinguished:
+The following agent states are distinguished:
 
 | State | Glyph | Means | Clears when |
 | --- | --- | --- | --- |
@@ -21,7 +22,7 @@ The following states are distinguished:
 | `error` | ❗ | the turn aborted: API error, context overflow, unparseable tool call | you look at the window |
 | `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, the idle nag | you look at the window |
 
-A window with multiple agents will show the most demanding status. Thus `waiting` > `error` > `done` > `working`.
+If one window contains multiple agents, the most demanding status is shown:  `waiting` > `error` > `done` > `working`.
 
 For windows with no agent this tool is a no-op.
 
@@ -30,21 +31,7 @@ without it renders them as underscores.
 
 ## Compatible agents
 Any agent that allows to hook on to lifecycle events work.
-You can register the following commands as hook commands:
-```
-tmux-agent-status set working
-tmux-agent-status set done
-tmux-agent-status set error
-tmux-agent-status set waiting
-tmux-agent-status reset
-tmux-agent-status finish
-```
-
-The `set` commands go on the agent's turn events. `reset` goes on session start and drops whatever
-the previous agent left in the pane; `finish` goes on session end and resolves the session to done,
-leaving an `error` alone. Neither of those two rings the bell.
-
-The [docs/agents](docs/agents/README.md) pages give the manaul config, drop-in file or plugin for each supported agent, [Claude Code](docs/agents/claude-code.md) included.
+The [docs/agents](docs/agents/README.md) shows this for various agents (manual config, drop-in file or plugin), including [Claude Code](docs/agents/claude-code.md).
 
 ## Install
 Installation consists of 4 steps:
@@ -67,12 +54,13 @@ source-file ~/.tmux/tmux-agent-status.conf
 ```
 
 **3. Include the glyph term in your tmux window format.**
-Paste the following format term into **both** `window-status-format` and `window-status-current-format`, after the name segment (outside any truncation you have) and before the window flags:
+Paste the following format term into **both** `window-status-format` and `window-status-current-format`, at a place you like.
 
 ```tmux
 #{?@agent_status, #{@agent_status},}
 ```
 
+We recommend after the name segment (outside any truncation you have) and before the window flags.
 For example:
 
 ```tmux
@@ -82,7 +70,10 @@ set -g window-status-format '#I:#{=/25/…:#{window_name}}#{?@agent_status, #{@a
 The name segment stays whatever you already had.
 
 **Optional: terminal & tmux bell and the tmux highlight.**
-The tool writes a bell (`\a`) to the tmux pane. You can configure tmux behavior as you like:
+When a turn ends (`waiting`, `error` and `done`, but not `working`) the tool writes a bell (`\a`) to
+its tmux pane. Four tmux settings decide what that bell becomes. tmux's own defaults already do the
+right thing, so this is only worth a look if you (or your tmux config framework) changed them:
+check with `tmux show-options -g bell-action`.
 
 | Setting | What it decides | Suggested |
 | --- | --- | --- |
@@ -100,18 +91,20 @@ set -g visual-bell off
 setw -g window-status-bell-style 'fg=magenta,bold,nodim'
 ```
 
-The price of `any` is that every other bell from the window you are on reaches the terminal as well:
-a shell completion beep, vim hitting the end of a search, and an agent finishing in the window you
-are already watching.
-The benefit is that you also get a bell on tabs in your terminal if the active tmux window rang.
-If you are in one terminal tab, and in another you have a tmux session with an agent, and that agent
-is in the active window, it will only get a terminal bell with `bell-action any`.
+`bell-action` is the one worth understanding. Say your terminal has two tabs: you are working in one,
+and the other holds a tmux session whose **current** window is running an agent. When that agent
+finishes, `other` throws the bell away, because for tmux that window is the one you are "on".
+Only `any` passes it out to the terminal, so only `any` lights up the other tab.
 
-What your terminal then does with that bell can be configured in the terminal.
-Ghostty, for example, by default prefixes the tab title with 🔔 and asks for attention while it is unfocused,
-and stays silent unless you enable a sound in `bell-features`.
+The price of `any` is that every other bell from the window you are on reaches the terminal too: a
+shell completion beep, vim hitting the end of a search, and an agent finishing in the window you are
+already watching.
 
-In this way, the bell tells you *which tab*, and the glyph tells you *which window*.
+What the terminal does with the bell is then up to the terminal. Ghostty, for example, prefixes the
+tab title with 🔔 and asks for your attention while it is unfocused, and stays silent unless you
+enable a sound in `bell-features`.
+
+So the bell tells you *which tab*, and the glyph tells you *which window*.
 
 **4. Register the agent hooks.**
 
@@ -140,7 +133,7 @@ The tmux window status glyph rendering can be verified by setting a glyph by han
 ## How it works
 
 The `tmux-agent-status` executable is called from your coding agent's lifecycle hooks.
-It writes a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window, and rings the terminal bell.
+It writes a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window, and rings the terminal bell on the states that end a turn.
 
 We use two tmux options, separating status from final glyph:
 
@@ -150,24 +143,30 @@ We use two tmux options, separating status from final glyph:
 
 They have different names, as tmux option inheritance uses the window properties as fallback for pane properties.
 
-Looking at a window clear it.
-This is achieved by two tmux hooks, both calling `tmux-agent-status clear-window <pane>`, which clears the status
-for the focused window.
+To clear the status, we use two tmux hooks, both calling `tmux-agent-status clear-window <pane>`, as can be seen in [`share/tmux/tmux-agent-status.conf`](./share/tmux/tmux-agent-status.conf).
 
 Therefore, switching to a window, or to another pane inside it, drops that window's `waiting`, `error` and `done`;
 `working` survives, because otherwise an agent you glance at would go blank while it is still running.
+
 A turn that ends on the window you are **already** watching is cleared on the spot: the bell rings and no glyph appears,
 because you are looking at the pane that would have explained it.
-Watched means the window is the current window of a session with a client attached, so a turn ending while you
-are detached keeps its glyph until you come back.
-If this happens on a different tab in your terminal, we still raise the bell.
+
+Watched means the window is the current window of a session with a client attached. So a turn that
+ends while you are **detached** keeps its glyph: re-attaching does not clear it, and it is still on
+the window entry when you get back, until you switch window or pane. That makes the glyph the one
+signal that survives a reconnect, where the bell had nobody to reach.
+
+A terminal window sitting behind another tab, desktop or monitor is the case tmux cannot see: the
+client is attached, so tmux says you are watching, and the glyph is cleared on the spot. There the
+bell is your only signal, and it reaches you only with `bell-action any`
+(see [the bell settings](#install) and [known limits](#known-limits)).
 
 ## The bell, and colour
 
 For the end states (`waiting`, `error` and `done`, thus not `working`) a terminal bell (`\a`) is printed.
 With `monitor-bell on`, tmux gives you the window highlight, in whatever way you configure it, and
-`bell-action` decides whether the bell also reaches your terminal: see the table in
-[setup step 3](#set-up).
+`bell-action` decides whether the bell also reaches your terminal: see the table under
+[step 3 of the install](#install).
 To not interfere with your own highlight format, this tool deliberately does not colour or name windows.
 
 If you want `error` to stand out further, paste this in front of the name segment, in both formats:
@@ -210,11 +209,11 @@ This can be useful for CI, demo recordings, nested test sessions, or any environ
   timeout.
 - A **zoomed** pane's siblings are hidden, but tmux still calls the whole window watched: their
   states clear when you look at the window, and a turn ending in a hidden sibling while you watch
-  rings the bell and leaves no glyph.
+  leaves no glyph. The bell is all you get, and only with `bell-action any`.
 - The same goes for a terminal window behind another tab, desktop or monitor: the client is
   attached, so tmux says you are looking. We're planning to read the client's focus flag so those
-  keep their glyph.
-- Creating or splitting a pane counts as looking at that window, so it clears the window's
+  keep their glyph, which will need `focus-events on` in your tmux config.
+- Creating, splitting or closing a pane counts as looking at that window, so it clears the window's
   non-sticky states.
 - Only agents that can push lifecycle events get a glyph at all. An absent glyph means "no signal".
 

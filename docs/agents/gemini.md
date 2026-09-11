@@ -42,7 +42,7 @@ Merge this block into your user or project `settings.json`. Do not add a second
 }
 ```
 
-## Prove it fired
+## Work in progress
 
 After Gemini ships and fires one of the above events, check that the command exits
 0 and does not break the agent. Once the payload schema is confirmed, the mapping
@@ -56,10 +56,3 @@ in `src/notify.rs` will be updated and the matrix above will change.
   all payloads. Set `TMUX_AGENT_STATUS_DEBUG=1` to see which payloads arrive.
 - **Event names are planned, not verified.** `SessionEnd` in particular is not
   confirmed as a shipped event.
-- **`TMUX_PANE` inheritance is undocumented.** If Gemini's hook runner is not a
-  child of the pane, add `--pane #{pane_id}` or set `TMUX_AGENT_STATUS_PANE`.
-
-## Opt-out and debug
-
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
-exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped payloads to stderr.

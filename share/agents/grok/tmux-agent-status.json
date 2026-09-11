@@ -7,6 +7,13 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "tmux-agent-status set working" }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "hooks": [
@@ -15,6 +22,27 @@
       }
     ],
     "PostToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "tmux-agent-status set working" }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          { "type": "command", "command": "tmux-agent-status set working" }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "tmux-agent-status set working" }
+        ]
+      }
+    ],
+    "SubagentStop": [
       {
         "hooks": [
           { "type": "command", "command": "tmux-agent-status set working" }

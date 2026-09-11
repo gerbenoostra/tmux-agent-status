@@ -26,19 +26,12 @@ mkdir -p .github/hooks
 cp /path/to/share/agents/copilot/tmux-agent-status.json .github/hooks/
 ```
 
-## Prove it fired
-
-Start a Copilot session in a tmux pane and check `@agent_pane_status`:
-
-```sh
-tmux display-message -p '#{@agent_pane_status}'
-```
-
-After submitting a prompt it should read `working`; after the agent stops it should
-read `done` or be empty.
-
 ## Quirks
 
+- **Repo-scope hooks need the folder trusted.** `.github/hooks/*.json` is gated behind the same
+  "this folder is not trusted" confirmation every repo session needs before it sends a prompt. It is
+  not a hooks-specific step, but a first-time user in an untrusted repo will see that prompt before
+  the hook ever fires.
 - **Notifications are fire-and-forget.** The shipped hook maps all `notification`
   events to `waiting`, which covers `permission_prompt` and `agent_idle`. If your
   agent emits other notification types you do not want mapped, narrow the matcher
@@ -49,11 +42,3 @@ read `done` or be empty.
 - **Stdout parsing.** Copilot CLI parses hook stdout as JSON per event, so
   every entry in the shipped file uses `--json`. The status commands write nothing
   to stdout themselves; `--json` prints `{}` so the parser never sees empty stdout.
-- **`TMUX_PANE` inheritance is undocumented.** Use `--pane #{pane_id}` or set
-  `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
-
-## Opt-out and debug
-
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
-exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr
-(shape B agents only).

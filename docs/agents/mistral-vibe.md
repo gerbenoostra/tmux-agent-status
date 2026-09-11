@@ -25,17 +25,6 @@ no separate feature flag.
 cp /path/to/share/agents/mistral-vibe/hooks.toml ./.vibe/hooks.toml
 ```
 
-## Prove it fired
-
-Start a Vibe session in a tmux pane and check `@agent_pane_status`:
-
-```sh
-tmux display-message -p '#{@agent_pane_status}'
-```
-
-After the first tool call it should read `working`; after an assistant turn that
-ends cleanly it should read `done` or be empty.
-
 ## Quirks
 
 - **Strict stdout parsing.** Vibe's `strict = true` treats malformed stdout as a
@@ -53,10 +42,3 @@ ends cleanly it should read `done` or be empty.
   no turn-abort event, so its `error` column stays empty.
 - **Subagents inherit hooks transitively.** There is no distinct subagent stop
   event; the parent's own `post_agent` is the correct `done` signal.
-- **`TMUX_PANE` inheritance is undocumented.** If Vibe's hook runner is not a
-  child of the pane, add `--pane #{pane_id}` or set `TMUX_AGENT_STATUS_PANE`.
-
-## Opt-out and debug
-
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
-exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped payloads to stderr.

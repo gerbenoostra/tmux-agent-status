@@ -3,15 +3,23 @@
   "hooks": [
     {
       "name": "tmux-agent-status-reset",
-      "trigger": "AgentSpawn",
+      "trigger": "agentSpawn",
       "action": {
         "type": "command",
         "command": "tmux-agent-status reset"
       }
     },
     {
+      "name": "tmux-agent-status-working-prompt",
+      "trigger": "userPromptSubmit",
+      "action": {
+        "type": "command",
+        "command": "tmux-agent-status set working"
+      }
+    },
+    {
       "name": "tmux-agent-status-working-pre",
-      "trigger": "PreToolUse",
+      "trigger": "preToolUse",
       "action": {
         "type": "command",
         "command": "tmux-agent-status set working"
@@ -19,7 +27,7 @@
     },
     {
       "name": "tmux-agent-status-working-post",
-      "trigger": "PostToolUse",
+      "trigger": "postToolUse",
       "action": {
         "type": "command",
         "command": "tmux-agent-status set working"
@@ -27,7 +35,7 @@
     },
     {
       "name": "tmux-agent-status-done",
-      "trigger": "AgentStop",
+      "trigger": "stop",
       "action": {
         "type": "command",
         "command": "tmux-agent-status set done"
