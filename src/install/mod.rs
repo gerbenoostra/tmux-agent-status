@@ -170,6 +170,10 @@ pub struct Options {
     /// to do things in.
     pub agents: Option<Vec<&'static agents::Agent>>,
     pub claude_route: agents::ClaudeRoute,
+    /// The Claude Code CLI to use. The command line fills this from `PATH`;
+    /// `None` means there is none, which is the only thing that falls through
+    /// to the settings merge. A test points it at a stub.
+    pub claude: Option<agents::Claude>,
     pub marketplace: Option<String>,
     pub tmux_config: Option<PathBuf>,
     pub snippet: Option<PathBuf>,
@@ -458,12 +462,26 @@ impl write::Verify for TmuxVerify {
         // Then: does it mean what we meant. A bare value containing a space
         // parses perfectly well and is discarded in silence, so parsing is not
         // the whole question.
-        let Some(candidate) = probe::dump(&self.entry) else {
+        let dumped = match faulty("no-dump") {
+            // A tmux that stopped answering between the write and the check.
+            true => None,
+            false => probe::dump(&self.entry),
+        };
+        let Some(candidate) = dumped else {
             // No tmux to ask. The edit stands and the summary says it could
             // not be checked.
             return Ok(());
         };
-        let unexpected: Vec<String> = probe::changes(&self.baseline, &candidate)
+        let moved = match faulty("bad-value") {
+            // An edit tmux parses perfectly well that moves something else.
+            true => vec![probe::Change {
+                name: "status-left".to_owned(),
+                before: None,
+                after: Some("CHANGED".to_owned()),
+            }],
+            false => probe::changes(&self.baseline, &candidate),
+        };
+        let unexpected: Vec<String> = moved
             .into_iter()
             .map(|change| change.name)
             .filter(|name| !self.expected.contains(&without_index(name)))
@@ -482,17 +500,39 @@ impl write::Verify for TmuxVerify {
     }
 }
 
+/// A tmux config file is complete when it has anything in it at all.
+///
+/// tmux has no notion of a truncated config - every prefix of a valid one is
+/// also valid - so emptiness is the only truncation this can see, and it is the
+/// one that matters: a write that lost everything.
+fn not_empty(text: &str) -> bool {
+    !text.is_empty()
+}
+
+/// The test-only fault switch, shared with `write` and unstable in the same
+/// way: it names the branches a test cannot otherwise reach, because a branch
+/// no test can reach is a branch nobody has read.
+///
+/// Every stage here stands for something a real machine does and a test cannot
+/// arrange: a quoting bug that produces a config tmux throws away whole, a tmux
+/// whose own default cannot be quoted, a file that moves between the plan and
+/// the write, a tmux that stops answering mid-run.
+fn faulty(stage: &str) -> bool {
+    std::env::var("TMUX_AGENT_STATUS_TEST_FAULT")
+        .is_ok_and(|value| value.split(',').any(|named| named == stage))
+}
+
 /// What to say about `/etc/tmux.conf`, which is never chosen.
 ///
 /// It needs root and it installs the tool for every user of the machine, which
 /// is not what anyone typing this command meant. So it is reported, with the
 /// way to ask for it on purpose.
-fn system_wide_note(listed: Option<&str>) -> String {
+fn system_wide_note(listed: Option<&str>, exists: impl Fn(&Path) -> bool) -> String {
     listed
         .map(tmux_conf::candidates)
         .unwrap_or_default()
         .iter()
-        .filter(|candidate| tmux_conf::is_system_wide(candidate) && candidate.exists())
+        .filter(|candidate| tmux_conf::is_system_wide(candidate) && exists(candidate))
         .map(|candidate| {
             format!(
                 "{} exists and is not being touched: it needs root, and it would install \
@@ -704,7 +744,7 @@ fn write_one(
         faults: write::Faults::from_env(),
     };
     let mut refused = None;
-    let outcome = writer.apply(|current| match change.rebuild.apply(current) {
+    let outcome = writer.apply(|current| match rebuild(&change.rebuild, current) {
         Ok(plan) => plan,
         Err(why) => {
             refused = Some(why);
@@ -718,15 +758,33 @@ fn write_one(
     match outcome {
         Ok(written) => {
             report.lines.push(summary_line(what, &written));
-            match written.outcome {
-                write::Outcome::AlreadyInstalled => Outcome::AlreadyInstalled,
-                _ => Outcome::Installed,
-            }
+            outcome_of(written.outcome)
         }
         Err(error) => {
             prompt.say(&format!("{what}: failed\n  {error}"));
             Outcome::Failed
         }
+    }
+}
+
+/// Build the new contents, with the fault switch standing in for a file that
+/// moved between the plan and the write.
+fn rebuild(rebuild: &Rebuild, current: &str) -> Result<write::Plan, String> {
+    match faulty("rebuild") {
+        true => Err("the file moved under us".to_owned()),
+        false => rebuild.apply(current),
+    }
+}
+
+/// What a completed write means for the step that asked for it.
+///
+/// A write can come back as "already installed" even when the plan said
+/// otherwise: the plan reads the file before the confirmation, and the merge
+/// runs again inside the lock against whatever is there by then.
+fn outcome_of(written: write::Outcome) -> Outcome {
+    match written {
+        write::Outcome::AlreadyInstalled => Outcome::AlreadyInstalled,
+        write::Outcome::Created | write::Outcome::Edited => Outcome::Installed,
     }
 }
 
@@ -828,8 +886,8 @@ fn plan_agent_action(agent: &'static agents::Agent, options: &Options) -> Action
     if agent.delivery == agents::Delivery::Plugin
         && options.claude_route != agents::ClaudeRoute::Settings
     {
-        match agents::Claude::on_path() {
-            Some(claude) => return plan_plugin(&claude, options),
+        match &options.claude {
+            Some(claude) => return plan_plugin(claude, options),
             // The plugin route was never available, so this is not a failure:
             // fall through to the merge the plan names as the fallback.
             None if options.claude_route == agents::ClaudeRoute::Plugin => {
@@ -965,7 +1023,7 @@ impl TmuxPlan {
         // own, so that there is no line to print when there is nothing to say.
         prompt.say(&format!(
             "{}This is what install would do:",
-            system_wide_note(probe::config_files().as_deref())
+            system_wide_note(probe::config_files().as_deref(), |path| path.exists())
         ));
 
         // The baseline is what makes the probe honest, and it is taken before
@@ -1031,23 +1089,41 @@ impl TmuxPlan {
             planned.push(Planned {
                 step: Step::TmuxHook,
                 what: "the tmux snippet".to_owned(),
-                action: Action::Write(Box::new(Change {
-                    what: "the tmux snippet".to_owned(),
-                    path: path.clone(),
-                    preview: tmux_conf::SNIPPET.to_owned(),
-                    rebuild: Rebuild::Whole(tmux_conf::SNIPPET.to_owned()),
-                    parses: |text| !text.is_empty(),
-                    creating: true,
-                    notes: vec!["no shipped copy was found, so one is written here".to_owned()],
-                    verify: None,
-                })),
+                // Inspected like every other target, so that somewhere we
+                // cannot write is handed back while nothing has been written,
+                // rather than failing halfway through the step.
+                action: match write::inspect(path) {
+                    Err(error) => Action::Manual(format!("    {error}")),
+                    Ok(seen) => Action::Write(Box::new(Change {
+                        what: "the tmux snippet".to_owned(),
+                        preview: tmux_conf::SNIPPET.to_owned(),
+                        rebuild: Rebuild::Whole(tmux_conf::SNIPPET.to_owned()),
+                        parses: not_empty,
+                        creating: !seen.exists,
+                        notes: vec!["no shipped copy was found, so one is written here".to_owned()],
+                        verify: None,
+                        path: seen.resolved,
+                    })),
+                },
             });
         }
 
+        // A source-file line pointing at nothing is worse than no line at all,
+        // so the line only goes in if the thing it points at will be there.
+        let snippet_refused = planned
+            .iter()
+            .any(|item| matches!(item.action, Action::Manual(_)));
         planned.push(Planned {
             step: Step::TmuxHook,
             what: Step::TmuxHook.title().to_owned(),
-            action: self.plan_source_line(snippet.path()),
+            action: match snippet_refused {
+                true => Action::Manual(
+                    "    not adding a source-file line, because the snippet it would point \
+                     at could not be written."
+                        .to_owned(),
+                ),
+                false => self.plan_source_line(snippet.path()),
+            },
         });
         planned
     }
@@ -1064,7 +1140,7 @@ impl TmuxPlan {
             what: Step::TmuxHook.title().to_owned(),
             preview: tmux_conf::with_source_block(&seen.contents, snippet),
             rebuild: Rebuild::SourceBlock(snippet.to_path_buf()),
-            parses: |text| !text.is_empty(),
+            parses: not_empty,
             creating: !seen.exists,
             notes: self.probe_notes(),
             verify: self.verification(),
@@ -1120,19 +1196,30 @@ impl TmuxPlan {
             .collect()
     }
 
-    /// The default this tmux would use, asked rather than remembered.
-    fn compiled_in_default(&self, options: &Options) -> String {
-        match options.probe {
+    /// The default this tmux would use, asked rather than remembered, with the
+    /// term already in it.
+    ///
+    /// `None` when the value cannot be quoted safely, which sends the step to
+    /// the manual path like any other value this tool will not write.
+    fn spliced_default(&self, options: &Options, option: &str) -> Option<String> {
+        let found = match options.probe {
             true => probe::compiled_in_default(),
             false => None,
         }
-        .unwrap_or_else(|| format::FALLBACK_DEFAULT.to_owned())
+        .unwrap_or_else(|| format::FALLBACK_DEFAULT.to_owned());
+        let found = match faulty("odd-default") {
+            // A default no quoting can carry. No tmux produces one today; a
+            // future one might, and the step must hand it back rather than
+            // write a line tmux discards.
+            true => "it's $a `b` \\c".to_owned(),
+            false => found,
+        };
+        format::assignment(option, &format::splice(&found))
     }
 
     /// Append a line for an option nothing assigns.
     fn plan_one_line(&self, option: &str, options: &Options) -> Action {
-        let spliced = format::splice(&self.compiled_in_default(options));
-        let Some(line) = format::assignment(option, &spliced) else {
+        let Some(line) = self.spliced_default(options, option) else {
             return self.manual_term("    this tmux's default format cannot be quoted safely");
         };
         let seen = match write::inspect(self.config.path()) {
@@ -1146,7 +1233,7 @@ impl TmuxPlan {
                 option: option.to_owned(),
                 line: line.clone(),
             },
-            parses: |text| !text.is_empty(),
+            parses: not_empty,
             creating: !seen.exists,
             notes: {
                 let mut notes = vec![format!("nothing assigns {option}, so a line is added")];
@@ -1215,9 +1302,16 @@ impl TmuxPlan {
                 first: last.line.first,
                 last: last.line.last,
                 was: last.line.text.clone(),
-                with: rewritten.clone(),
+                // The fault hands the writer a deliberately malformed splice -
+                // a stray argument after the value, which is what a quoting
+                // bug produces. tmux abandons the whole config over it, and
+                // the probe is the only thing that can see that.
+                with: match faulty("bad-splice") {
+                    true => format!("{rewritten} stray-argument"),
+                    false => rewritten.clone(),
+                },
             },
-            parses: |text| !text.is_empty(),
+            parses: not_empty,
             creating: false,
             notes: {
                 let mut notes = vec![format!("  before: {}", last.line.text)];
@@ -1234,13 +1328,11 @@ impl TmuxPlan {
     fn plan_new_pair(&self, options: &Options) -> Action {
         // Asked rather than remembered: the default has changed between tmux
         // versions and the one in *this* tmux is the only one that is right.
-        let default = match options.probe {
-            true => probe::compiled_in_default(),
-            false => None,
-        }
-        .unwrap_or_else(|| format::FALLBACK_DEFAULT.to_owned());
-
-        let Some(block) = format::pair(&format::splice(&default)) else {
+        let block: Option<String> = format::OPTIONS
+            .iter()
+            .map(|option| self.spliced_default(options, option))
+            .collect();
+        let Some(block) = block else {
             return self.manual_term("    this tmux's default format cannot be quoted safely");
         };
         let seen = match write::inspect(self.config.path()) {
@@ -1251,7 +1343,7 @@ impl TmuxPlan {
             what: Step::TmuxFormat.title().to_owned(),
             preview: append_marked(&seen.contents, &block),
             rebuild: Rebuild::FormatPair(block.clone()),
-            parses: |text| !text.is_empty(),
+            parses: not_empty,
             creating: !seen.exists,
             notes: {
                 let mut notes = vec![
@@ -1347,7 +1439,11 @@ pub fn offer_reload(config: &Path, prompt: &dyn prompt::Interaction) {
         &format!("Reload tmux now (tmux source-file {})?", config.display()),
         true,
     ) {
-        match probe::reload(config) {
+        let reloaded = match faulty("bad-reload") {
+            true => Err(std::io::Error::other("tmux refused the reload")),
+            false => probe::reload(config),
+        };
+        match reloaded {
             Ok(()) => prompt.say("  tmux reloaded."),
             Err(error) => prompt.say(&format!("  {error}")),
         }
@@ -1578,20 +1674,18 @@ mod tests {
 
     #[test]
     fn the_system_config_is_reported_and_never_chosen() {
-        // Whether `/etc/tmux.conf` exists is a fact about the machine, so the
-        // assertion is about the two things that follow from it.
-        let listed = "/etc/tmux.conf,~/.tmux.conf";
-        let note = system_wide_note(Some(listed));
-        if Path::new("/etc/tmux.conf").exists() {
-            assert!(note.contains("/etc/tmux.conf"), "{note}");
-            assert!(note.contains("--tmux-config"), "{note}");
-        } else {
-            assert!(note.is_empty(), "{note}");
-        }
-        // A user config is never reported this way, and no listing at all says
-        // nothing rather than guessing.
-        assert!(system_wide_note(Some("~/.tmux.conf")).is_empty());
-        assert!(system_wide_note(None).is_empty());
+        // It needs root, and it would install this for every user of the
+        // machine, which is not what anyone typing the command meant.
+        let note = system_wide_note(Some("/etc/tmux.conf,~/.tmux.conf"), |_| true);
+        assert!(note.contains("/etc/tmux.conf"), "{note}");
+        assert!(note.contains("--tmux-config"), "{note}");
+
+        // A config file tmux names but that is not there is nothing to say.
+        assert!(system_wide_note(Some("/etc/tmux.conf"), |_| false).is_empty());
+        // A user config is never reported this way.
+        assert!(system_wide_note(Some("~/.tmux.conf"), |_| true).is_empty());
+        // And no listing at all says nothing rather than guessing.
+        assert!(system_wide_note(None, |_| true).is_empty());
     }
 
     #[test]
@@ -1624,6 +1718,46 @@ mod tests {
         // And nothing else, because anything else moving is the tell that tmux
         // abandoned the config.
         assert_eq!(ours.len(), 4);
+    }
+
+    #[test]
+    fn a_write_that_turned_out_to_be_a_no_op_reports_as_one() {
+        // The plan reads the file before the confirmation; the merge runs
+        // again inside the lock, and by then somebody else may have done it.
+        assert_eq!(
+            outcome_of(write::Outcome::AlreadyInstalled),
+            Outcome::AlreadyInstalled
+        );
+        assert_eq!(outcome_of(write::Outcome::Created), Outcome::Installed);
+        assert_eq!(outcome_of(write::Outcome::Edited), Outcome::Installed);
+    }
+
+    #[test]
+    fn an_adoption_and_an_added_line_both_know_when_they_are_done() {
+        let vibe = agents::by_name("mistral-vibe").expect("a row");
+        let adopt = Rebuild::Adopt(vibe);
+        let wrapped = adopt.apply(vibe.contents).unwrap().written().unwrap();
+        assert!(has_marked_block(&wrapped));
+        // Only a marked block is ours, so a second adoption has nothing to do.
+        assert_eq!(adopt.apply(&wrapped), Ok(write::Plan::AlreadyInstalled));
+
+        let one = Rebuild::FormatOne {
+            option: format::OPTIONS[1].to_owned(),
+            line: format!("set -g {} 'x{}'\n", format::OPTIONS[1], format::TERM),
+        };
+        // The *other* option already carrying the term is not this one being
+        // done, which is the whole reason the check is per option.
+        let other_done = format!("set -g {} 'x{}'\n", format::OPTIONS[0], format::TERM);
+        let out = one.apply(&other_done).unwrap().written().unwrap();
+        assert_eq!(one.apply(&out), Ok(write::Plan::AlreadyInstalled));
+    }
+
+    #[test]
+    fn a_tmux_config_is_complete_when_it_has_anything_in_it() {
+        // tmux has no notion of a truncated config, so emptiness is the only
+        // truncation this can see - and it is the one that matters.
+        assert!(not_empty("set -g status on\n"));
+        assert!(!not_empty(""));
     }
 
     #[test]

@@ -142,8 +142,8 @@ pub struct SafeWrite<'a> {
 impl SafeWrite<'_> {
     /// Run the whole contract. Steps are numbered as the plan numbers them.
     pub fn apply(&self, build: impl FnOnce(&str) -> Plan) -> Result<Written, Error> {
-        let target = Target::resolve(self.path)?;
-        target.permit(self.ask)?;
+        let target = Target::resolve(self.path);
+        target.permit(self.ask, &self.faults)?;
 
         // Create mode makes its directories here rather than at step 6,
         // because the lock file is a sibling of the target and there is
@@ -152,14 +152,14 @@ impl SafeWrite<'_> {
         // already carry our entries, and so create mode always goes on to
         // write. `--dry-run` never reaches this line at all.
         if !target.exists {
-            create_parents(&target.resolved)?;
+            create_parents(&target.resolved, &self.faults)?;
         }
 
         let _lock = Lock::take(&target.resolved, &self.faults)?;
 
         // 4. Read and fingerprint.
-        let before = target.read()?;
-        let fingerprint = Fingerprint::of(&target.resolved, &self.faults)?;
+        let before = target.read(&self.faults)?;
+        let fingerprint = Fingerprint::of(&target.resolved, &self.faults, "stat")?;
 
         // 5. Merge, and decide "already installed" semantically.
         let Plan::Write(after) = build(&before) else {
@@ -178,20 +178,20 @@ impl SafeWrite<'_> {
 
         // 7. Write a sibling, in the target's own directory so the rename is
         // same-filesystem and therefore atomic.
-        let temp = write_sibling(&target.resolved, &after, &self.faults)?;
+        let mut temp = write_sibling(&target.resolved, &after, &self.faults)?;
 
         // 8. Re-check the fingerprint. The window between here and the rename
         // is small and not zero, and step 11 is what covers the difference.
         if self.faults.hits("changed") {
             let _ = fs::write(&target.resolved, "written by somebody else\n");
         }
-        if Fingerprint::of(&target.resolved, &self.faults)? != fingerprint {
-            let _ = fs::remove_file(&temp);
+        if Fingerprint::of(&target.resolved, &self.faults, "stat-again")? != fingerprint {
             return Err(Error::Changed(target.resolved));
         }
 
         // 9 and 10. Rename, then fsync the directory so it survives a power cut.
-        rename(&temp, &target.resolved, &self.faults)?;
+        rename(temp.path(), &target.resolved, &self.faults)?;
+        temp.taken();
         fsync_parent(&target.resolved, &self.faults)?;
 
         // 11. Verify byte for byte, and tell the two kinds of mismatch apart.
@@ -231,11 +231,16 @@ impl SafeWrite<'_> {
         if self.faults.hits("verify-race") {
             let _ = fs::write(&target.resolved, "{\"raced\": true}\n");
         }
-        let found = read_to_string(&target.resolved)?;
+        let found = read_to_string(&target.resolved, &self.faults)?;
         if found == written {
             return Ok(());
         }
-        if (self.parses)(&found) && found != before {
+        // A truncation is a prefix of what we meant to write, and nothing
+        // else is: that is exact rather than a judgement, and it catches the
+        // case a language check cannot - a tmux config has no notion of being
+        // truncated, because every prefix of a valid one is also valid.
+        let ours_cut_short = written.starts_with(&found);
+        if !ours_cut_short && (self.parses)(&found) && found != before {
             // A complete document that is neither ours nor the backup: somebody
             // wrote it after step 8. We cannot know whose write is worth more,
             // so we keep all three and hand the reconciliation to a human. It
@@ -270,26 +275,28 @@ impl Target {
     /// Step 1. A symlink chain resolves to its target and the edit lands there;
     /// the link itself is never replaced, because every later step addresses
     /// the resolved path.
-    fn resolve(path: &Path) -> Result<Target, Error> {
+    fn resolve(path: &Path) -> Target {
         match path.canonicalize() {
-            Ok(resolved) => Ok(Target {
+            Ok(resolved) => Target {
                 resolved,
                 exists: true,
-            }),
+            },
             // Create mode: canonicalize the nearest existing ancestor so the
             // new file lands in the same place a resolved one would.
-            Err(_) => Ok(Target {
+            Err(_) => Target {
                 resolved: resolve_missing(path),
                 exists: false,
-            }),
+            },
         }
     }
 
     /// Step 2. Refuse what must not be edited; ask about what is merely odd.
-    fn permit(&self, ask: &dyn Ask) -> Result<(), Error> {
+    fn permit(&self, ask: &dyn Ask, faults: &Faults) -> Result<(), Error> {
         let metadata = match self.exists {
             true => Some(
-                fs::symlink_metadata(&self.resolved)
+                faults
+                    .guard("lstat")
+                    .and_then(|()| fs::symlink_metadata(&self.resolved))
                     .map_err(|source| Error::io("reading the file's metadata", source))?,
             ),
             false => None,
@@ -349,9 +356,9 @@ impl Target {
     }
 
     /// Step 4. Create mode reads an empty document rather than a file.
-    fn read(&self) -> Result<String, Error> {
+    fn read(&self, faults: &Faults) -> Result<String, Error> {
         match self.exists {
-            true => read_to_string(&self.resolved),
+            true => read_to_string(&self.resolved, faults),
             false => Ok(String::new()),
         }
     }
@@ -373,7 +380,11 @@ pub struct Inspection {
 
 /// Look at a target without touching it.
 pub fn inspect(path: &Path) -> Result<Inspection, Error> {
-    let target = Target::resolve(path)?;
+    // Read-only, so nothing here is ever asked to fail: the fault switch is
+    // for the write, and a plan that could be made to fail on demand would
+    // only be testing the switch.
+    let faults = Faults::default();
+    let target = Target::resolve(path);
     let metadata = match target.exists {
         true => Some(
             fs::symlink_metadata(&target.resolved)
@@ -396,7 +407,7 @@ pub fn inspect(path: &Path) -> Result<Inspection, Error> {
     Ok(Inspection {
         named: path.to_path_buf(),
         warnings: target.warnings(metadata.as_ref()),
-        contents: target.read()?,
+        contents: target.read(&faults)?,
         resolved: target.resolved,
         exists: target.exists,
     })
@@ -463,20 +474,46 @@ fn back_up(target: &Path, faults: &Faults) -> Result<PathBuf, Error> {
         file_name(target),
         timestamp(SystemTime::now())
     ));
-    if faults.hits("backup") {
-        return Err(Error::io(
-            "copying the file to its backup",
-            faults.error("backup"),
-        ));
-    }
-    fs::copy(target, &backup)
+    faults
+        .guard("backup")
+        .and_then(|()| fs::copy(target, &backup))
         .map_err(|source| Error::io("copying the file to its backup", source))?;
     fsync(&backup, faults)?;
     Ok(backup)
 }
 
+/// A temp file that removes itself unless the rename takes it.
+///
+/// Every way out of a failed write goes through this, so the invariant is one
+/// thing in one place: a run that fails leaves nothing behind, and a
+/// half-written sibling of somebody's tmux.conf is exactly the residue this
+/// tool promises not to leave.
+struct Temp {
+    path: PathBuf,
+    renamed: bool,
+}
+
+impl Temp {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The rename took it, so there is nothing left to remove.
+    fn taken(&mut self) {
+        self.renamed = true;
+    }
+}
+
+impl Drop for Temp {
+    fn drop(&mut self) {
+        if !self.renamed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
 /// Step 7. In the target's own directory, so step 9's rename is atomic.
-fn write_sibling(target: &Path, contents: &str, faults: &Faults) -> Result<PathBuf, Error> {
+fn write_sibling(target: &Path, contents: &str, faults: &Faults) -> Result<Temp, Error> {
     let temp = target.with_file_name(format!(
         "{}.tmp-{}-{}",
         file_name(target),
@@ -484,50 +521,57 @@ fn write_sibling(target: &Path, contents: &str, faults: &Faults) -> Result<PathB
         nonce()
     ));
     let bytes = faults.damage(contents);
-    let mut file =
-        File::create(&temp).map_err(|source| Error::io("creating a temp file", source))?;
-    file.write_all(bytes.as_bytes())
-        .map_err(|source| Error::io("writing the temp file", source))?;
-    sync(&file, "the temp file", faults)?;
-    drop(file);
+    let mut file = faults
+        .guard("create")
+        .and_then(|()| File::create(&temp))
+        .map_err(|source| Error::io("creating a temp file", source))?;
+    // From here the file exists, so from here it is something that cleans up
+    // after itself.
+    let temp = Temp {
+        path: temp,
+        renamed: false,
+    };
+    fill(&mut file, &bytes, temp.path(), faults)?;
     // The new file inherits the old one's mode, so a config the user chmodded
     // keeps the mode they gave it.
     if let Ok(metadata) = fs::metadata(target) {
-        let _ = fs::set_permissions(&temp, metadata.permissions());
+        let _ = fs::set_permissions(temp.path(), metadata.permissions());
     }
     Ok(temp)
 }
 
+/// Put the bytes in the temp file and make sure they are really there.
+fn fill(file: &mut File, bytes: &str, temp: &Path, faults: &Faults) -> Result<(), Error> {
+    faults
+        .guard("write")
+        .and_then(|()| file.write_all(bytes.as_bytes()))
+        .map_err(|source| Error::io("writing the temp file", source))?;
+    sync(temp, "the temp file", "fsync-temp", faults)
+}
+
 /// Step 9.
 fn rename(temp: &Path, target: &Path, faults: &Faults) -> Result<(), Error> {
-    if faults.hits("rename") {
-        let _ = fs::remove_file(temp);
-        return Err(Error::io(
-            "renaming the temp file over the target",
-            faults.error("rename"),
-        ));
-    }
-    fs::rename(temp, target)
+    faults
+        .guard("rename")
+        .and_then(|()| fs::rename(temp, target))
         .map_err(|source| Error::io("renaming the temp file over the target", source))
 }
 
 /// Step 10.
 fn fsync_parent(target: &Path, faults: &Faults) -> Result<(), Error> {
     let parent = target.parent().unwrap_or(target);
-    let dir = File::open(parent).map_err(|source| Error::io("opening the directory", source))?;
-    sync(&dir, "the directory", faults)
+    sync(parent, "the directory", "fsync-dir", faults)
 }
 
 fn fsync(path: &Path, faults: &Faults) -> Result<(), Error> {
-    let file = File::open(path).map_err(|source| Error::io("opening the backup", source))?;
-    sync(&file, "the backup", faults)
+    sync(path, "the backup", "fsync", faults)
 }
 
-fn sync(file: &File, what: &str, faults: &Faults) -> Result<(), Error> {
-    if faults.hits("fsync") {
-        return Err(Error::io(format!("syncing {what}"), faults.error("fsync")));
-    }
-    file.sync_all()
+fn sync(path: &Path, what: &str, stage: &str, faults: &Faults) -> Result<(), Error> {
+    faults
+        .guard(stage)
+        .and_then(|()| File::open(path))
+        .and_then(|file| file.sync_all())
         .map_err(|source| Error::io(format!("syncing {what}"), source))
 }
 
@@ -561,13 +605,19 @@ fn keep(target: &Path, contents: &str, faults: &Faults) -> Option<PathBuf> {
     }
 }
 
-fn read_to_string(path: &Path) -> Result<String, Error> {
-    fs::read_to_string(path).map_err(|source| Error::io("reading the file", source))
+fn read_to_string(path: &Path, faults: &Faults) -> Result<String, Error> {
+    faults
+        .guard("read")
+        .and_then(|()| fs::read_to_string(path))
+        .map_err(|source| Error::io("reading the file", source))
 }
 
-fn create_parents(target: &Path) -> Result<(), Error> {
+fn create_parents(target: &Path, faults: &Faults) -> Result<(), Error> {
     let parent = target.parent().unwrap_or(target);
-    fs::create_dir_all(parent).map_err(|source| Error::io("creating the directory", source))
+    faults
+        .guard("mkdir")
+        .and_then(|()| fs::create_dir_all(parent))
+        .map_err(|source| Error::io("creating the directory", source))
 }
 
 fn file_name(path: &Path) -> String {
@@ -623,12 +673,12 @@ struct Fingerprint {
 }
 
 impl Fingerprint {
-    fn of(path: &Path, faults: &Faults) -> Result<Option<Fingerprint>, Error> {
+    fn of(path: &Path, faults: &Faults, stage: &str) -> Result<Option<Fingerprint>, Error> {
         // The fault stats a path that runs *through* a regular file, which
         // fails with `ENOTDIR` rather than `ENOENT`: a refusal that is not
         // absence, and so not create mode.
         let through_a_file;
-        let path = match faults.hits("stat") {
+        let path = match faults.hits(stage) {
             true => {
                 through_a_file = path.join("not-a-directory");
                 &through_a_file
@@ -684,7 +734,9 @@ impl Lock {
         let holder = Holder::from_line(held.trim());
         match holder.as_ref().map(Holder::liveness) {
             Some(Liveness::Gone) => {
-                fs::remove_file(path)
+                faults
+                    .guard("unlock")
+                    .and_then(|()| fs::remove_file(path))
                     .map_err(|source| Error::io("removing a stale lock file", source))?;
                 Lock::take_after_breaking(path, faults)
             }
@@ -834,20 +886,19 @@ impl Faults {
     /// What `TMUX_AGENT_STATUS_TEST_FAULT` names, which is how an integration
     /// test reaches the real binary.
     pub fn from_env() -> Faults {
+        Faults::parse(&std::env::var("TMUX_AGENT_STATUS_TEST_FAULT").unwrap_or_default())
+    }
+
+    /// A comma-separated list of stages, which is how an in-process test names
+    /// them without reaching for the environment at all.
+    pub fn parse(stages: &str) -> Faults {
         Faults(
-            std::env::var("TMUX_AGENT_STATUS_TEST_FAULT")
-                .unwrap_or_default()
+            stages
                 .split(',')
                 .filter(|stage| !stage.is_empty())
                 .map(str::to_owned)
                 .collect(),
         )
-    }
-
-    /// Named directly, which is how an in-process test avoids reaching for the
-    /// environment at all.
-    pub fn named(stages: &[&str]) -> Faults {
-        Faults(stages.iter().map(|stage| (*stage).to_owned()).collect())
     }
 
     fn hits(&self, stage: &str) -> bool {
@@ -857,6 +908,19 @@ impl Faults {
     /// An `io::Error` naming the stage, so a fault reads as itself in a report.
     fn error(&self, stage: &str) -> io::Error {
         io::Error::other(format!("TMUX_AGENT_STATUS_TEST_FAULT={stage}"))
+    }
+
+    /// Fail before a syscall the run asked to see fail.
+    ///
+    /// Every fallible call below goes through this, so that "the disk refused"
+    /// is a branch a test can reach at each of them rather than at none of
+    /// them. Chained ahead of the real call, it also means each site has one
+    /// error path instead of two.
+    fn guard(&self, stage: &str) -> io::Result<()> {
+        match self.hits(stage) {
+            true => Err(self.error(stage)),
+            false => Ok(()),
+        }
     }
 
     /// Make the bytes that reach disk differ from the bytes we meant to write.
@@ -1264,17 +1328,17 @@ mod tests {
 
     #[test]
     fn a_named_fault_damages_exactly_its_own_stage() {
-        assert!(Faults::named(&["empty", "restore"]).hits("restore"));
-        assert!(!Faults::named(&["empty"]).hits("restore"));
-        assert_eq!(Faults::named(&["empty"]).damage("kept"), "");
-        assert_eq!(Faults::named(&["truncate"]).damage("kept"), "ke");
+        assert!(Faults::parse("empty,restore").hits("restore"));
+        assert!(!Faults::parse("empty").hits("restore"));
+        assert_eq!(Faults::parse("empty").damage("kept"), "");
+        assert_eq!(Faults::parse("truncate").damage("kept"), "ke");
         assert!(
-            Faults::named(&["scramble"])
+            Faults::parse("scramble")
                 .damage("kept")
                 .contains("not what we meant")
         );
         assert!(
-            Faults::named(&["rename"])
+            Faults::parse("rename")
                 .error("rename")
                 .to_string()
                 .contains("rename")

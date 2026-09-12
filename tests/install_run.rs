@@ -7,6 +7,7 @@
 //! proposed line, or picks a different set of agents.
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -111,6 +112,7 @@ fn options(home: &TempDir, steps: install::Steps) -> Options {
         steps,
         agents: None,
         claude_route: agents::ClaudeRoute::Settings,
+        claude: None,
         marketplace: None,
         tmux_config: None,
         snippet: None,
@@ -350,6 +352,121 @@ fn declining_an_adoption_leaves_the_file_alone_and_still_reports_success() {
         fs::read_to_string(&target).expect("the file"),
         vibe.contents
     );
+}
+
+/// A `claude` that answers `plugin list` with `listed`, and exits `code` for
+/// anything else.
+fn claude_stub(dir: &TempDir, listed: &str, code: i32) -> agents::Claude {
+    let path = dir.join("claude");
+    fs::write(
+        &path,
+        format!("#!/bin/sh\ncase \"$2\" in list) echo '{listed}' ;; *) exit {code} ;; esac\n"),
+    )
+    .expect("the stub");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+    agents::Claude::at(path)
+}
+
+fn with_claude(dir: &TempDir, claude: Option<agents::Claude>) -> Options {
+    Options {
+        claude,
+        claude_route: agents::ClaudeRoute::Auto,
+        ..only_agents(dir, &["claude-code"])
+    }
+}
+
+#[test]
+fn the_plugin_route_installs_and_leaves_settings_json_alone() {
+    let dir = TempDir::new("run-plugin");
+    let script = Script::saying_yes();
+
+    let report = install::run(
+        &with_claude(&dir, Some(claude_stub(&dir, "[]", 0))),
+        &script,
+    );
+
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::Installed));
+    assert_eq!(report.exit_code(), 0);
+    assert!(
+        script.output().contains("plugin installed"),
+        "{}",
+        script.output()
+    );
+    // 004's promise: the plugin writes its own bookkeeping, and we go nowhere
+    // near the file the user was told we would not touch.
+    assert!(!dir.join(".claude/settings.json").exists());
+}
+
+#[test]
+fn declining_the_plugin_installs_nothing_and_is_not_a_failure() {
+    let dir = TempDir::new("run-plugin-declined");
+    let script = Script::saying_no();
+
+    let report = install::run(
+        &with_claude(&dir, Some(claude_stub(&dir, "[]", 0))),
+        &script,
+    );
+
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotInstalled));
+    assert_eq!(report.exit_code(), 0);
+    assert!(!dir.join(".claude/settings.json").exists());
+    // The confirmation says what it is about to clone, and from where.
+    assert!(
+        script
+            .output()
+            .contains("clones the marketplace from GitHub"),
+        "{}",
+        script.output()
+    );
+}
+
+#[test]
+fn a_claude_that_cannot_answer_fails_the_step_rather_than_merging() {
+    let dir = TempDir::new("run-plugin-mute");
+    let script = Script::saying_yes();
+
+    // `plugin list` itself fails, so we cannot know whether it is installed.
+    let mute = claude_stub(&dir, "", 3);
+    fs::write(dir.join("claude"), "#!/bin/sh\nexit 3\n").expect("the stub");
+
+    let report = install::run(&with_claude(&dir, Some(mute)), &script);
+
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::Failed));
+    assert_eq!(report.exit_code(), 1);
+    assert!(
+        script.output().contains("--claude-route=settings"),
+        "{}",
+        script.output()
+    );
+    assert!(!dir.join(".claude/settings.json").exists());
+}
+
+#[test]
+fn no_claude_at_all_is_the_one_thing_that_falls_through_to_the_merge() {
+    let dir = TempDir::new("run-plugin-absent");
+    let script = Script::saying_yes();
+
+    let report = install::run(&with_claude(&dir, None), &script);
+
+    assert_eq!(report.exit_code(), 0);
+    assert!(dir.join(".claude/settings.json").is_file());
+}
+
+#[test]
+fn forcing_the_plugin_route_with_no_claude_fails_rather_than_merging() {
+    let dir = TempDir::new("run-plugin-forced");
+    let script = Script::saying_yes();
+
+    let report = install::run(
+        &Options {
+            claude_route: agents::ClaudeRoute::Plugin,
+            ..with_claude(&dir, None)
+        },
+        &script,
+    );
+
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::Failed));
+    assert!(!dir.join(".claude/settings.json").exists());
 }
 
 #[test]

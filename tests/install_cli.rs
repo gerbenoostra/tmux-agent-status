@@ -488,6 +488,288 @@ fn a_mixed_run_finishes_the_work_it_can_and_exits_one() {
 }
 
 #[test]
+fn a_negative_step_flag_skips_exactly_that_step() {
+    let home = TempDir::new("cli-no-format");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    fs::write(
+        home.join(".config/tmux/tmux.conf"),
+        "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
+    )
+    .expect("the config");
+
+    let out = install(&home, &["-y", "--no-agents", "--no-tmux-format"]);
+
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    let written = fs::read_to_string(home.join(".config/tmux/tmux.conf")).expect("the config");
+    assert!(
+        written.contains("source-file"),
+        "the hook step was skipped too"
+    );
+    assert!(
+        !written.contains("@agent_status"),
+        "--no-tmux-format did not skip the format step:\n{written}"
+    );
+}
+
+#[test]
+fn the_probe_can_be_turned_off_and_the_run_says_so() {
+    let home = TempDir::new("cli-no-probe");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    fs::write(home.join(".config/tmux/tmux.conf"), "set -g status on\n").expect("the config");
+
+    let out = install(&home, &["-y", "--no-agents", "--no-tmux-probe"]);
+
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    let text = stdout(&out);
+    assert!(
+        text.contains("not be checked against a live tmux"),
+        "the run did not say what it skipped: {text}"
+    );
+    // The edit still lands, from the documented default rather than a probed
+    // one.
+    let written = fs::read_to_string(home.join(".config/tmux/tmux.conf")).expect("the config");
+    assert!(written.contains("@agent_status"), "{written}");
+}
+
+#[test]
+fn a_target_in_a_directory_we_cannot_write_is_handed_back() {
+    let home = TempDir::new("cli-unwritable");
+    let codex = home.join(".codex");
+    fs::create_dir_all(&codex).expect("the directory");
+    fs::write(codex.join("hooks.json"), "{}\n").expect("the config");
+    fs::set_permissions(&codex, fs::Permissions::from_mode(0o555)).expect("chmod");
+
+    let out = install(&home, &["-y", "--agents=codex"]);
+
+    // A refusal the user can act on, not a failure: they are left exactly
+    // where they were, holding the block they need.
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    let text = stdout(&out);
+    assert!(text.contains("not installed"), "{text}");
+    assert!(text.contains("not writable"), "{text}");
+    assert_eq!(
+        fs::read_to_string(codex.join("hooks.json")).expect("the file"),
+        "{}\n"
+    );
+}
+
+#[test]
+fn a_tmux_config_we_cannot_write_is_handed_back_with_the_term() {
+    let home = TempDir::new("cli-unwritable-tmux");
+    let dir = home.join(".config/tmux");
+    fs::create_dir_all(&dir).expect("the directory");
+    fs::write(dir.join("tmux.conf"), "set -g status on\n").expect("the config");
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).expect("chmod");
+
+    // The snippet goes somewhere writable, so this is about the config file
+    // alone: whether a shipped snippet is found beside the binary depends on
+    // how the binary under test was laid out, which is not what this is for.
+    let snippet = home.join("snippet.conf");
+    let out = install(
+        &home,
+        &[
+            "-y",
+            "--no-agents",
+            "--snippet",
+            &snippet.display().to_string(),
+        ],
+    );
+
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    let text = stdout(&out);
+    assert!(text.contains("not installed"), "{text}");
+    assert!(text.contains("not writable"), "{text}");
+    // Both steps hand something back, and the format step prints the term.
+    assert!(
+        text.contains("#{?@agent_status, #{@agent_status},}"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_tmux_edit_that_does_not_land_is_restored_like_any_other() {
+    let home = TempDir::new("cli-tmux-truncate");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    fs::write(
+        &config,
+        "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
+    )
+    .expect("the config");
+    let before = fs::read_to_string(&config).expect("the config");
+
+    let out = command(&home, &["-y", "--tmux-format"])
+        .env("TMUX_AGENT_STATUS_TEST_FAULT", "truncate")
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&out), 1, "{}", stdout(&out));
+    assert_eq!(
+        fs::read_to_string(&config).expect("the config"),
+        before,
+        "the config was not restored"
+    );
+    assert!(stdout(&out).contains("restored from"), "{}", stdout(&out));
+}
+
+#[test]
+fn a_snippet_we_cannot_write_is_handed_back_rather_than_failing() {
+    let home = TempDir::new("cli-snippet-unwritable");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    fs::write(home.join(".config/tmux/tmux.conf"), "set -g status on\n").expect("the config");
+    let locked = home.join("locked");
+    fs::create_dir_all(&locked).expect("the directory");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).expect("chmod");
+
+    let out = install(
+        &home,
+        &[
+            "-y",
+            "--tmux-hook",
+            "--snippet",
+            &locked.join("snippet.conf").display().to_string(),
+        ],
+    );
+
+    // Nothing was written, and the user is told why while they still have a
+    // config that works.
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    assert!(stdout(&out).contains("not writable"), "{}", stdout(&out));
+    assert!(
+        !fs::read_to_string(home.join(".config/tmux/tmux.conf"))
+            .expect("the config")
+            .contains("source-file"),
+        "a source line was written for a snippet that could not be"
+    );
+}
+
+#[test]
+fn a_value_that_cannot_be_requoted_is_handed_back_with_the_term() {
+    let home = TempDir::new("cli-unquotable");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    // A bare value carrying a backslash: single quotes would make the escape
+    // literal and change what the user meant.
+    fs::write(&config, "set -g window-status-format back\\ slash\n").expect("the config");
+    let before = fs::read_to_string(&config).expect("the config");
+
+    let out = install(&home, &["-y", "--tmux-format"]);
+
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    let text = stdout(&out);
+    assert!(text.contains("cannot be requoted safely"), "{text}");
+    assert!(
+        text.contains("#{?@agent_status, #{@agent_status},}"),
+        "{text}"
+    );
+    let after = fs::read_to_string(&config).expect("the config");
+    // The line that was handed back is untouched, to the byte.
+    assert!(
+        after.starts_with(before.trim_end()),
+        "the refused line was rewritten:\n{after}"
+    );
+    // And the *other* option, which nothing assigned, still gets its line:
+    // one being unrewritable is no reason to leave the other bare.
+    assert!(
+        after.contains("set -g window-status-current-format"),
+        "{after}"
+    );
+}
+
+#[test]
+fn a_default_that_cannot_be_quoted_is_handed_back_for_either_shape() {
+    // Both the config that assigns neither option and the one that assigns
+    // only one fall back on this tmux's own default, and both must hand it
+    // back rather than write a line tmux would discard.
+    for existing in [
+        "set -g status on\n",
+        "set -g window-status-format '#I:#W'\n",
+    ] {
+        let home = TempDir::new("cli-odd-default");
+        fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+        let config = home.join(".config/tmux/tmux.conf");
+        fs::write(&config, existing).expect("the config");
+
+        let out = command(&home, &["-y", "--tmux-format"])
+            .env("TMUX_AGENT_STATUS_TEST_FAULT", "odd-default")
+            .output()
+            .expect("the binary runs");
+
+        assert_eq!(code(&out), 0, "{}", stdout(&out));
+        assert!(
+            stdout(&out).contains("cannot be quoted safely"),
+            "{existing:?}: {}",
+            stdout(&out)
+        );
+    }
+}
+
+#[test]
+fn a_config_we_cannot_write_is_handed_back_whichever_shape_it_has() {
+    // The same refusal has to reach both ways of planning a format edit: the
+    // one that splices a line, and the one that adds a line for an option
+    // nothing assigns.
+    for existing in [
+        "set -g window-status-format '#I:#W'\n",
+        "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
+    ] {
+        let home = TempDir::new("cli-unwritable-shapes");
+        let dir = home.join(".config/tmux");
+        fs::create_dir_all(&dir).expect("the directory");
+        fs::write(dir.join("tmux.conf"), existing).expect("the config");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).expect("chmod");
+
+        let out = install(&home, &["-y", "--tmux-format"]);
+
+        assert_eq!(code(&out), 0, "{}", stdout(&out));
+        assert!(
+            stdout(&out).contains("not writable"),
+            "{existing:?}: {}",
+            stdout(&out)
+        );
+    }
+}
+
+/// The stages of the fault switch that stand for something no test can
+/// arrange: a tmux that stops answering, an edit it parses but that moves
+/// something else, a default it cannot quote, a file that moves under us, a
+/// reload it refuses.
+#[test]
+fn every_fault_stage_reaches_the_branch_it_stands_for() {
+    for (stage, expected, in_config) in [
+        // tmux stopped answering between the write and the check: the edit
+        // stands, and the summary says it was not checked.
+        ("no-dump", 0, true),
+        // An edit tmux parses that moves something else: rolled back.
+        ("bad-value", 1, false),
+        // A default that cannot be quoted: handed back, nothing written.
+        ("odd-default", 0, false),
+        // The file moved between the plan and the write: nothing written.
+        ("rebuild", 1, false),
+        // The reload was refused: the edit stands and the run says so.
+        ("bad-reload", 0, true),
+    ] {
+        let home = TempDir::new(&format!("cli-fault-{stage}"));
+        fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+        let config = home.join(".config/tmux/tmux.conf");
+        fs::write(&config, "set -g status-left 'LEFT'\n").expect("the config");
+
+        let out = command(&home, &["-y", "--no-agents"])
+            .env("TMUX_AGENT_STATUS_TEST_FAULT", stage)
+            .output()
+            .expect("the binary runs");
+
+        assert_eq!(code(&out), expected, "{stage}: {}", stdout(&out));
+        let written = fs::read_to_string(&config).expect("the config");
+        assert_eq!(
+            written.contains("@agent_status"),
+            in_config,
+            "{stage}: the config came out wrong:\n{written}"
+        );
+    }
+}
+
+#[test]
 fn the_help_text_documents_the_subcommand_and_its_flags() {
     let out = Command::new(support::BIN)
         .arg("--help")

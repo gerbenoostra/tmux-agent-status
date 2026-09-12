@@ -69,6 +69,10 @@ impl Server {
     fn option(&self, args: &[&str]) -> String {
         self.run(args).trim_end().to_owned()
     }
+
+    fn socket_path(&self) -> String {
+        self.option(&["display-message", "-p", "#{socket_path}"])
+    }
 }
 
 impl Drop for Server {
@@ -320,6 +324,153 @@ fn installing_into_a_config_twice_leaves_exactly_one_of_everything() {
         after_first.matches("source-file").count(),
         1,
         "a second set of hooks was sourced:\n{after_first}"
+    );
+}
+
+// 23. The probe catches an abandoned config, the edit is rolled back, and the
+// original config still produces its original options.
+#[test]
+fn a_malformed_splice_is_rolled_back_and_the_config_still_works() {
+    if !tmux_available() {
+        eprintln!("no tmux on PATH: skipping");
+        return;
+    }
+    let home = TempDir::new("e2e-rollback");
+    let config = home.write(
+        ".config/tmux/tmux.conf",
+        "set -g status-left 'LEFT'\n\
+         set -g window-status-format '#I:#W'\n\
+         set -g window-status-current-format '#I:#W'\n",
+    );
+    let before = fs::read_to_string(&config).expect("the config");
+
+    let out = Command::new(support::BIN)
+        .arg("install")
+        .args([
+            "-y",
+            "--tmux-format",
+            "--tmux-config",
+            &config.display().to_string(),
+        ])
+        .env("HOME", home.path())
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("TMUX")
+        // A stray argument after the value, which is what a quoting bug
+        // produces and what tmux throws the whole file away over.
+        .env("TMUX_AGENT_STATUS_TEST_FAULT", "bad-splice")
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("tmux will not read the edited config"),
+        "{text}"
+    );
+    assert!(text.contains("restored from"), "{text}");
+    assert_eq!(
+        fs::read_to_string(&config).expect("the config"),
+        before,
+        "the config was not rolled back"
+    );
+
+    // And the original config still does what it did: the rollback is only
+    // worth anything if what comes back works.
+    let server = Server::start_on(&config);
+    assert_eq!(
+        server.option(&["show-options", "-gv", "status-left"]),
+        "LEFT"
+    );
+    assert_eq!(
+        server.option(&["show-options", "-gwv", "window-status-format"]),
+        "#I:#W"
+    );
+}
+
+// The reload is the last thing a run offers, and it must only ever source a
+// config the running server actually loads.
+#[test]
+fn the_reload_sources_the_config_into_the_server_that_loads_it() {
+    if !tmux_available() {
+        eprintln!("no tmux on PATH: skipping");
+        return;
+    }
+    let home = TempDir::new("e2e-reload");
+    let config = home.write(
+        ".config/tmux/tmux.conf",
+        "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
+    );
+    // A server already running on that config, which is the situation the
+    // reload exists for.
+    let server = Server::start_on(&config);
+    let socket = server.socket_path();
+
+    let out = Command::new(support::BIN)
+        .arg("install")
+        .args([
+            "-y",
+            "--tmux-format",
+            "--tmux-config",
+            &config.display().to_string(),
+        ])
+        .env("HOME", home.path())
+        .env_remove("XDG_CONFIG_HOME")
+        // How tmux finds the server the caller is in.
+        .env("TMUX", format!("{socket},0,0"))
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("tmux reloaded"), "{text}");
+    // The running server picked the term up without being restarted.
+    for option in ["window-status-format", "window-status-current-format"] {
+        let value = server.option(&["show-options", "-gwv", option]);
+        assert!(value.contains("@agent_status"), "{option}: {value}");
+    }
+}
+
+#[test]
+fn a_reload_tmux_refuses_is_reported_without_undoing_the_edit() {
+    if !tmux_available() {
+        eprintln!("no tmux on PATH: skipping");
+        return;
+    }
+    let home = TempDir::new("e2e-reload-refused");
+    let config = home.write(
+        ".config/tmux/tmux.conf",
+        "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
+    );
+    let server = Server::start_on(&config);
+    let socket = server.socket_path();
+
+    let out = Command::new(support::BIN)
+        .arg("install")
+        .args([
+            "-y",
+            "--tmux-format",
+            "--tmux-config",
+            &config.display().to_string(),
+        ])
+        .env("HOME", home.path())
+        .env_remove("XDG_CONFIG_HOME")
+        .env("TMUX", format!("{socket},0,0"))
+        .env("TMUX_AGENT_STATUS_TEST_FAULT", "bad-reload")
+        .stdin(Stdio::null())
+        .output()
+        .expect("the binary runs");
+
+    let text = stdout(&out);
+    // The edit stands: the reload is a convenience, not part of the write.
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("refused the reload"), "{text}");
+    assert!(
+        fs::read_to_string(&config)
+            .expect("the config")
+            .contains("@agent_status"),
+        "the edit was undone by a failed reload"
     );
 }
 

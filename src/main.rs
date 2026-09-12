@@ -274,6 +274,7 @@ fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
         steps,
         agents,
         claude_route,
+        claude: install::agents::Claude::on_path(),
         marketplace,
         tmux_config,
         snippet,

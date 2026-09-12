@@ -260,6 +260,39 @@ fn a_config_that_blocks_is_given_up_on_and_leaves_nothing_running() {
 }
 
 #[test]
+fn a_config_tmux_will_not_read_is_named_line_and_reason() {
+    if !tmux_or_skip() {
+        return;
+    }
+    let dir = TempDir::new("probe-check");
+    let good = dir.write("good.conf", "set -g status-left 'LEFT'\n");
+    assert_eq!(probe::check(&good), Some(Ok(())));
+
+    // Verified on 3.6a: at server start the same file is abandoned whole, in
+    // silence, exiting 0. `source-file` on a running server is the only channel
+    // that says anything at all.
+    let bad = dir.write("bad.conf", "set -g status-left 'LEFT' stray-argument\n");
+    let complaint = probe::check(&bad)
+        .expect("tmux answered")
+        .expect_err("a broken config is refused");
+    assert!(complaint.contains("bad.conf"), "{complaint}");
+    assert!(complaint.contains(":1:"), "no line number: {complaint}");
+    assert!(complaint.contains("too many arguments"), "{complaint}");
+}
+
+#[test]
+fn a_reload_that_tmux_refuses_is_reported_rather_than_swallowed() {
+    if !tmux_or_skip() {
+        return;
+    }
+    // A path nothing can source. Whatever server this reaches, nothing is
+    // applied to it: the point is that the refusal comes back as an error.
+    let error = probe::reload(Path::new("/nonexistent/tmux-agent-status-no-such.conf"))
+        .expect_err("tmux cannot source a file that is not there");
+    assert!(error.to_string().contains("source-file"), "{error}");
+}
+
+#[test]
 fn the_running_server_can_be_asked_what_it_loaded() {
     if !tmux_or_skip() {
         return;

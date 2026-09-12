@@ -337,7 +337,7 @@ fn a_write_that_does_not_land_is_restored_byte_for_byte() {
         let ask = Answer::yes();
 
         let error = SafeWrite {
-            faults: Faults::named(&[stage]),
+            faults: Faults::parse(stage),
             ..writer(&target, &ask)
         }
         .apply(|_| Plan::Write("what we meant to write\n".to_owned()))
@@ -369,7 +369,7 @@ fn a_restore_that_fails_names_the_backup_and_the_command() {
     let ask = Answer::yes();
 
     let error = SafeWrite {
-        faults: Faults::named(&["empty", "restore"]),
+        faults: Faults::parse("empty,restore"),
         ..writer(&target, &ask)
     }
     .apply(|_| Plan::Write("after\n".to_owned()))
@@ -398,13 +398,35 @@ fn a_restore_that_fails_names_the_backup_and_the_command() {
 
 // 14. The counterpart, and the case a blanket restore gets wrong.
 #[test]
+fn a_write_cut_short_is_restored_even_when_the_remains_look_complete() {
+    // A tmux config has no notion of being truncated - every prefix of a valid
+    // one is also valid - so the language check cannot tell this from somebody
+    // else's document. Being a prefix of what we meant to write can.
+    let dir = TempDir::new("prefix");
+    let target = dir.write("tmux.conf", "before\n");
+    let ask = Answer::yes();
+
+    let error = SafeWrite {
+        // Anything at all is a complete document, which is the worst case.
+        parses: |_| true,
+        faults: Faults::parse("truncate"),
+        ..writer(&target, &ask)
+    }
+    .apply(|_| Plan::Write("a much longer line than the original\n".to_owned()))
+    .expect_err("a truncated write must fail");
+
+    assert!(matches!(error, Error::Damaged { .. }), "{error}");
+    assert_eq!(read(&target), "before\n", "the file was not restored");
+}
+
+#[test]
 fn a_concurrent_writers_document_is_never_clobbered() {
     let dir = TempDir::new("raced");
     let target = dir.write("tmux.conf", "before\n");
     let ask = Answer::yes();
 
     let error = SafeWrite {
-        faults: Faults::named(&["verify-race"]),
+        faults: Faults::parse("verify-race"),
         ..writer(&target, &ask)
     }
     .apply(|_| Plan::Write("ours\n".to_owned()))
@@ -444,7 +466,7 @@ fn a_race_reports_the_two_files_it_has_when_it_cannot_keep_the_third() {
     let ask = Answer::yes();
 
     let error = SafeWrite {
-        faults: Faults::named(&["verify-race", "keep"]),
+        faults: Faults::parse("verify-race,keep"),
         ..writer(&target, &ask)
     }
     .apply(|_| Plan::Write("ours\n".to_owned()))
@@ -467,7 +489,7 @@ fn a_document_that_does_not_parse_is_restored_rather_than_kept() {
 
     let error = SafeWrite {
         parses: never_parses,
-        faults: Faults::named(&["verify-race"]),
+        faults: Faults::parse("verify-race"),
         ..writer(&target, &ask)
     }
     .apply(|_| Plan::Write("ours\n".to_owned()))
@@ -484,7 +506,7 @@ fn a_file_that_changes_before_the_rename_is_left_alone() {
     let ask = Answer::yes();
 
     let error = SafeWrite {
-        faults: Faults::named(&["changed"]),
+        faults: Faults::parse("changed"),
         ..writer(&target, &ask)
     }
     .apply(|_| Plan::Write("ours\n".to_owned()))
@@ -505,25 +527,121 @@ fn a_file_that_changes_before_the_rename_is_left_alone() {
 
 #[test]
 fn a_failure_before_the_rename_leaves_the_file_untouched() {
-    for stage in ["backup", "fsync", "rename"] {
+    // Every syscall the write makes before the rename, each one refusing in
+    // turn. The assertion is always the same: the user's file is exactly the
+    // one they had.
+    for stage in [
+        "lstat",
+        "read",
+        "stat",
+        "backup",
+        "fsync",
+        "create",
+        "write",
+        "fsync-temp",
+        "stat-again",
+        "rename",
+    ] {
         let dir = TempDir::new("early-failure");
         let target = dir.write("tmux.conf", "before\n");
         let ask = Answer::yes();
 
         let error = SafeWrite {
-            faults: Faults::named(&[stage]),
+            faults: Faults::parse(stage),
             ..writer(&target, &ask)
         }
         .apply(|_| Plan::Write("after\n".to_owned()))
         .expect_err("{stage} must fail the write");
 
         assert!(matches!(error, Error::Io { .. }), "{stage}: {error}");
-        assert!(
-            error.to_string().contains(stage),
-            "{stage}: the message must name what failed: {error}"
-        );
         assert_eq!(read(&target), "before\n", "{stage}: the file changed");
+        let residue: Vec<String> = dir
+            .entries()
+            .into_iter()
+            .filter(|name| name.contains(".tmp-") || name.contains(".lock"))
+            .collect();
+        assert!(residue.is_empty(), "{stage}: left behind {residue:?}");
     }
+}
+
+#[test]
+fn a_failure_after_the_rename_is_still_a_failure_of_the_step() {
+    // The bytes are on disk by now, so these are the syscalls whose failure
+    // the user hears about without losing anything.
+    for stage in ["fsync-dir", "read"] {
+        let dir = TempDir::new("late-failure");
+        let target = dir.write("tmux.conf", "before\n");
+        let ask = Answer::yes();
+
+        let error = SafeWrite {
+            // `read` fires first at step 4, so this pins the earlier site; the
+            // later one is reached by the same stage in the loop above.
+            faults: Faults::parse(stage),
+            ..writer(&target, &ask)
+        }
+        .apply(|_| Plan::Write("after\n".to_owned()))
+        .expect_err("the write must fail");
+
+        assert!(matches!(error, Error::Io { .. }), "{stage}: {error}");
+    }
+}
+
+#[test]
+fn create_mode_reports_a_directory_it_cannot_make() {
+    let dir = TempDir::new("mkdir-fails");
+    let target = dir.join("config/tmux/tmux.conf");
+    let ask = Answer::yes();
+
+    let error = SafeWrite {
+        faults: Faults::parse("mkdir"),
+        ..writer(&target, &ask)
+    }
+    .apply(|_| Plan::Write("fresh\n".to_owned()))
+    .expect_err("the write must fail");
+
+    assert!(matches!(error, Error::Io { .. }), "{error}");
+    assert!(error.to_string().contains("mkdir"), "{error}");
+    assert!(!target.exists());
+}
+
+#[test]
+fn a_stale_lock_that_cannot_be_removed_is_reported() {
+    let dir = TempDir::new("unlock-fails");
+    let target = dir.write("tmux.conf", "before\n");
+    fs::write(
+        dir.join("tmux.conf.tmux-agent-status.lock"),
+        format!("{}\t{}\tgone\n", u32::MAX - 1, hostname()),
+    )
+    .expect("the lock file");
+    let ask = Answer::yes();
+
+    let error = SafeWrite {
+        faults: Faults::parse("unlock"),
+        ..writer(&target, &ask)
+    }
+    .apply(|_| Plan::Write("after\n".to_owned()))
+    .expect_err("the write must fail");
+
+    assert!(matches!(error, Error::Io { .. }), "{error}");
+    assert_eq!(read(&target), "before\n");
+}
+
+#[test]
+fn create_mode_reports_a_directory_it_cannot_sync() {
+    // The parent fsync is its own syscall, and in create mode nothing before
+    // it can fail first.
+    let dir = TempDir::new("fsync-dir-create");
+    let target = dir.join("tmux.conf");
+    let ask = Answer::yes();
+
+    let error = SafeWrite {
+        faults: Faults::parse("fsync-dir"),
+        ..writer(&target, &ask)
+    }
+    .apply(|_| Plan::Write("fresh\n".to_owned()))
+    .expect_err("the write must fail");
+
+    assert!(error.to_string().contains("fsync-dir"), "{error}");
 }
 
 /// A semantic check that always says no, which is what a tmux probe does when
@@ -591,7 +709,7 @@ fn a_rollback_that_fails_says_what_to_do_by_hand() {
 
     let error = SafeWrite {
         verify: Some(&rejects),
-        faults: Faults::named(&["restore"]),
+        faults: Faults::parse("restore"),
         ..writer(&target, &ask)
     }
     .apply(|_| Plan::Write("after\n".to_owned()))
@@ -614,7 +732,7 @@ fn a_rollback_that_fails_says_what_to_do_by_hand() {
     let fresh = dir.join("fresh.conf");
     let error = SafeWrite {
         verify: Some(&rejects),
-        faults: Faults::named(&["restore"]),
+        faults: Faults::parse("restore"),
         ..writer(&fresh, &ask)
     }
     .apply(|_| Plan::Write("after\n".to_owned()))
@@ -767,7 +885,7 @@ fn a_filesystem_that_refuses_for_its_own_reasons_fails_cleanly() {
         let ask = Answer::yes();
 
         let error = SafeWrite {
-            faults: Faults::named(&[stage]),
+            faults: Faults::parse(stage),
             ..writer(&target, &ask)
         }
         .apply(|_| Plan::Write("after\n".to_owned()))
