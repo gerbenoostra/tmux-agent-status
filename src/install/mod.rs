@@ -234,6 +234,8 @@ pub enum Rebuild {
     /// Append a marked block setting one option, for a config that assigns the
     /// other and leaves this one on tmux's default.
     FormatOne { option: String, line: String },
+    /// Wrap entries the user placed by hand in markers, changing nothing else.
+    Adopt(&'static agents::Agent),
 }
 
 impl Rebuild {
@@ -272,6 +274,10 @@ impl Rebuild {
                     current, *first, *last, with,
                 )))
             }
+            Rebuild::Adopt(agent) => Ok(match has_marked_block(current) {
+                true => write::Plan::AlreadyInstalled,
+                false => write::Plan::Write(agent.adopt(current)),
+            }),
             Rebuild::FormatPair(block) => Ok(match format::references_agent_status(current) {
                 true => write::Plan::AlreadyInstalled,
                 false => write::Plan::Write(append_marked(current, block)),
@@ -306,6 +312,10 @@ fn first_of(logical: &str) -> &str {
 /// One planned piece of work.
 pub enum Action {
     Write(Box<Change>),
+    /// The hooks are there, but not in a block we manage. Offered as an
+    /// adoption - rewrap them in markers, changing no behaviour - because the
+    /// alternative is a second copy of every hook.
+    Adopt(Box<Change>),
     /// The Claude Code plugin, which is commands rather than a file.
     Plugin {
         claude: agents::Claude,
@@ -326,6 +336,24 @@ pub struct Planned {
     pub step: Step,
     pub what: String,
     pub action: Action,
+}
+
+/// Work that survived the confirmation, and so is actually going to happen.
+///
+/// A type of its own rather than a filtered list of `Planned`, so that `apply`
+/// cannot be handed something already settled and has no arm for it.
+enum Work {
+    Write {
+        step: Step,
+        what: String,
+        change: Box<Change>,
+    },
+    Plugin {
+        step: Step,
+        what: String,
+        claude: agents::Claude,
+        marketplace: String,
+    },
 }
 
 /// How a step came out.
@@ -454,6 +482,28 @@ impl write::Verify for TmuxVerify {
     }
 }
 
+/// What to say about `/etc/tmux.conf`, which is never chosen.
+///
+/// It needs root and it installs the tool for every user of the machine, which
+/// is not what anyone typing this command meant. So it is reported, with the
+/// way to ask for it on purpose.
+fn system_wide_note(listed: Option<&str>) -> String {
+    listed
+        .map(tmux_conf::candidates)
+        .unwrap_or_default()
+        .iter()
+        .filter(|candidate| tmux_conf::is_system_wide(candidate) && candidate.exists())
+        .map(|candidate| {
+            format!(
+                "{} exists and is not being touched: it needs root, and it would install \
+                 this for every user of the machine.\nPass --tmux-config if that really \
+                 was the intent.\n",
+                candidate.display()
+            )
+        })
+        .collect()
+}
+
 /// A hook name with its `[index]` removed.
 ///
 /// tmux reports an unset hook under its bare name and a set one under
@@ -499,8 +549,10 @@ pub fn run(options: &Options, prompt: &dyn prompt::Interaction) -> Report {
     }
 
     // Phase 3. Every question, and then no more questions.
-    prompt.say("This is what install would do:");
-    let approved = confirm(&planned, prompt, &mut report);
+    if tmux.is_none() {
+        prompt.say("This is what install would do:");
+    }
+    let approved = confirm(planned, prompt, &mut report);
 
     if prompt.is_dry_run() {
         prompt.say("\n--dry-run: nothing above was written.");
@@ -508,7 +560,7 @@ pub fn run(options: &Options, prompt: &dyn prompt::Interaction) -> Report {
     }
 
     // Phases 4 and 5.
-    apply(planned, &approved, prompt, &mut report);
+    apply(approved, prompt, &mut report);
     summarise(&report, prompt, options);
     if let Some(tmux) = &tmux {
         if report.exit_code() == 0 {
@@ -519,44 +571,70 @@ pub fn run(options: &Options, prompt: &dyn prompt::Interaction) -> Report {
 }
 
 /// Show every planned change and take the answers, in one pass.
+///
+/// What comes back is the work to do, not indices into what was planned:
+/// everything settled here - already installed, handed back, refused - is
+/// settled, and `apply` never sees it again.
 fn confirm(
-    planned: &[Planned],
+    planned: Vec<Planned>,
     prompt: &dyn prompt::Interaction,
     report: &mut Report,
-) -> Vec<usize> {
+) -> Vec<Work> {
     let mut approved = Vec::new();
-    for (index, item) in planned.iter().enumerate() {
-        match &item.action {
+    for item in planned {
+        let (step, what) = (item.step, item.what);
+        match item.action {
             Action::AlreadyInstalled => {
-                prompt.say(&format!("  {} - already installed", item.what));
-                report.record(item.step, Outcome::AlreadyInstalled);
+                prompt.say(&format!("  {what} - already installed"));
+                report.record(step, Outcome::AlreadyInstalled);
             }
             Action::Manual(advice) => {
-                prompt.say(&format!("  {} - not installed\n{advice}", item.what));
-                report.record(item.step, Outcome::NotInstalled);
+                prompt.say(&format!("  {what} - not installed\n{advice}"));
+                report.record(step, Outcome::NotInstalled);
             }
             Action::Failed(why) => {
-                prompt.say(&format!("  {} - failed\n    {why}", item.what));
-                report.record(item.step, Outcome::Failed);
+                prompt.say(&format!("  {what} - failed\n    {why}"));
+                report.record(step, Outcome::Failed);
             }
             Action::Plugin {
                 marketplace,
                 claude,
             } => {
-                prompt.say(&format!("  {} - install the Claude Code plugin", item.what));
+                prompt.say(&format!("  {what} - install the Claude Code plugin"));
                 prompt.say("    This clones the marketplace from GitHub:");
-                for command in claude.plugin_commands(marketplace) {
+                for command in claude.plugin_commands(&marketplace) {
                     prompt.say(&format!("      {}", command.join(" ")));
                 }
-                match prompt.confirm(&format!("Install {}?", item.what), true) {
-                    true => approved.push(index),
-                    false => report.record(item.step, Outcome::NotInstalled),
+                match prompt.confirm(&format!("Install {what}?"), true) {
+                    true => approved.push(Work::Plugin {
+                        step,
+                        what,
+                        claude,
+                        marketplace,
+                    }),
+                    false => report.record(step, Outcome::NotInstalled),
+                }
+            }
+            Action::Adopt(change) => {
+                prompt.say(&format!(
+                    "  {what} - already installed, but not in a block we manage"
+                ));
+                for note in &change.notes {
+                    prompt.say(&format!("    {note}"));
+                }
+                match prompt.confirm(
+                    &format!("Adopt the hooks in {}?", change.path.display()),
+                    true,
+                ) {
+                    true => approved.push(Work::Write { step, what, change }),
+                    // Declining leaves the file untouched and the step reports
+                    // success, because the hooks *are* installed.
+                    false => report.record(step, Outcome::AlreadyInstalled),
                 }
             }
             Action::Write(change) => {
                 prompt.say(&format!(
-                    "  {} - {} {}",
-                    item.what,
+                    "  {what} - {} {}",
                     match change.creating {
                         true => "create",
                         false => "edit",
@@ -567,8 +645,8 @@ fn confirm(
                     prompt.say(&format!("    {note}"));
                 }
                 match prompt.confirm(&format!("Write {}?", change.path.display()), true) {
-                    true => approved.push(index),
-                    false => report.record(item.step, Outcome::NotInstalled),
+                    true => approved.push(Work::Write { step, what, change }),
+                    false => report.record(step, Outcome::NotInstalled),
                 }
             }
         }
@@ -578,26 +656,18 @@ fn confirm(
 
 /// Phases 4 and 5: the safe write, per target, in the order the list was built
 /// - agents, then the tmux hook, then the tmux format.
-fn apply(
-    planned: Vec<Planned>,
-    approved: &[usize],
-    prompt: &dyn prompt::Interaction,
-    report: &mut Report,
-) {
-    for (index, item) in planned.into_iter().enumerate() {
-        if !approved.contains(&index) {
-            continue;
-        }
-        match item.action {
-            Action::Plugin {
+fn apply(approved: Vec<Work>, prompt: &dyn prompt::Interaction, report: &mut Report) {
+    for item in approved {
+        match item {
+            Work::Plugin {
+                step,
+                what,
                 claude,
                 marketplace,
             } => match claude.install_plugin(&marketplace) {
                 Ok(()) => {
-                    report
-                        .lines
-                        .push(format!("{}: plugin installed", item.what));
-                    report.record(item.step, Outcome::Installed);
+                    report.lines.push(format!("{what}: plugin installed"));
+                    report.record(step, Outcome::Installed);
                 }
                 // The routes are chosen by what is available, not by what
                 // worked. Falling back here would edit `~/.claude/settings.json`
@@ -605,19 +675,16 @@ fn apply(
                 // the silent consequence of a network blip.
                 Err(why) => {
                     prompt.say(&format!(
-                        "{}: failed\n{why}\n  To merge into ~/.claude/settings.json instead, \
-                         re-run with --claude-route=settings.",
-                        item.what
+                        "{what}: failed\n{why}\n  To merge into ~/.claude/settings.json \
+                         instead, re-run with --claude-route=settings."
                     ));
-                    report.record(item.step, Outcome::Failed);
+                    report.record(step, Outcome::Failed);
                 }
             },
-            Action::Write(change) => {
-                let outcome = write_one(&item.what, *change, prompt, report);
-                report.record(item.step, outcome);
+            Work::Write { step, what, change } => {
+                let outcome = write_one(&what, *change, prompt, report);
+                report.record(step, outcome);
             }
-            // Everything else was settled while it was being confirmed.
-            Action::AlreadyInstalled | Action::Manual(_) | Action::Failed(_) => {}
         }
     }
 }
@@ -805,6 +872,21 @@ fn plan_merge(agent: &'static agents::Agent, options: &Options) -> Action {
         Err(error) => return Action::Manual(format!("    {error}")),
     };
     match agent.merge(&seen.contents) {
+        // Verified as a real setup: a user who copied the shipped drop-in by
+        // hand before this subcommand existed has the hooks and no markers.
+        // Only a marked block is ours to rewrite or, later, to remove.
+        Ok(write::Plan::AlreadyInstalled) if agent.present_unmarked(&seen.contents) => {
+            Action::Adopt(Box::new(Change {
+                what: agent.label.to_owned(),
+                preview: agent.adopt(&seen.contents),
+                rebuild: Rebuild::Adopt(agent),
+                parses: agent.parses(),
+                creating: false,
+                notes: agent_notes(agent, &seen),
+                verify: None,
+                path: seen.resolved,
+            }))
+        }
         Ok(write::Plan::AlreadyInstalled) => Action::AlreadyInstalled,
         Ok(write::Plan::Write(preview)) => Action::Write(Box::new(Change {
             what: agent.label.to_owned(),
@@ -846,8 +928,9 @@ fn agent_notes(agent: &'static agents::Agent, seen: &write::Inspection) -> Vec<S
     // warning to review, never a silent skip.
     if agent.present_unmarked(&seen.contents) {
         notes.push(
-            "these hooks are already there without markers, so they are being adopted rather \
-             than repeated"
+            "these hooks are already there, without markers. Adopting them wraps them in a \
+             block this tool manages and changes nothing about what they do; declining leaves \
+             the file exactly as it is, and the hooks are installed either way."
                 .to_owned(),
         );
     }
@@ -878,18 +961,12 @@ impl TmuxPlan {
     fn detect(options: &Options, prompt: &dyn prompt::Interaction) -> TmuxPlan {
         let config = tmux_conf::discover_config(options.tmux_config.as_deref(), &options.home);
 
-        if let Some(listed) = probe::config_files() {
-            for candidate in tmux_conf::candidates(&listed) {
-                if tmux_conf::is_system_wide(&candidate) && candidate.exists() {
-                    prompt.say(&format!(
-                        "  {} exists and is not being touched: it needs root and it would \
-                         install this for every user of the machine.\n  \
-                         Pass --tmux-config if that really was the intent.",
-                        candidate.display()
-                    ));
-                }
-            }
-        }
+        // Said as part of the plan's own heading rather than on a line of its
+        // own, so that there is no line to print when there is nothing to say.
+        prompt.say(&format!(
+            "{}This is what install would do:",
+            system_wide_note(probe::config_files().as_deref())
+        ));
 
         // The baseline is what makes the probe honest, and it is taken before
         // anything is written.
@@ -1497,6 +1574,24 @@ mod tests {
     fn a_continuation_is_matched_on_the_line_it_started() {
         assert_eq!(first_of("set -g x \\\ncontinued"), "set -g x \\");
         assert_eq!(first_of("single"), "single");
+    }
+
+    #[test]
+    fn the_system_config_is_reported_and_never_chosen() {
+        // Whether `/etc/tmux.conf` exists is a fact about the machine, so the
+        // assertion is about the two things that follow from it.
+        let listed = "/etc/tmux.conf,~/.tmux.conf";
+        let note = system_wide_note(Some(listed));
+        if Path::new("/etc/tmux.conf").exists() {
+            assert!(note.contains("/etc/tmux.conf"), "{note}");
+            assert!(note.contains("--tmux-config"), "{note}");
+        } else {
+            assert!(note.is_empty(), "{note}");
+        }
+        // A user config is never reported this way, and no listing at all says
+        // nothing rather than guessing.
+        assert!(system_wide_note(Some("~/.tmux.conf")).is_empty());
+        assert!(system_wide_note(None).is_empty());
     }
 
     #[test]

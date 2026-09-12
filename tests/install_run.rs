@@ -298,21 +298,57 @@ fn devins_project_file_is_mentioned_and_never_written() {
 fn hooks_already_there_without_markers_are_adopted_rather_than_repeated() {
     let dir = TempDir::new("run-adopt");
     // Verified as a real setup: a user who copied the shipped drop-in by hand
-    // before this subcommand existed.
+    // before this subcommand existed. Marker-only idempotency would append a
+    // second copy of every hook to that file.
     let vibe = agent("mistral-vibe");
     let target = dir.write(".vibe/hooks.toml", vibe.contents);
     let script = Script::saying_yes();
 
     let report = install::run(&only_agents(&dir, &["mistral-vibe"]), &script);
 
+    assert_eq!(report.exit_code(), 0);
+    let after = fs::read_to_string(&target).expect("the file");
+    assert!(
+        script.output().contains("not in a block we manage"),
+        "{}",
+        script.output()
+    );
+    // Adopting wraps what is there and changes nothing about what it does.
+    assert!(after.contains("# >>> tmux-agent-status >>>"), "{after}");
+    assert_eq!(
+        after.matches("tmux-agent-status-pre-tool").count(),
+        1,
+        "a second copy of the hooks was appended:\n{after}"
+    );
+    // And a second run has nothing left to do.
+    let again = Script::saying_yes();
+    let report = install::run(&only_agents(&dir, &["mistral-vibe"]), &again);
     assert_eq!(
         report.outcome(Step::Agents),
         Some(Outcome::AlreadyInstalled)
     );
+    assert_eq!(fs::read_to_string(&target).expect("the file"), after);
+}
+
+#[test]
+fn declining_an_adoption_leaves_the_file_alone_and_still_reports_success() {
+    let dir = TempDir::new("run-adopt-declined");
+    let vibe = agent("mistral-vibe");
+    let target = dir.write(".vibe/hooks.toml", vibe.contents);
+    let script = Script::saying_no();
+
+    let report = install::run(&only_agents(&dir, &["mistral-vibe"]), &script);
+
+    // The hooks *are* installed, so declining to rewrap them is not a failure
+    // and not an omission.
+    assert_eq!(
+        report.outcome(Step::Agents),
+        Some(Outcome::AlreadyInstalled)
+    );
+    assert_eq!(report.exit_code(), 0);
     assert_eq!(
         fs::read_to_string(&target).expect("the file"),
-        vibe.contents,
-        "an already-installed file was rewritten"
+        vibe.contents
     );
 }
 
