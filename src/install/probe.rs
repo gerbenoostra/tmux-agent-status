@@ -161,6 +161,28 @@ pub fn dump_within(config: &Path, timeout: Duration) -> Option<Dump> {
     Dump::of(&server)
 }
 
+/// Ask tmux whether it can read a config at all.
+///
+/// `source-file` on a running server reports the file, the line and the reason
+/// and exits non-zero - verified on 3.6a - and it is the only channel tmux
+/// offers: fed the same config at server start, it abandons the whole file in
+/// silence and exits 0. So the question is asked of a throwaway server that has
+/// loaded nothing, which is also what makes the answer about *this* config
+/// rather than about the user's running one.
+///
+/// `None` when there is no tmux to ask.
+pub fn check(config: &Path) -> Option<Result<(), String>> {
+    let server = Server::start_on(Path::new("/dev/null"), TIMEOUT)?;
+    let (ok, complaint, also) = server.attempt(&["source-file", &config.to_string_lossy()])?;
+    Some(match ok {
+        true => Ok(()),
+        // Verified on 3.6a: the complaint comes back on *stdout*, not stderr.
+        // Both are taken, because which one a given tmux uses is not something
+        // to find out from a user's bug report.
+        false => Err(format!("{}{}", complaint.trim(), also.trim())),
+    })
+}
+
 /// Ask the running server to reload a config, the same command a user types.
 ///
 /// Never `set-option`. By this point the probe has already loaded that exact
@@ -211,6 +233,12 @@ impl Server {
     }
 
     fn ask(&self, args: &[&str]) -> Option<String> {
+        let (ok, out, _) = self.attempt(args)?;
+        ok.then_some(out)
+    }
+
+    /// The same, but keeping what tmux had to say when it refused.
+    fn attempt(&self, args: &[&str]) -> Option<(bool, String, String)> {
         let mut all = vec!["-L", self.socket.as_str()];
         all.extend_from_slice(args);
         run_probe(&all, &self.socket, self.timeout)
@@ -255,14 +283,14 @@ fn run_here(args: &[&str]) -> Option<String> {
 /// resolves a relative `source-file` against the process's cwd rather than the
 /// config's - verified, and the reason a config using relative source paths is
 /// reported rather than silently mis-resolved.
-fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<String> {
+fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, String, String)> {
     let mut command = Command::new("tmux");
     command
         .args(args)
         .env_remove("TMUX")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     if let Some(home) = std::env::var_os("HOME") {
         command.current_dir(home);
     }
@@ -289,9 +317,11 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<String> {
         }
     };
     let output = child.wait_with_output().ok()?;
-    status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    Some((
+        status.success(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    ))
 }
 
 /// Clear up a probe server we could not wait for.

@@ -212,6 +212,25 @@ fn quote(path: &Path) -> String {
     }
 }
 
+/// Replace a run of physical lines with one line.
+///
+/// A logical line may span several physical ones through trailing backslashes,
+/// and the rewrite collapses the run - a formatting change the confirmation
+/// discloses, and the only one an edit makes outside the value itself.
+pub fn replace_lines(text: &str, first: usize, last: usize, with: &str) -> String {
+    let mut out = String::with_capacity(text.len() + with.len());
+    for (index, line) in text.lines().enumerate() {
+        if index < first || index > last {
+            out.push_str(line);
+            out.push('\n');
+        } else if index == first {
+            out.push_str(with);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// One assignment of a format option, and where it lives.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Assignment {
@@ -504,6 +523,18 @@ mod tests {
             discover_snippet(Some(&explicit), None, Path::new("/x"), &home),
             Choice::Create(explicit)
         );
+    }
+
+    #[test]
+    fn replacing_a_line_leaves_its_neighbours_alone() {
+        let text = "one\ntwo\nthree\n";
+        assert_eq!(replace_lines(text, 1, 1, "TWO"), "one\nTWO\nthree\n");
+        // A continuation run collapses into the single line that replaces it.
+        assert_eq!(replace_lines(text, 0, 1, "ONE"), "ONE\nthree\n");
+        assert_eq!(replace_lines(text, 2, 2, "THREE"), "one\ntwo\nTHREE\n");
+        // A file with no trailing newline gains one, which is what every other
+        // writer here does too.
+        assert_eq!(replace_lines("one\ntwo", 1, 1, "TWO"), "one\nTWO\n");
     }
 
     #[test]

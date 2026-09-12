@@ -16,7 +16,11 @@ categories = ["command-line-utilities"]
 # genuinely needs an editor. Only the `editor` feature: `password` and
 # `zeroize` are for something this tool never asks for.
 dialoguer = { version = "0.12.0", default-features = false, features = ["editor"] }
-pico-args = "0.5.0"
+# `eq-separator`: pico-args ships with no features at all, so `--key=value` is
+# not understood without this. `install --agents=codex,cursor` is the
+# documented spelling, and it is the only unambiguous one for a flag whose
+# value is optional.
+pico-args = { version = "0.5.0", features = ["eq-separator"] }
 # `preserve_order`: a merge that reorders a user's keys is a diff they did not
 # ask for, and this tool edits files it did not write.
 serde_json = { version = "1.0.151", default-features = false, features = [

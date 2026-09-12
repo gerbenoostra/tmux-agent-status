@@ -13,7 +13,7 @@ pub mod prompt;
 pub mod tmux_conf;
 pub mod write;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The comment that opens a block this tool manages.
 ///
@@ -83,6 +83,1105 @@ impl Home {
             None => self.home.join(".config").join(tail),
         }
     }
+}
+
+/// One of the three things `install` does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    Agents,
+    TmuxHook,
+    TmuxFormat,
+}
+
+impl Step {
+    pub const ALL: [Step; 3] = [Step::Agents, Step::TmuxHook, Step::TmuxFormat];
+
+    pub fn flag(self) -> &'static str {
+        match self {
+            Step::Agents => "--agents",
+            Step::TmuxHook => "--tmux-hook",
+            Step::TmuxFormat => "--tmux-format",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Step::Agents => "agent hooks",
+            Step::TmuxHook => "the tmux source-file line",
+            Step::TmuxFormat => "the tmux format term",
+        }
+    }
+}
+
+/// Which steps this run performs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Steps {
+    pub agents: bool,
+    pub tmux_hook: bool,
+    pub tmux_format: bool,
+}
+
+impl Steps {
+    pub fn has(self, step: Step) -> bool {
+        match step {
+            Step::Agents => self.agents,
+            Step::TmuxHook => self.tmux_hook,
+            Step::TmuxFormat => self.tmux_format,
+        }
+    }
+}
+
+/// Work out which steps run, from what the flags asked for.
+///
+/// `--agents=codex,cursor` selects the agents step *and* narrows it; a bare
+/// `--agents` selects the step and leaves the choice to detection. That is what
+/// makes `--agents` alone mean "only the agents", without a second "only" flag.
+pub fn select(positive: &[Step], negative: &[Step]) -> Result<Steps, String> {
+    if !positive.is_empty() && !negative.is_empty() {
+        return Err(format!(
+            "{} and {} cannot be given together: name the steps to run, or the steps to skip",
+            positive[0].flag(),
+            negative[0].flag().replacen("--", "--no-", 1)
+        ));
+    }
+    let chosen = |step: Step| match (positive.is_empty(), negative.is_empty()) {
+        // Nothing said: all three.
+        (true, true) => true,
+        // Only positives: exactly those.
+        (false, _) => positive.contains(&step),
+        // Only negatives: all three minus those.
+        (true, false) => !negative.contains(&step),
+    };
+    Ok(Steps {
+        agents: chosen(Step::Agents),
+        tmux_hook: chosen(Step::TmuxHook),
+        tmux_format: chosen(Step::TmuxFormat),
+    })
+}
+
+/// Everything the run was asked to do.
+pub struct Options {
+    pub steps: Steps,
+    /// The agents named on the command line. `None` leaves it to detection.
+    ///
+    /// A name that is valid but undetected installs anyway: naming an agent
+    /// explicitly is a stronger signal than the absence of its config
+    /// directory, and installing hooks before the agent is a legitimate order
+    /// to do things in.
+    pub agents: Option<Vec<&'static agents::Agent>>,
+    pub claude_route: agents::ClaudeRoute,
+    pub marketplace: Option<String>,
+    pub tmux_config: Option<PathBuf>,
+    pub snippet: Option<PathBuf>,
+    /// Whether to let tmux mark our homework. `--no-tmux-probe` downgrades the
+    /// tmux steps to the parser's own word.
+    pub probe: bool,
+    pub home: Home,
+    pub exe: Option<PathBuf>,
+}
+
+/// What one target's write would be, before anything is written.
+///
+/// Built by the plan phase from the bytes on disk and a pure function, which is
+/// what makes `--dry-run` free and what stops a run from leaving two of three
+/// steps applied because the third asked a question the user did not like.
+pub struct Change {
+    pub what: String,
+    pub path: PathBuf,
+    /// What the file would become, for the confirmation to show.
+    ///
+    /// A preview, and only that. The bytes actually written are built by
+    /// `rebuild` from what is on disk *inside the lock*, because two steps can
+    /// target the same file and the second one's view of it would otherwise be
+    /// the view from before the first one wrote.
+    pub preview: String,
+    pub rebuild: Rebuild,
+    /// Whether the bytes are a complete document in this file's own language.
+    pub parses: fn(&str) -> bool,
+    /// Whether the file existed, which is "created" rather than "edited".
+    pub creating: bool,
+    /// Anything the confirmation should say out loud.
+    pub notes: Vec<String>,
+    /// The semantic check, for the steps that have one.
+    pub verify: Option<TmuxVerify>,
+}
+
+/// How a target's new contents are built from whatever is on disk.
+///
+/// An enum rather than a closure so that a plan can be printed, compared and
+/// tested. Each variant is a pure function of the current bytes, which is what
+/// the safe write's step 5 asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Rebuild {
+    /// The whole file is ours: replace it.
+    Whole(String),
+    /// Merge an agent's entries in.
+    Agent(&'static agents::Agent),
+    /// Append the marked `source-file` block.
+    SourceBlock(PathBuf),
+    /// Replace one logical line with the spliced version of itself.
+    FormatLine {
+        first: usize,
+        last: usize,
+        /// The line as it was when the plan was made. If the file has moved
+        /// under us, the bytes are not the ones we read and nothing is written.
+        was: String,
+        with: String,
+    },
+    /// Append a marked block setting both format options.
+    FormatPair(String),
+}
+
+impl Rebuild {
+    /// Build the new contents, inside the lock, from the bytes on disk.
+    pub fn apply(&self, current: &str) -> Result<write::Plan, String> {
+        match self {
+            Rebuild::Whole(contents) => Ok(match current == contents {
+                true => write::Plan::AlreadyInstalled,
+                false => write::Plan::Write(contents.clone()),
+            }),
+            Rebuild::Agent(agent) => agent.merge(current).map_err(|why| why.to_string()),
+            Rebuild::SourceBlock(snippet) => Ok(match tmux_conf::sources_snippet(current) {
+                true => write::Plan::AlreadyInstalled,
+                false => write::Plan::Write(tmux_conf::with_source_block(current, snippet)),
+            }),
+            Rebuild::FormatLine {
+                first,
+                last,
+                was,
+                with,
+            } => {
+                let found: Vec<&str> = current.lines().collect();
+                // The line numbers were worked out before the confirmation, and
+                // another step may have written the same file since. Appending
+                // at the end leaves earlier lines where they were, which is
+                // what both other writers do - but check rather than assume,
+                // because the cost of being wrong is a line tmux discards.
+                if found.get(*first).is_none_or(|line| line != &first_of(was)) {
+                    return Err(format!(
+                        "{} moved under us: line {} is no longer the one we read",
+                        "the config",
+                        first + 1
+                    ));
+                }
+                Ok(write::Plan::Write(tmux_conf::replace_lines(
+                    current, *first, *last, with,
+                )))
+            }
+            Rebuild::FormatPair(block) => Ok(match format::references_agent_status(current) {
+                true => write::Plan::AlreadyInstalled,
+                false => write::Plan::Write(append_marked(current, block)),
+            }),
+        }
+    }
+}
+
+/// The first physical line of a logical one.
+fn first_of(logical: &str) -> &str {
+    logical.split('\n').next().unwrap_or(logical)
+}
+
+/// One planned piece of work.
+pub enum Action {
+    Write(Box<Change>),
+    /// The Claude Code plugin, which is commands rather than a file.
+    Plugin {
+        claude: agents::Claude,
+        marketplace: String,
+    },
+    /// Already done. Nothing is written and no backup is taken.
+    AlreadyInstalled,
+    /// Cannot be done here; this is what to do by hand. Not a failure: a
+    /// refusal the user can act on leaves them no worse off than before they
+    /// ran anything.
+    Manual(String),
+    /// Detection or planning failed. This one is a failure.
+    Failed(String),
+}
+
+/// A planned action, and which step asked for it.
+pub struct Planned {
+    pub step: Step,
+    pub what: String,
+    pub action: Action,
+}
+
+/// How a step came out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Installed,
+    AlreadyInstalled,
+    /// Nothing was written and the user knows what to do. Exit code 0: a
+    /// refusal the user chose is not an error.
+    NotInstalled,
+    Failed,
+}
+
+/// What the run did, and what to exit with.
+#[derive(Default)]
+pub struct Report {
+    pub lines: Vec<String>,
+    outcomes: Vec<(Step, Outcome)>,
+}
+
+impl Report {
+    fn record(&mut self, step: Step, outcome: Outcome) {
+        self.outcomes.push((step, outcome));
+    }
+
+    pub fn outcome(&self, step: Step) -> Option<Outcome> {
+        self.outcomes
+            .iter()
+            .filter(|(which, _)| *which == step)
+            .map(|(_, outcome)| *outcome)
+            .reduce(worst)
+    }
+
+    /// 0 when every requested step is installed or was already; 1 when at
+    /// least one failed, with every file it touched back the way it was.
+    pub fn exit_code(&self) -> u8 {
+        match self
+            .outcomes
+            .iter()
+            .any(|(_, outcome)| *outcome == Outcome::Failed)
+        {
+            true => 1,
+            false => 0,
+        }
+    }
+}
+
+/// The outcome a step reports when its targets disagree.
+fn worst(a: Outcome, b: Outcome) -> Outcome {
+    let rank = |outcome: Outcome| match outcome {
+        Outcome::Failed => 3,
+        Outcome::NotInstalled => 2,
+        Outcome::Installed => 1,
+        Outcome::AlreadyInstalled => 0,
+    };
+    match rank(a) >= rank(b) {
+        true => a,
+        false => b,
+    }
+}
+
+/// Everything `install` is allowed to move in a tmux config.
+///
+/// One list for both tmux steps rather than one each, because they edit the
+/// same file in sequence: the format step's baseline is taken before the hook
+/// step has written, so it sees the hooks appear as well. The assertion that
+/// matters is unchanged - *nothing this installer is not responsible for*
+/// moved - and an abandoned config still shows up instantly, because it reverts
+/// everything else the user set.
+///
+/// Hook names are compared with any `[index]` stripped: tmux reports an unset
+/// hook under its bare name and a set one under `name[index]`, so one edit
+/// shows up as two changes under two spellings of the same thing.
+fn ours_to_change() -> Vec<String> {
+    let mut names: Vec<String> = format::OPTIONS.iter().map(|o| (*o).to_owned()).collect();
+    names.push("session-window-changed".to_owned());
+    names.push("window-pane-changed".to_owned());
+    names
+}
+
+/// The semantic check for a tmux step: start a throwaway server on the config
+/// tmux actually loads, and assert that the only things that moved are the ones
+/// we meant to move.
+pub struct TmuxVerify {
+    /// The config tmux loads, which is not always the file we edited: the
+    /// winning format line can live in a sourced fragment, and probing a
+    /// fragment on its own tests a config the user does not have.
+    pub entry: PathBuf,
+    pub baseline: probe::Dump,
+    /// The option and hook names allowed to differ.
+    pub expected: Vec<String>,
+}
+
+impl write::Verify for TmuxVerify {
+    fn verify(&self, _: &Path) -> Result<(), String> {
+        // First: can tmux read it at all. `source-file` names the file, the
+        // line and the reason, which is the only useful error tmux ever gives
+        // about a config.
+        if let Some(Err(complaint)) = probe::check(&self.entry) {
+            return Err(format!("tmux will not read the edited config: {complaint}"));
+        }
+        // Then: does it mean what we meant. A bare value containing a space
+        // parses perfectly well and is discarded in silence, so parsing is not
+        // the whole question.
+        let Some(candidate) = probe::dump(&self.entry) else {
+            // No tmux to ask. The edit stands and the summary says it could
+            // not be checked.
+            return Ok(());
+        };
+        let unexpected: Vec<String> = probe::changes(&self.baseline, &candidate)
+            .into_iter()
+            .map(|change| change.name)
+            .filter(|name| !self.expected.contains(&without_index(name)))
+            .collect();
+        match unexpected.is_empty() {
+            true => Ok(()),
+            // Everything reverting at once is what an abandoned config looks
+            // like, and it costs the user their whole configuration rather
+            // than just our glyph.
+            false => Err(format!(
+                "tmux read the edited config back differently than we meant: {} \
+                 also changed. A config tmux cannot parse is abandoned whole.",
+                unexpected.join(", ")
+            )),
+        }
+    }
+}
+
+/// A hook name with its `[index]` removed.
+///
+/// tmux reports an unset hook under its bare name and a set one under
+/// `name[index]`, so one edit shows up as two changes under two spellings of
+/// the same thing.
+fn without_index(name: &str) -> String {
+    name.split_once('[')
+        .map_or(name, |(head, _)| head)
+        .to_owned()
+}
+
+/// Run the whole thing.
+///
+/// Every step is the same five phases - detect, plan, confirm, apply, verify -
+/// and nothing writes until every phase-3 answer is in. That is what makes
+/// `--dry-run` free, and what stops a run from leaving two of three steps
+/// applied because the third asked a question the user did not like.
+///
+/// A step that fails does not stop the run: the remaining steps still apply,
+/// and the summary says which of the three landed. No step reads another's
+/// output, so a failure cannot corrupt what follows. The glyph does need all
+/// three to appear, but a run that does what it can and says exactly what it
+/// did not beats one that abandons work it was able to finish.
+pub fn run(options: &Options, prompt: &prompt::Prompt) -> Report {
+    let mut report = Report::default();
+
+    // Phases 1 and 2, for every step, before a single byte is written.
+    let mut planned: Vec<Planned> = Vec::new();
+    if options.steps.agents {
+        planned.extend(plan_agents(options, prompt));
+    }
+    let tmux = match options.steps.tmux_hook || options.steps.tmux_format {
+        true => Some(TmuxPlan::detect(options, prompt)),
+        false => None,
+    };
+    if let Some(tmux) = &tmux {
+        if options.steps.tmux_hook {
+            planned.extend(tmux.plan_hook(options, prompt));
+        }
+        if options.steps.tmux_format {
+            planned.extend(tmux.plan_format(options, prompt));
+        }
+    }
+
+    // Phase 3. Every question, and then no more questions.
+    prompt.say("This is what install would do:");
+    let approved = confirm(&planned, prompt, &mut report);
+
+    if prompt.is_dry_run() {
+        prompt.say("\n--dry-run: nothing above was written.");
+        return report;
+    }
+
+    // Phases 4 and 5.
+    apply(planned, &approved, prompt, &mut report);
+    summarise(&report, prompt, options);
+    if let Some(tmux) = &tmux {
+        if report.exit_code() == 0 {
+            offer_reload(tmux.config.path(), prompt);
+        }
+    }
+    report
+}
+
+/// Show every planned change and take the answers, in one pass.
+fn confirm(planned: &[Planned], prompt: &prompt::Prompt, report: &mut Report) -> Vec<usize> {
+    let mut approved = Vec::new();
+    for (index, item) in planned.iter().enumerate() {
+        match &item.action {
+            Action::AlreadyInstalled => {
+                prompt.say(format!("  {} - already installed", item.what));
+                report.record(item.step, Outcome::AlreadyInstalled);
+            }
+            Action::Manual(advice) => {
+                prompt.say(format!("  {} - not installed\n{advice}", item.what));
+                report.record(item.step, Outcome::NotInstalled);
+            }
+            Action::Failed(why) => {
+                prompt.say(format!("  {} - failed\n    {why}", item.what));
+                report.record(item.step, Outcome::Failed);
+            }
+            Action::Plugin {
+                marketplace,
+                claude,
+            } => {
+                prompt.say(format!("  {} - install the Claude Code plugin", item.what));
+                prompt.say("    This clones the marketplace from GitHub:");
+                for command in claude.plugin_commands(marketplace) {
+                    prompt.say(format!("      {}", command.join(" ")));
+                }
+                match prompt.confirm(&format!("Install {}?", item.what), true) {
+                    true => approved.push(index),
+                    false => report.record(item.step, Outcome::NotInstalled),
+                }
+            }
+            Action::Write(change) => {
+                prompt.say(format!(
+                    "  {} - {} {}",
+                    item.what,
+                    match change.creating {
+                        true => "create",
+                        false => "edit",
+                    },
+                    change.path.display()
+                ));
+                for note in &change.notes {
+                    prompt.say(format!("    {note}"));
+                }
+                match prompt.confirm(&format!("Write {}?", change.path.display()), true) {
+                    true => approved.push(index),
+                    false => report.record(item.step, Outcome::NotInstalled),
+                }
+            }
+        }
+    }
+    approved
+}
+
+/// Phases 4 and 5: the safe write, per target, in the order the list was built
+/// - agents, then the tmux hook, then the tmux format.
+fn apply(planned: Vec<Planned>, approved: &[usize], prompt: &prompt::Prompt, report: &mut Report) {
+    for (index, item) in planned.into_iter().enumerate() {
+        if !approved.contains(&index) {
+            continue;
+        }
+        match item.action {
+            Action::Plugin {
+                claude,
+                marketplace,
+            } => match claude.install_plugin(&marketplace) {
+                Ok(()) => {
+                    report
+                        .lines
+                        .push(format!("{}: plugin installed", item.what));
+                    report.record(item.step, Outcome::Installed);
+                }
+                // The routes are chosen by what is available, not by what
+                // worked. Falling back here would edit `~/.claude/settings.json`
+                // on a machine where the user was promised it would not be, as
+                // the silent consequence of a network blip.
+                Err(why) => {
+                    prompt.say(format!(
+                        "{}: failed\n{why}\n  To merge into ~/.claude/settings.json instead, \
+                         re-run with --claude-route=settings.",
+                        item.what
+                    ));
+                    report.record(item.step, Outcome::Failed);
+                }
+            },
+            Action::Write(change) => {
+                let outcome = write_one(&item.what, *change, prompt, report);
+                report.record(item.step, outcome);
+            }
+            // Everything else was settled while it was being confirmed.
+            Action::AlreadyInstalled | Action::Manual(_) | Action::Failed(_) => {}
+        }
+    }
+}
+
+fn write_one(what: &str, change: Change, prompt: &prompt::Prompt, report: &mut Report) -> Outcome {
+    let verify = change.verify.as_ref().map(|v| v as &dyn write::Verify);
+    let writer = write::SafeWrite {
+        path: &change.path,
+        ask: prompt,
+        parses: change.parses,
+        verify,
+        faults: write::Faults::from_env(),
+    };
+    let mut refused = None;
+    let outcome = writer.apply(|current| match change.rebuild.apply(current) {
+        Ok(plan) => plan,
+        Err(why) => {
+            refused = Some(why);
+            write::Plan::AlreadyInstalled
+        }
+    });
+    if let Some(why) = refused {
+        prompt.say(format!("{what}: failed\n  {why}"));
+        return Outcome::Failed;
+    }
+    match outcome {
+        Ok(written) => {
+            report.lines.push(summary_line(what, &written));
+            match written.outcome {
+                write::Outcome::AlreadyInstalled => Outcome::AlreadyInstalled,
+                _ => Outcome::Installed,
+            }
+        }
+        Err(error) => {
+            prompt.say(format!("{what}: failed\n  {error}"));
+            Outcome::Failed
+        }
+    }
+}
+
+fn summary_line(what: &str, written: &write::Written) -> String {
+    let did = match written.outcome {
+        write::Outcome::Created => "created",
+        write::Outcome::Edited => "edited",
+        write::Outcome::AlreadyInstalled => "already installed",
+    };
+    let backup = written
+        .backup
+        .as_ref()
+        .map(|path| format!(", backup {}", path.display()))
+        .unwrap_or_default();
+    format!("{what}: {did} {}{backup}", written.resolved.display())
+}
+
+/// What the run did, grouped by where it landed.
+///
+/// A dotfiles-managed machine does not have one answer to "where does this edit
+/// go": verified on a real home-manager setup, some targets resolve into a
+/// versioned checkout and others into unmanaged `$HOME`, at the same time. For
+/// a user whose other agent configs *are* versioned, an unmanaged write is
+/// state that quietly does not exist on their next machine, and the one moment
+/// they can act on that is while reading this. Reporting, never policy.
+fn summarise(report: &Report, prompt: &prompt::Prompt, options: &Options) {
+    if report.lines.is_empty() {
+        return;
+    }
+    prompt.say("\nWhat changed:");
+    for line in &report.lines {
+        prompt.say(format!("  {line}"));
+    }
+    let versioned: Vec<&String> = report
+        .lines
+        .iter()
+        .filter(|line| repo_in_line(line).is_some())
+        .collect();
+    if !versioned.is_empty() {
+        prompt.say("\nSome of those landed in a git repository; the rest live only in $HOME.");
+    }
+    if options.steps.agents {
+        prompt.say("\nAgents load their hooks at startup: restart any running session.");
+    }
+}
+
+/// Whether a summary line names a path inside a git repository.
+fn repo_in_line(line: &str) -> Option<PathBuf> {
+    let path = line.split_whitespace().find(|word| word.starts_with('/'))?;
+    git_repo_of(Path::new(path))
+}
+
+/// Plan the agent step: choose the agents, then work out each one's write.
+fn plan_agents(options: &Options, prompt: &prompt::Prompt) -> Vec<Planned> {
+    chosen_agents(options, prompt)
+        .into_iter()
+        .map(|agent| plan_agent(agent, options))
+        .collect()
+}
+
+/// Which agents to install for.
+///
+/// Named on the command line wins outright. Otherwise every agent is listed,
+/// preselected when either signal hits, so nothing is ever installed without
+/// having been shown.
+fn chosen_agents(options: &Options, prompt: &prompt::Prompt) -> Vec<&'static agents::Agent> {
+    if let Some(named) = &options.agents {
+        return named.clone();
+    }
+    let rows: Vec<(String, bool)> = agents::AGENTS
+        .iter()
+        .map(|agent| {
+            let found = agent.detect(&options.home);
+            (
+                format!("{} ({})", agent.label, found.why()),
+                found.preselected(),
+            )
+        })
+        .collect();
+    prompt
+        .choose("Which agents should get hooks?", &rows)
+        .into_iter()
+        .filter_map(|index| agents::AGENTS.get(index))
+        .collect()
+}
+
+fn plan_agent(agent: &'static agents::Agent, options: &Options) -> Planned {
+    Planned {
+        step: Step::Agents,
+        what: agent.label.to_owned(),
+        action: plan_agent_action(agent, options),
+    }
+}
+
+fn plan_agent_action(agent: &'static agents::Agent, options: &Options) -> Action {
+    if agent.delivery == agents::Delivery::Plugin
+        && options.claude_route != agents::ClaudeRoute::Settings
+    {
+        match agents::Claude::on_path() {
+            Some(claude) => return plan_plugin(&claude, options),
+            // The plugin route was never available, so this is not a failure:
+            // fall through to the merge the plan names as the fallback.
+            None if options.claude_route == agents::ClaudeRoute::Plugin => {
+                return Action::Failed(
+                    "--claude-route=plugin was asked for, but `claude` is not on PATH".to_owned(),
+                );
+            }
+            None => {}
+        }
+    }
+    plan_merge(agent, options)
+}
+
+fn plan_plugin(claude: &agents::Claude, options: &Options) -> Action {
+    let marketplace = options
+        .marketplace
+        .clone()
+        .unwrap_or_else(agents::default_marketplace);
+    match claude.plugin_installed() {
+        // Idempotency stops here: it must not go on to check where the
+        // marketplace points, and must never re-add it to "correct" it.
+        Some(true) => Action::AlreadyInstalled,
+        Some(false) => Action::Plugin {
+            claude: claude.clone(),
+            marketplace,
+        },
+        None => Action::Failed(
+            "`claude plugin list --json` could not be read.\n  \
+             To merge into ~/.claude/settings.json instead, re-run with \
+             --claude-route=settings."
+                .to_owned(),
+        ),
+    }
+}
+
+fn plan_merge(agent: &'static agents::Agent, options: &Options) -> Action {
+    let target = agent.target(&options.home);
+    let seen = match write::inspect(&target) {
+        Ok(seen) => seen,
+        Err(error) => return Action::Manual(format!("    {error}")),
+    };
+    match agent.merge(&seen.contents) {
+        Ok(write::Plan::AlreadyInstalled) => Action::AlreadyInstalled,
+        Ok(write::Plan::Write(preview)) => Action::Write(Box::new(Change {
+            what: agent.label.to_owned(),
+            preview,
+            rebuild: Rebuild::Agent(agent),
+            parses: agent.parses(),
+            creating: !seen.exists,
+            notes: agent_notes(agent, &seen),
+            verify: None,
+            path: seen.resolved,
+        })),
+        // The step does not fail and nothing is written: the user is left
+        // exactly where they were, holding the block they need.
+        Err(why) => Action::Manual(format!(
+            "    {why}\n    Add this to {} by hand:\n{}",
+            seen.resolved.display(),
+            indent(agent.contents)
+        )),
+    }
+}
+
+fn agent_notes(agent: &'static agents::Agent, seen: &write::Inspection) -> Vec<String> {
+    let mut notes = Vec::new();
+    if seen.resolved != seen.named {
+        notes.push(format!(
+            "{} resolves to {}",
+            seen.named.display(),
+            seen.resolved.display()
+        ));
+    }
+    if let Some(repo) = git_repo_of(&seen.resolved) {
+        notes.push(format!(
+            "that is inside the git repository at {}",
+            repo.display()
+        ));
+    }
+    // A line merely mentioning us that is neither an entry we manage nor one
+    // we would replace - a comment, or a wrapper of the user's own - is a
+    // warning to review, never a silent skip.
+    if agent.present_unmarked(&seen.contents) {
+        notes.push(
+            "these hooks are already there without markers, so they are being adopted rather \
+             than repeated"
+                .to_owned(),
+        );
+    }
+    if agent.name == "devin" {
+        notes.push(format!(
+            "project scope lives in {} and is not written here",
+            agents::devin_project_file().display()
+        ));
+    }
+    notes
+}
+
+fn indent(text: &str) -> String {
+    text.lines().map(|line| format!("      {line}\n")).collect()
+}
+
+/// What the tmux steps found out before either of them planned anything.
+struct TmuxPlan {
+    config: tmux_conf::Choice,
+    /// The dump of the config as it stands, or `None` when there is no tmux.
+    baseline: Option<probe::Dump>,
+    /// What tmux said about the config as it stands, when it would not read
+    /// it. Set means the user's config was already broken before we arrived.
+    pre_broken: Option<String>,
+}
+
+impl TmuxPlan {
+    fn detect(options: &Options, prompt: &prompt::Prompt) -> TmuxPlan {
+        let config = tmux_conf::discover_config(options.tmux_config.as_deref(), &options.home);
+
+        if let Some(listed) = probe::config_files() {
+            for candidate in tmux_conf::candidates(&listed) {
+                if tmux_conf::is_system_wide(&candidate) && candidate.exists() {
+                    prompt.say(format!(
+                        "  {} exists and is not being touched: it needs root and it would \
+                         install this for every user of the machine.\n  \
+                         Pass --tmux-config if that really was the intent.",
+                        candidate.display()
+                    ));
+                }
+            }
+        }
+
+        // The baseline is what makes the probe honest, and it is taken before
+        // anything is written.
+        let baseline = match options.probe && config.path().exists() {
+            true => probe::dump(config.path()),
+            false => None,
+        };
+        let pre_broken = match options.probe && config.path().exists() {
+            true => probe::check(config.path()).and_then(Result::err),
+            false => None,
+        };
+
+        TmuxPlan {
+            config,
+            baseline,
+            pre_broken,
+        }
+    }
+
+    /// The refusal both tmux steps share when the config was already broken.
+    ///
+    /// Editing it would produce an install nobody could validate, and the user
+    /// would reasonably blame the tool that touched the file last for a
+    /// breakage it inherited.
+    fn refusal(&self) -> Option<Action> {
+        self.pre_broken.as_ref().map(|complaint| {
+            Action::Manual(
+                [
+                    format!(
+                        "    tmux will not read {} as it stands:",
+                        self.config.path().display()
+                    ),
+                    format!("      {complaint}"),
+                    "    tmux discards a config it cannot parse *whole*, so nothing in that"
+                        .to_owned(),
+                    "    file is in effect right now. Fixing that comes first.".to_owned(),
+                ]
+                .join("\n"),
+            )
+        })
+    }
+
+    fn plan_hook(&self, options: &Options, prompt: &prompt::Prompt) -> Vec<Planned> {
+        if let Some(refusal) = self.refusal() {
+            return vec![Planned {
+                step: Step::TmuxHook,
+                what: Step::TmuxHook.title().to_owned(),
+                action: refusal,
+            }];
+        }
+        let snippet = tmux_conf::discover_snippet(
+            options.snippet.as_deref(),
+            options.exe.as_deref(),
+            self.config.path(),
+            &options.home,
+        );
+        let mut planned = Vec::new();
+
+        // The snippet first: a source-file line pointing at nothing is worse
+        // than no line at all.
+        if let tmux_conf::Choice::Create(path) = &snippet {
+            planned.push(Planned {
+                step: Step::TmuxHook,
+                what: "the tmux snippet".to_owned(),
+                action: Action::Write(Box::new(Change {
+                    what: "the tmux snippet".to_owned(),
+                    path: path.clone(),
+                    preview: tmux_conf::SNIPPET.to_owned(),
+                    rebuild: Rebuild::Whole(tmux_conf::SNIPPET.to_owned()),
+                    parses: |text| !text.is_empty(),
+                    creating: true,
+                    notes: vec!["no shipped copy was found, so one is written here".to_owned()],
+                    verify: None,
+                })),
+            });
+        }
+
+        planned.push(Planned {
+            step: Step::TmuxHook,
+            what: Step::TmuxHook.title().to_owned(),
+            action: self.plan_source_line(snippet.path(), prompt),
+        });
+        planned
+    }
+
+    fn plan_source_line(&self, snippet: &Path, prompt: &prompt::Prompt) -> Action {
+        let seen = match write::inspect(self.config.path()) {
+            Ok(seen) => seen,
+            Err(error) => return Action::Manual(format!("    {error}")),
+        };
+        if tmux_conf::sources_snippet(&seen.contents) {
+            return Action::AlreadyInstalled;
+        }
+        Action::Write(Box::new(Change {
+            what: Step::TmuxHook.title().to_owned(),
+            preview: tmux_conf::with_source_block(&seen.contents, snippet),
+            rebuild: Rebuild::SourceBlock(snippet.to_path_buf()),
+            parses: |text| !text.is_empty(),
+            creating: !seen.exists,
+            notes: self.probe_notes(prompt),
+            verify: self.verification(),
+            path: seen.resolved,
+        }))
+    }
+
+    fn plan_format(&self, options: &Options, prompt: &prompt::Prompt) -> Vec<Planned> {
+        let action = match self.refusal() {
+            Some(refusal) => refusal,
+            None => self.plan_format_action(options, prompt),
+        };
+        vec![Planned {
+            step: Step::TmuxFormat,
+            what: Step::TmuxFormat.title().to_owned(),
+            action,
+        }]
+    }
+
+    fn plan_format_action(&self, options: &Options, prompt: &prompt::Prompt) -> Action {
+        let entry = self.config.path();
+        let found = tmux_conf::assignments(entry);
+        // The last assignment in tmux's own order is the one that wins, and so
+        // the one to edit. Editing any earlier one produces a line tmux
+        // discards: a successful-looking install with no glyph.
+        let Some(last) = found.last() else {
+            return self.plan_new_pair(options, prompt);
+        };
+        let Some(line) = last.candidate.clone().line() else {
+            let why = last
+                .candidate
+                .clone()
+                .refusal()
+                .map(format::Refusal::reason)
+                .unwrap_or("the line cannot be read");
+            return self.manual_term(&format!(
+                "    {} line {}: {why}",
+                last.file.display(),
+                last.line.first + 1
+            ));
+        };
+        if line.already_installed() {
+            // Wherever the user put the term, they put it there on purpose.
+            return Action::AlreadyInstalled;
+        }
+        let Some(rewritten) = line.spliced_line() else {
+            return self.manual_term(&format!(
+                "    {} line {}: the value cannot be requoted safely",
+                last.file.display(),
+                last.line.first + 1
+            ));
+        };
+        let rewritten = self.offer_edit(rewritten, prompt);
+
+        let seen = match write::inspect(&last.file) {
+            Ok(seen) => seen,
+            // The winning line lives in a file we may not write. Editing an
+            // earlier one would produce a line tmux discards, so the step
+            // reports rather than editing a loser.
+            Err(error) => return self.manual_term(&format!("    {error}")),
+        };
+        Action::Write(Box::new(Change {
+            what: Step::TmuxFormat.title().to_owned(),
+            preview: tmux_conf::replace_lines(
+                &seen.contents,
+                last.line.first,
+                last.line.last,
+                &rewritten,
+            ),
+            rebuild: Rebuild::FormatLine {
+                first: last.line.first,
+                last: last.line.last,
+                was: last.line.text.clone(),
+                with: rewritten.clone(),
+            },
+            parses: |text| !text.is_empty(),
+            creating: false,
+            notes: {
+                let mut notes = vec![format!("  before: {}", last.line.text)];
+                notes.push(format!("  after:  {rewritten}"));
+                notes.extend(self.probe_notes(prompt));
+                notes
+            },
+            verify: self.verification(),
+            path: seen.resolved,
+        }))
+    }
+
+    /// No format line at all: the user is on tmux's compiled-in default.
+    fn plan_new_pair(&self, options: &Options, prompt: &prompt::Prompt) -> Action {
+        // Asked rather than remembered: the default has changed between tmux
+        // versions and the one in *this* tmux is the only one that is right.
+        let default = match options.probe {
+            true => probe::compiled_in_default(),
+            false => None,
+        }
+        .unwrap_or_else(|| format::FALLBACK_DEFAULT.to_owned());
+
+        let Some(block) = format::pair(&format::splice(&default)) else {
+            return self.manual_term("    this tmux's default format cannot be quoted safely");
+        };
+        let seen = match write::inspect(self.config.path()) {
+            Ok(seen) => seen,
+            Err(error) => return self.manual_term(&format!("    {error}")),
+        };
+        Action::Write(Box::new(Change {
+            what: Step::TmuxFormat.title().to_owned(),
+            preview: append_marked(&seen.contents, &block),
+            rebuild: Rebuild::FormatPair(block.clone()),
+            parses: |text| !text.is_empty(),
+            creating: !seen.exists,
+            notes: {
+                let mut notes = vec![
+                    "no format line was found, so a new pair is written for both options"
+                        .to_owned(),
+                ];
+                notes.extend(block.lines().map(|line| format!("  {line}")));
+                notes.extend(self.probe_notes(prompt));
+                notes
+            },
+            verify: self.verification(),
+            path: seen.resolved,
+        }))
+    }
+
+    /// Offer to edit the proposed line, and re-check whatever comes back.
+    fn offer_edit(&self, proposed: String, prompt: &prompt::Prompt) -> String {
+        if prompt.confirm("Edit the proposed line before writing it?", false) {
+            if let Some(edited) = prompt.edit(&proposed) {
+                let edited = edited.trim_end().to_owned();
+                if format::references_agent_status(&edited) {
+                    return edited;
+                }
+                prompt.say("  that no longer references @agent_status; keeping the proposal.");
+            }
+        }
+        proposed
+    }
+
+    fn verification(&self) -> Option<TmuxVerify> {
+        Some(TmuxVerify {
+            entry: self.config.path().to_path_buf(),
+            baseline: self.baseline.clone()?,
+            expected: ours_to_change(),
+        })
+    }
+
+    fn probe_notes(&self, prompt: &prompt::Prompt) -> Vec<String> {
+        let _ = prompt;
+        match self.baseline.is_some() {
+            // It loads the user's real config in a throwaway server, so their
+            // `run-shell`, `if-shell` and any plugin-manager bootstrap actually
+            // execute. Disclosed, bounded by a timeout, skippable.
+            true => vec![
+                "afterwards tmux is asked to read the edited config back, in a throwaway \
+                 server; that runs whatever your config runs"
+                    .to_owned(),
+            ],
+            false => vec!["the edit will not be checked against a live tmux".to_owned()],
+        }
+    }
+
+    /// The manual path: print the term and what we found, and report the step
+    /// as not installed. The run's exit code stays 0, because a refusal the
+    /// user chose is not an error - and this is the state they are in today,
+    /// so falling into it leaves them no worse off than before they ran
+    /// anything.
+    fn manual_term(&self, why: &str) -> Action {
+        Action::Manual(format!(
+            "{why}\n    Add this term to both {} and {}, after the name segment:\n      {}",
+            format::OPTIONS[0],
+            format::OPTIONS[1],
+            format::TERM
+        ))
+    }
+}
+
+/// Offer the reload, which is the same command the user would type.
+///
+/// Never `set-option`. By this point the probe has already loaded that exact
+/// file in a throwaway server and found it sound, so the reload is offered on a
+/// file that is known to parse rather than hoped to.
+pub fn offer_reload(config: &Path, prompt: &prompt::Prompt) {
+    let Some(listed) = probe::config_files() else {
+        // No running server, so there is nothing to reload into.
+        return;
+    };
+    // Only a config that server would load. Sourcing anything else into it
+    // applies settings the user never asked that tmux to have - which is a
+    // real hazard with `--tmux-config`, and how a scratch config ends up in
+    // somebody's live session.
+    let loaded = tmux_conf::candidates(&listed)
+        .iter()
+        .any(|candidate| same_file(candidate, config));
+    if !loaded {
+        prompt.say(format!(
+            "\nNot offering a reload: the running tmux does not load {}.\n\
+             Start a new server, or source it yourself if that is what you meant.",
+            config.display()
+        ));
+        return;
+    }
+    if prompt.confirm(
+        &format!("Reload tmux now (tmux source-file {})?", config.display()),
+        true,
+    ) {
+        match probe::reload(config) {
+            Ok(()) => prompt.say("  tmux reloaded."),
+            Err(error) => prompt.say(format!("  {error}")),
+        }
+    }
+}
+
+/// Whether two paths name the same file, following symlinks where they exist.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        // A candidate tmux named that does not exist cannot be the one we
+        // edited, because we only edit files we could resolve.
+        _ => a == b,
+    }
+}
+
+/// The git repository a path sits in, if any.
+///
+/// Reporting, never policy. For a user whose other agent configs are versioned,
+/// a write into unmanaged `$HOME` is state that quietly does not exist on their
+/// next machine, and the one moment they can act on that is while reading the
+/// summary.
+pub fn git_repo_of(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map(Path::to_path_buf)
 }
 
 #[cfg(test)]

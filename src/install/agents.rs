@@ -70,7 +70,7 @@ impl Place {
 }
 
 /// One agent, and everything the installer needs to know about it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Agent {
     /// The name `--agents=` takes, and the directory name under `share/agents/`
     /// for the agents that ship a drop-in.

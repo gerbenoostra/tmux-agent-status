@@ -2,10 +2,12 @@
 
 use std::fmt;
 use std::io::{self, IsTerminal, Read, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use pico_args::Arguments;
 use tmux_agent_status::command;
+use tmux_agent_status::install;
 use tmux_agent_status::notify;
 use tmux_agent_status::state::{State, UnknownState};
 
@@ -81,6 +83,7 @@ fn run() -> Result<ExitCode, MainError> {
         "finish" => run_finish(pargs),
         "clear-window" => run_clear_window(pargs),
         "notify" => run_notify(pargs),
+        "install" => run_install(pargs),
         _ => {
             let free = free_strings(pargs)?;
             Err(unexpected_arguments(&subcommand, free))
@@ -207,6 +210,107 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// `tmux-agent-status install`.
+///
+/// Deliberately not routed through `run_hook`: a hook exits 0 whatever happens,
+/// which is right for something an agent calls on every turn and worthless for
+/// an installer. This one reports what it did and exits accordingly.
+fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
+    let yes = pargs.contains(["-y", "--yes"]);
+    let dry_run = pargs.contains("--dry-run");
+    let probe = !pargs.contains("--no-tmux-probe");
+
+    let mut positive = Vec::new();
+    let mut negative = Vec::new();
+    let named = opt_value(&mut pargs, "--agents")?;
+    // `--agents=codex,cursor` selects the step *and* narrows it; a bare
+    // `--agents` selects the step and leaves the choice to detection.
+    if named.is_some() || pargs.contains("--agents") {
+        positive.push(install::Step::Agents);
+    }
+    if pargs.contains("--tmux-hook") {
+        positive.push(install::Step::TmuxHook);
+    }
+    if pargs.contains("--tmux-format") {
+        positive.push(install::Step::TmuxFormat);
+    }
+    if pargs.contains("--no-agents") {
+        negative.push(install::Step::Agents);
+    }
+    if pargs.contains("--no-tmux-hook") {
+        negative.push(install::Step::TmuxHook);
+    }
+    if pargs.contains("--no-tmux-format") {
+        negative.push(install::Step::TmuxFormat);
+    }
+    let steps = install::select(&positive, &negative).map_err(MainError::Usage)?;
+
+    let claude_route = match opt_value(&mut pargs, "--claude-route")?.as_deref() {
+        None | Some("auto") => install::agents::ClaudeRoute::Auto,
+        Some("plugin") => install::agents::ClaudeRoute::Plugin,
+        Some("settings") => install::agents::ClaudeRoute::Settings,
+        Some(other) => {
+            return Err(MainError::from(format!(
+                "unknown --claude-route `{other}`: valid routes are auto, plugin, settings"
+            )));
+        }
+    };
+    let marketplace = opt_value(&mut pargs, "--marketplace")?;
+    let tmux_config = opt_value(&mut pargs, "--tmux-config")?.map(PathBuf::from);
+    let snippet = opt_value(&mut pargs, "--snippet")?.map(PathBuf::from);
+    reject_extra_with_prefix(pargs, "install")?;
+
+    let agents = named.map(|names| parse_agents(&names)).transpose()?;
+    let home = install::Home::from_env()
+        .ok_or(MainError::from("install needs $HOME and there is none"))?;
+
+    // A question with no terminal and no `-y` is a usage error rather than a
+    // guess: a tool that edits configs unattended is a tool nobody asked to
+    // run.
+    let prompt = install::prompt::Prompt::new(yes, dry_run)
+        .map_err(|error| MainError::Usage(error.to_string()))?;
+
+    let options = install::Options {
+        steps,
+        agents,
+        claude_route,
+        marketplace,
+        tmux_config,
+        snippet,
+        probe,
+        home,
+        exe: std::env::current_exe().ok(),
+    };
+    Ok(ExitCode::from(install::run(&options, &prompt).exit_code()))
+}
+
+/// Resolve the names `--agents=` gave.
+///
+/// A name that is not in the table is a usage error listing the valid names: a
+/// typo'd `--agents=cursur` must never be read as "install nothing,
+/// successfully".
+fn parse_agents(names: &str) -> Result<Vec<&'static install::agents::Agent>, MainError> {
+    names
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            install::agents::by_name(name).ok_or_else(|| {
+                MainError::Usage(format!(
+                    "unknown agent `{name}`: valid names are {}",
+                    install::agents::names().join(", ")
+                ))
+            })
+        })
+        .collect()
+}
+
+fn opt_value(pargs: &mut Arguments, name: &'static str) -> Result<Option<String>, MainError> {
+    pargs
+        .opt_value_from_fn(name, |s: &str| Ok::<_, &'static str>(s.to_owned()))
+        .map_err(|_| MainError::from(format!("{name} requires a value")))
+}
+
 fn pane_value(pargs: &mut Arguments) -> Result<Option<String>, MainError> {
     pargs
         .opt_value_from_fn("--pane", |s: &str| Ok::<_, &'static str>(s.to_owned()))
@@ -317,6 +421,9 @@ usage:
                               map a JSON payload from a shape-B agent
   tmux-agent-status notify --agent <name> --stdin [--json]
                               read the JSON payload from stdin
+  tmux-agent-status install [flags]
+                              write the agent hooks and tmux configuration the
+                              README documents, asking before each change
   tmux-agent-status --version      version, and the executable that is actually running
   tmux-agent-status --help         this text
 
@@ -328,8 +435,27 @@ The pane is resolved in this order: --pane, $TMUX_AGENT_STATUS_PANE, $TMUX_PANE.
 Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every write into a no-op. Set
 `TMUX_AGENT_STATUS_DEBUG=1` to log dropped events to stderr.
 
+install flags:
+  --agents[=<name>[,<name>...]]  agent hooks; with names, only those agents
+  --tmux-hook                    the source-file line for the shipped snippet
+  --tmux-format                  the glyph term in both window status formats
+  --no-agents --no-tmux-hook --no-tmux-format
+  -y, --yes                      take the recommended answer to every question
+  --dry-run                      print the plan and change nothing
+  --tmux-config <path>           the config file to edit
+  --snippet <path>               where the sourced snippet lives, or should go
+  --claude-route <auto|plugin|settings>
+  --marketplace <source>         where to install the Claude Code plugin from
+  --no-tmux-probe                do not check the edit against a throwaway tmux
+
+With no step flags, install does all three. Positive and negative step flags
+cannot be mixed.
+
+agents: {}
+
 states: {}
 ",
+        install::agents::names().join(", "),
         states.join(", ")
     )
 }
