@@ -207,9 +207,15 @@ One primitive, used by every file this tool touches. `install::write::safely(pat
    concurrent runs. It does **not** serialise the agent that also writes the file - nothing can,
    since the agent takes no lock - which is what steps 8 and 11 are for.
 4. **Read and fingerprint.** Read the whole file. Record `(len, mtime, hash)`.
-5. **Merge.** Build the new contents from the bytes read in step 4 with a pure function. If the
-   result equals the input, stop here: nothing to do, **no backup written**, report "already
-   installed". This is what makes a second run leave no trace at all.
+5. **Merge, and decide "already installed" semantically.** Build the new contents from the bytes
+   read in step 4 with a pure function. The no-op test is **whether the parsed document already
+   carries exactly our entries**, not whether our serialiser reproduces the file byte for byte -
+   verified on a real hand-maintained config, where reserialising an already-correct file changed
+   2906 bytes into 3284 with no semantic change at all. A byte-level test would rewrite that file,
+   take a pointless backup and put a large no-op diff in the user's dotfiles repo. So: already
+   carries our entries, stop here, **nothing written, no backup**. Only a genuine semantic change
+   earns a write, and when one is earned the reformatting it brings is disclosed in the
+   confirmation.
 6. **Back up.** Copy to `<target>.bak-<UTC RFC3339 basic>` beside the target, preserving mode,
    `fsync`ed. Never deleted, never reused, never overwritten.
 7. **Write a sibling.** `<target>.tmp-<pid>-<nonce>` in the target's own directory, so the rename in
@@ -344,6 +350,7 @@ what is *available*, not by what *worked*:
 | Situation | What happens |
 | --- | --- |
 | `claude` absent from `PATH` | fall to the merge into `~/.claude/settings.json`; the plugin route was never available |
+| `claude` present, plugin already installed | **stop**; see "Never repoint an existing marketplace" |
 | `claude` present, plugin commands succeed | plugin installed; `settings.json` untouched, as 004 promises |
 | `claude` present, plugin commands **fail** (old CLI, no network, marketplace down) | **fail the step**, print the command and its stderr verbatim, suggest `--claude-route=settings` |
 
@@ -353,6 +360,18 @@ consequence of a network blip. A user who wants that outcome can have it by aski
 `--claude-route=settings` forces the merge, and `--claude-route=plugin` forces the plugin and fails
 if it cannot - but nobody gets it by accident. The failure is loud, the step is retryable, and no
 other step is affected.
+
+#### Never repoint an existing marketplace
+
+Idempotency keys on **the plugin being installed** - an id starting `tmux-agent-status@` in
+`claude plugin list --json` - and stops there. It must not go on to check *where* the marketplace
+points, and must never re-run `marketplace add` to "correct" it.
+
+Verified as a real setup: a contributor's marketplace is registered as a `directory` source pointing
+at their local checkout, which is how they test the plugin they are developing. Re-adding it from
+GitHub would silently swap their working copy for a released one, and the symptom - a plugin that no
+longer reflects their edits - is maddening to trace back to an installer they ran once. If the
+plugin is installed, the step is done.
 
 ### The repository slug
 
@@ -404,12 +423,44 @@ Two mechanical details that are easy to get wrong and are therefore written down
 preceded by a newline if the file does not already end in one, or the marker lands on the tail of
 the user's last line; and the block ends in a newline of its own.
 
-Idempotency is **the marker comments alone**. A line merely carrying `tmux-agent-status notify`
-could be a comment about the tool, a wrapper hook of the user's own, or a stale entry they meant to
-delete, and treating any of those as "installed" silently does nothing while reporting success.
-Instead such a line outside our markers is a **warning**: "this file already mentions
-tmux-agent-status outside the block we manage; review it". Deleting the markers therefore causes a
-reinstall, which is the documented and correct behaviour.
+Idempotency has two levels, and collapsing them to one gets a real user wrong either way:
+
+1. **The marker comments** identify the block *we manage*. Only a marked block is ours to rewrite
+   or, later, to remove.
+2. **Our own `name = "tmux-agent-status-..."` keys** identify the hook set *being present*, marked
+   or not. This is the case of a user who copied the shipped drop-in by hand before this subcommand
+   existed - verified as a real setup, byte-identical to the shipped file and carrying no markers.
+
+Marker-only idempotency would append a **second copy** of every hook to that file. So the append is
+gated on level 2: if an equivalent set is already there, unmarked, the tool reports "already
+installed, not in a block we manage" and offers to **adopt** it - rewrap the existing entries in
+markers, changing no behaviour - rather than duplicating it. Declining leaves the file untouched and
+the step reports success, because the hooks *are* installed.
+
+A line merely mentioning `tmux-agent-status` that is neither of those - a comment, a wrapper of the
+user's own - is a warning to review, never a silent skip.
+
+### Managed and unmanaged paths, in the same run
+
+A dotfiles-managed machine does not have one answer to "where does this edit go". Verified on a real
+home-manager setup, all four of these were true at once:
+
+| Target | What it is | Where an edit lands |
+| --- | --- | --- |
+| `~/.vibe/hooks.toml`, `~/.config/devin/config.json` | `mkOutOfStoreSymlink` | in the dotfiles git repo, versioned |
+| `~/.codex/hooks.json`, `~/.cursor/hooks.json` | plain files nobody manages | in `$HOME` only, invisible to the repo |
+| `~/.tmux/tmux-agent-status.conf` | a store build product | nowhere; never edited, only sourced |
+| `~/.claude/settings.json` | `mkOutOfStoreSymlink` | in the repo - and never written anyway, because the plugin route wins |
+
+The tool must not pretend this is uniform. Per target it already knows the resolved path, so the
+summary groups what it wrote by destination: which edits landed in a git repository and which landed
+in unmanaged `$HOME`. For a user whose other agent configs *are* versioned, an unmanaged write is
+state that quietly does not exist on their next machine, and the one moment they can act on that is
+while reading the summary.
+
+This is reporting, not policy. Refusing to write unmanaged paths would make the tool useless on the
+machines it is most for, and guessing which dotfiles manager should adopt a file is not something a
+status-glyph installer has any business doing.
 
 ### Scope
 
@@ -424,8 +475,11 @@ mentioned, not written.
 In order, first hit wins:
 
 1. `--snippet <path>`
-2. relative to the running executable: `../share/tmux/tmux-agent-status.conf`, which covers the
-   nix profile, the release tarball and a source install
+2. relative to the running executable, resolving symlinks first: `../share/tmux/...` covers the nix
+   profile and the release tarball, and `../../share/tmux/...` covers a binary run straight out of
+   `target/release` in a checkout. Verified as a case that occurs: a dev-loop `~/.local/bin`
+   shadow pointing into a build directory finds nothing at `../share`, and must fall through
+   rather than fail
 3. the usual prefixes: `$PREFIX/share`, `~/.nix-profile/share`, `/usr/local/share`,
    `/opt/homebrew/share`
 4. nothing found - offer to write the embedded copy to `~/.config/tmux/tmux-agent-status.conf`
@@ -754,65 +808,65 @@ solves the wrong problem. Written before the code where it can be.
 
 ### Pure, no filesystem
 
-11. **Format line parser** against a corpus of real lines: bare, single-quoted, double-quoted,
+1. **Format line parser** against a corpus of real lines: bare, single-quoted, double-quoted,
    `setw`, `set -gw`, backslash continuation, `;`-joined (refused), a value containing `#(...)` with
    embedded double quotes and nested `#{}` (the shape a real config has), a value already carrying
    `@agent_status` (untouched), no line at all.
-12. **Splice**: before `#{?window_flags`, at the end when absent, requoting each way, and the
+2. **Splice**: before `#{?window_flags`, at the end when absent, requoting each way, and the
    round-trip property *parse then emit with no change is byte-identical*.
-13. **JSON merge**, per merge class: empty file, no `hooks` key, unrelated hooks preserved, our
+3. **JSON merge**, per merge class: empty file, no `hooks` key, unrelated hooks preserved, our
    entries already present (**byte-identical output**), our entries present but stale (replaced, not
    duplicated), key order preserved, Droid's top-level shape, Devin's eight-key constraint.
-14. **Step algebra**: every flag combination, including the positive-and-negative usage error and an
+4. **Step algebra**: every flag combination, including the positive-and-negative usage error and an
    unknown `--agents=` name (exit 2, valid names listed).
-15. **Config-order resolution**: a main file that sets the format then sources a fragment that sets
+5. **Config-order resolution**: a main file that sets the format then sources a fragment that sets
    it, and the reverse; the last assignment in tmux's own order is the one selected. This is the
    defect a draft of this plan had, and it is the test that keeps it fixed.
-16. **The TOML top-level scan**, from fixtures: a file ending inside `"""`, inside `'''`, inside a
+6. **The TOML top-level scan**, from fixtures: a file ending inside `"""`, inside `'''`, inside a
    comment, inside a single-line string, and cleanly at top level; only the last is appended to.
-17. **Tokenizer**: a `;` inside single quotes is part of the value, a `;` outside separates commands
+7. **Tokenizer**: a `;` inside single quotes is part of the value, a `;` outside separates commands
    and refuses the line.
 
 ### Filesystem, against a temp `HOME`
 
-18. **Symlink**: a chain two deep; the edit lands on the final target and the links are still links.
-19. **Hard link**: detected, and the warning fires.
-20. **Read-only parent**: clean failure, original intact, exit 1.
-21. **Writability, both directions.** A chain ending in a genuine read-only store file: refused,
+8. **Symlink**: a chain two deep; the edit lands on the final target and the links are still links.
+9. **Hard link**: detected, and the warning fires.
+10. **Read-only parent**: clean failure, original intact, exit 1.
+11. **Writability, both directions.** A chain ending in a genuine read-only store file: refused,
     with the generator fragment printed. A chain that *passes through* a read-only store and ends
     in a writable file: **edited normally** - the `mkOutOfStoreSymlink` case, a regression test for
     a rule this plan got wrong once already. Plus a read-only file in a writable directory, which
     `rename(2)` can replace and which must therefore warn and ask rather than refuse.
-22. **Backup**: created, matches the pre-state byte for byte, named in the output.
-23. **Fault injection** - the single most important test here. A test-only switch
+12. **Backup**: created, matches the pre-state byte for byte, named in the output.
+13. **Fault injection** - the single most important test here. A test-only switch
     (`TMUX_AGENT_STATUS_TEST_FAULT=<stage>`, documented as unstable and unsupported) makes the write
     produce truncated, empty or scrambled bytes. Assert verify catches every one, the restore runs,
     and the file afterwards is **byte-identical to before the run**. Repeat with a fault in the
     restore itself: the exit is 1 and the message names the backup.
-24. **The concurrent writer is not clobbered.** The counterpart to 13, and the case a blanket
+14. **The concurrent writer is not clobbered.** The counterpart to 13, and the case a blanket
     restore gets wrong: a fault that replaces the target, after our rename, with a *complete and
     parseable* document that is neither ours nor the backup. Assert nothing is restored, the step
     fails, and the message names the file, the backup and the temp file. Then assert the damaged
     variants of the same test still *do* restore, so the two rows of step 11 are both pinned.
-25. **Create mode**: a target that does not exist, with a missing parent directory. Assert the
+15. **Create mode**: a target that does not exist, with a missing parent directory. Assert the
     directory and file are created, no backup is written, the summary says "created", and a second
     run reports already installed.
-26. **Concurrency**: N processes installing into the same file at once. Afterwards the file is valid
+16. **Concurrency**: N processes installing into the same file at once. Afterwards the file is valid
     in its own language and carries exactly one copy of our entries; every loser reported a clean
     precondition or lock failure and wrote nothing.
-27. **Idempotency**: two runs. The second writes no file, creates no backup, and reports every step
+17. **Idempotency**: two runs. The second writes no file, creates no backup, and reports every step
     as already installed. Asserted on file mtimes, not just on output.
 
 ### CLI
 
-28. `--dry-run` golden output, and an assertion that the filesystem is unchanged afterwards -
+18. `--dry-run` golden output, and an assertion that the filesystem is unchanged afterwards -
     including that the probe server's socket is gone and no lock, temp or backup file was left.
-29. Non-TTY without `-y` exits 2 with a message naming `-y`.
-30. Exit codes for a mixed run: one step already installed, one applied, one failed.
-31. **The Claude route does not fall back on failure**: with a stub `claude` on `PATH` that exits
+19. Non-TTY without `-y` exits 2 with a message naming `-y`.
+20. Exit codes for a mixed run: one step already installed, one applied, one failed.
+21. **The Claude route does not fall back on failure**: with a stub `claude` on `PATH` that exits
     non-zero, the step fails, `~/.claude/settings.json` is untouched, and the message names
     `--claude-route=settings`. With `claude` absent, the same run merges into `settings.json`.
-32. **No tmux on `PATH`**: discovery, format default and reload all degrade as described, the run
+22. **No tmux on `PATH`**: discovery, format default and reload all degrade as described, the run
     still installs what it can, and the summary says what could not be checked.
 
 ### The tmux probe, extending `tests/tmux_server.rs`
@@ -820,32 +874,32 @@ solves the wrong problem. Written before the code where it can be.
 These are the tests that make the probe worth its cost. Each one is a config the parser might get
 wrong, checked by the thing that actually decides:
 
-33. **The probe catches an abandoned config.** Hand the writer a deliberately malformed splice (a
+23. **The probe catches an abandoned config.** Hand the writer a deliberately malformed splice (a
     stray argument after the value). Assert the dump comparison fails, the file is rolled back, the
     step reports failure, and the original config still produces its original options.
-34. **The probe passes a good splice**, and the dump diff contains *only* the two format values.
-35. **A pre-broken config is refused**, not edited: the baseline is defaults, the tool says so, and
+24. **The probe passes a good splice**, and the dump diff contains *only* the two format values.
+25. **A pre-broken config is refused**, not edited: the baseline is defaults, the tool says so, and
     nothing is written.
-36. **The probe cleans up**: no server on the probe socket afterwards, in the success, failure and
+26. **The probe cleans up**: no server on the probe socket afterwards, in the success, failure and
     interrupt cases.
-37. **Relative `source-file`** in the config: the probe runs with cwd `$HOME`, and the case is
+27. **Relative `source-file`** in the config: the probe runs with cwd `$HOME`, and the case is
     reported rather than silently mis-resolved.
-38. **No tmux on `PATH`**: the probe is skipped, the step still installs, the summary says the edit
+28. **No tmux on `PATH`**: the probe is skipped, the step still installs, the summary says the edit
     was not checked against tmux.
 
 ### Real tmux, extending `tests/tmux_server.rs`
 
-39. Write a temp config with a known format, `install --tmux-format --tmux-hook -y
+29. Write a temp config with a known format, `install --tmux-format --tmux-hook -y
     --tmux-config <path>`, then start `tmux -L <name> -f <path>` and assert: the term is in both
     options, both hooks are registered, and a hand-set `@agent_status` renders in the window entry.
-40. The same against a config with **no** format line, proving the default probe produces a working
+30. The same against a config with **no** format line, proving the default probe produces a working
     pair of lines.
-41. The `set-option`-never test: `window-status-format` never appears as a `set-option` argument
+31. The `set-option`-never test: `window-status-format` never appears as a `set-option` argument
     anywhere in `src/`.
 
 ### Drift, extending `tests/agent_configs.rs`
 
-42. Every directory under `share/agents/` has a row in the installer's agent table, and every row's
+32. Every directory under `share/agents/` has a row in the installer's agent table, and every row's
     embedded contents equal the shipped file. A new agent cannot be added without the installer
     learning about it.
 
@@ -853,10 +907,10 @@ wrong, checked by the thing that actually decides:
 
 The steps a checkout cannot fake, run once before merge and recorded here:
 
-43. A real `install` on a machine with several agents, followed by a real turn producing a real
+33. A real `install` on a machine with several agents, followed by a real turn producing a real
     glyph, with `git diff` in the dotfiles repo showing exactly the intended edits and nothing else.
-44. The Claude Code plugin route end to end, against a throwaway `HOME`, confirming that
+34. The Claude Code plugin route end to end, against a throwaway `HOME`, confirming that
     `~/.claude/settings.json` still has no `hooks` entry of ours (004's promise).
-45. A home-manager machine, both chains: a `mkOutOfStoreSymlink` `~/.tmux.conf` is edited in the
+35. A home-manager machine, both chains: a `mkOutOfStoreSymlink` `~/.tmux.conf` is edited in the
     dotfiles checkout and the symlinks survive; a genuinely store-resident file is refused and
     prints something the user can paste into their generator.
