@@ -13,7 +13,12 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 pico-args = "0.5.0"
-serde_json = { version = "1.0.151", default-features = false, features = ["std"] }
+# `preserve_order`: a merge that reorders a user's keys is a diff they did not
+# ask for, and this tool edits files it did not write.
+serde_json = { version = "1.0.151", default-features = false, features = [
+    "std",
+    "preserve_order",
+] }
 
 [profile.release]
 strip = true

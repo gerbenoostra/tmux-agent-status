@@ -255,3 +255,100 @@ fn validate_toml_file(path: &Path, agent: &str) {
         }
     }
 }
+
+/// A new agent cannot be added without the installer learning about it.
+///
+/// Every directory under `share/agents/` has a row in the installer's table,
+/// and every row's embedded contents are byte-for-byte the shipped file. That
+/// second half is what keeps `include_str!` honest: the embedded bytes *are*
+/// the shipped files, so these drift checks still mean something about what a
+/// user ends up with.
+#[test]
+fn every_shipped_drop_in_has_a_row_in_the_installer_table() {
+    use tmux_agent_status::install::agents;
+
+    let mut checked = 0;
+    for entry in fs::read_dir(agents_dir()).unwrap() {
+        let agent_dir = entry.unwrap().path();
+        if !agent_dir.is_dir() {
+            continue;
+        }
+        let name = agent_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let row = agents::by_name(&name).unwrap_or_else(|| {
+            panic!(
+                "share/agents/{name}/ ships a drop-in but the installer has no row for it; \
+                 valid names are {:?}",
+                agents::names()
+            )
+        });
+
+        let files: Vec<PathBuf> = fs::read_dir(&agent_dir)
+            .unwrap()
+            .map(|file| file.unwrap().path())
+            .filter(|file| file.file_name().is_some())
+            .collect();
+        assert_eq!(
+            files.len(),
+            1,
+            "share/agents/{name}/ ships {} files; the installer embeds one",
+            files.len()
+        );
+        let shipped = fs::read_to_string(&files[0]).unwrap();
+        assert_eq!(
+            row.contents,
+            shipped,
+            "the installer's embedded copy of {} has drifted from the shipped file",
+            files[0].display()
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no shipped drop-ins were checked");
+}
+
+/// The two agents with no drop-in directory still have to match their page.
+///
+/// Claude Code's entries live in the plugin that ships them, and Gemini has no
+/// drop-in mechanism at all - its hooks live in `settings.json` and nowhere
+/// else. Both are embedded, so both need something holding them to the docs.
+#[test]
+fn the_agents_without_a_drop_in_directory_match_their_source() {
+    use tmux_agent_status::install::agents;
+
+    let claude = agents::by_name("claude-code").expect("a row for Claude Code");
+    let plugin = repo_root().join("plugins/tmux-agent-status/hooks/hooks.json");
+    assert_eq!(
+        claude.contents,
+        fs::read_to_string(&plugin).unwrap(),
+        "the installer's Claude Code entries have drifted from {}",
+        plugin.display()
+    );
+
+    // Gemini's block is the one `docs/agents/gemini.md` tells a user to merge
+    // by hand, so the installer must offer to write exactly that.
+    let gemini = agents::by_name("gemini").expect("a row for Gemini");
+    let page = repo_root().join("docs/agents/gemini.md");
+    let text = fs::read_to_string(&page).unwrap();
+    let documented = fenced_json(&text).unwrap_or_else(|| {
+        panic!(
+            "{}: no fenced json block to compare against",
+            page.display()
+        )
+    });
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(gemini.contents).unwrap(),
+        serde_json::from_str::<serde_json::Value>(&documented).unwrap(),
+        "the installer's Gemini block has drifted from {}",
+        page.display()
+    );
+}
+
+/// The first ```json block in a page.
+fn fenced_json(text: &str) -> Option<String> {
+    let start = text.find("```json\n")? + "```json\n".len();
+    let end = start + text[start..].find("\n```")?;
+    Some(text[start..end].to_owned())
+}

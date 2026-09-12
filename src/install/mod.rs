@@ -6,6 +6,7 @@
 //! writing - resolve symlinks, lock, back up, never truncate, verify, restore -
 //! is `tasks/plans/011-install-command.md`, and `write` is where it lives.
 
+pub mod agents;
 pub mod format;
 pub mod probe;
 pub mod tmux_conf;

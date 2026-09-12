@@ -34,6 +34,16 @@ pub enum Plan {
     Write(String),
 }
 
+impl Plan {
+    /// The bytes this plan would put on disk, when there are any.
+    pub fn written(self) -> Option<String> {
+        match self {
+            Plan::Write(contents) => Some(contents),
+            Plan::AlreadyInstalled => None,
+        }
+    }
+}
+
 /// What a successful write did, which is what the summary reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -1049,6 +1059,15 @@ mod tests {
             timestamp(UNIX_EPOCH - std::time::Duration::from_secs(1)),
             "19700101T000000Z"
         );
+    }
+
+    #[test]
+    fn a_plan_answers_only_when_it_would_write() {
+        assert_eq!(
+            Plan::Write("bytes".to_owned()).written(),
+            Some("bytes".to_owned())
+        );
+        assert_eq!(Plan::AlreadyInstalled.written(), None);
     }
 
     #[test]
