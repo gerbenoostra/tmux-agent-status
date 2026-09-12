@@ -7,5 +7,6 @@
 
 pub mod command;
 pub mod markdown;
+pub mod tempdir;
 
 pub const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
