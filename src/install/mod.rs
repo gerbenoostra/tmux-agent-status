@@ -7,6 +7,7 @@
 //! is `tasks/plans/011-install-command.md`, and `write` is where it lives.
 
 pub mod format;
+pub mod probe;
 pub mod tmux_conf;
 pub mod write;
 
