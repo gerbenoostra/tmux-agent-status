@@ -190,6 +190,22 @@ pub fn pair(value: &str) -> Option<String> {
     )
 }
 
+/// The words of one logical config line, unquoted.
+///
+/// `None` for a comment, a blank line, a line carrying a second command, or
+/// quoting this module will not read - the same tokenizer that reads a format
+/// line, so the two never disagree about where a word ends.
+pub fn words(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    match tokenize(line) {
+        (tokens, Stop::End) => Some(tokens.into_iter().map(|token| token.text).collect()),
+        _ => None,
+    }
+}
+
 /// Read one logical config line.
 pub fn parse(line: &str) -> Candidate {
     let trimmed = line.trim_start();
@@ -680,6 +696,25 @@ mod tests {
             out,
             format!("setw  -g\t window-status-format   'x{TERM}'   ")
         );
+    }
+
+    #[test]
+    fn words_uses_the_same_tokenizer_as_the_parser() {
+        assert_eq!(
+            words("source-file -q '/odd path/x.conf'"),
+            Some(vec![
+                "source-file".to_owned(),
+                "-q".to_owned(),
+                "/odd path/x.conf".to_owned()
+            ])
+        );
+        assert_eq!(words("source-file ~/x.conf").unwrap().len(), 2);
+        // A comment, a blank line, a second command and unreadable quoting all
+        // decline to answer rather than guessing.
+        assert_eq!(words("# source-file x"), None);
+        assert_eq!(words("   "), None);
+        assert_eq!(words("source-file x; source-file y"), None);
+        assert_eq!(words("source-file 'unterminated"), None);
     }
 
     #[test]
