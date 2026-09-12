@@ -1,6 +1,7 @@
 # 011 - `install`: write the hooks and configs from the tool
 
-Status: planned - nothing implemented. Branch `feat/install-command`.
+Status: in progress on `feat/install-command`. Item 0 (the `AGENTS.md` rule rewrite) is done and
+committed; items 1-10 are open.
 
 Covers *how the last three of the README's four setup steps stop being a manual paste*. What the
 states mean, what the two tmux options are and which events map to which state stay 001, 005 and
@@ -751,6 +752,8 @@ reasonably blame the tool that touched the file last for a breakage it inherited
 | prompts | `dialoguer` (`MultiSelect`, `Confirm`, `Editor`) | the agent list is genuinely a checkbox and the format string genuinely needs an editor; `inquire` is the equivalent alternative if `dialoguer`'s `Editor` disappoints |
 | `HOME` resolution | read `$HOME` / `$XDG_CONFIG_HOME` from the environment, never `getpwuid` | tests point a child process at a temp home; a tool that cannot be redirected cannot be tested |
 | non-interactive | exit 2, never a silent default | a tool that edits configs unattended is a tool nobody asked to run |
+| coverage | `src/install/` holds the repo's 100% line and region bar, reached by widening the test fault switch to every fallible syscall | the gate predates this plan and applies to the whole crate; lowering it for the one subcommand that writes user files is the wrong place to start making exceptions |
+| the TTY module | `src/install/prompt.rs` is the one file `just coverage` skips, by filename | a prompt needs a terminal to exercise, and the alternative is a pty harness that proves `dialoguer` works rather than that we do; keeping the exception to one named file is what makes it reviewable |
 
 ## Uninstall, designed not shipped
 
@@ -840,7 +843,9 @@ solves the wrong problem. Written before the code where it can be.
 12. **Backup**: created, matches the pre-state byte for byte, named in the output.
 13. **Fault injection** - the single most important test here. A test-only switch
     (`TMUX_AGENT_STATUS_TEST_FAULT=<stage>`, documented as unstable and unsupported) makes the write
-    produce truncated, empty or scrambled bytes. Assert verify catches every one, the restore runs,
+    produce truncated, empty or scrambled bytes. The same switch names every other fallible syscall
+    in the write - the backup copy, each `fsync`, the rename, the restore - because a branch no test
+    can reach is a branch nobody has read, and the coverage gate says so out loud. Assert verify catches every one, the restore runs,
     and the file afterwards is **byte-identical to before the run**. Repeat with a fault in the
     restore itself: the exit is 1 and the message names the backup.
 14. **The concurrent writer is not clobbered.** The counterpart to 13, and the case a blanket
