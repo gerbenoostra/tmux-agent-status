@@ -175,19 +175,27 @@ pub fn splice(raw: &str) -> String {
     }
 }
 
-/// The block that installs a value on both options, for a config with no
-/// format line at all.
+/// A `set -g <option> <value>` line, for an option with no assignment of its
+/// own to splice.
 ///
 /// `None` when the value cannot be quoted safely, which sends the step to the
 /// manual path like any other value this module will not write.
+pub fn assignment(option: &str, value: &str) -> Option<String> {
+    Some(format!(
+        "set -g {option} {}\n",
+        requote(value, Quoting::Bare)?
+    ))
+}
+
+/// The same for both options at once, for a config with no format line at all.
+///
+/// Both, always: a term in only one of them makes the glyph vanish the moment
+/// the window becomes current.
 pub fn pair(value: &str) -> Option<String> {
-    let quoted = requote(value, Quoting::Bare)?;
-    Some(
-        OPTIONS
-            .iter()
-            .map(|option| format!("set -g {option} {quoted}\n"))
-            .collect(),
-    )
+    OPTIONS
+        .iter()
+        .map(|option| assignment(option, value))
+        .collect()
 }
 
 /// The words of one logical config line, unquoted.
@@ -759,6 +767,17 @@ mod tests {
         }
         assert!(block.ends_with('\n'));
         assert_eq!(block.lines().count(), 2);
+    }
+
+    #[test]
+    fn a_single_option_can_be_assigned_on_its_own() {
+        // The case of a config that sets one of the two and leaves the other
+        // on tmux's default.
+        assert_eq!(
+            assignment(OPTIONS[1], "#I:#W").unwrap(),
+            "set -g window-status-current-format '#I:#W'\n"
+        );
+        assert!(assignment(OPTIONS[0], "it's$HOME").is_none());
     }
 
     #[test]

@@ -239,6 +239,19 @@ pub struct Assignment {
     pub candidate: Candidate,
 }
 
+impl Assignment {
+    /// Which of the two options this line assigns, when the line can be read.
+    ///
+    /// `None` for a line that names one of them and is being handed back: it is
+    /// still reported, but it is not a winner anything can be spliced into.
+    pub fn option(&self) -> Option<&str> {
+        match &self.candidate {
+            Candidate::Line(line) => Some(&line.option),
+            _ => None,
+        }
+    }
+}
+
 /// Every format assignment tmux would execute, in the order it executes them.
 ///
 /// The last one for a given option is the one that wins, and so the one to

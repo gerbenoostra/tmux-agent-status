@@ -469,7 +469,7 @@ pub fn run(options: &Options, prompt: &prompt::Prompt) -> Report {
     };
     if let Some(tmux) = &tmux {
         if options.steps.tmux_hook {
-            planned.extend(tmux.plan_hook(options, prompt));
+            planned.extend(tmux.plan_hook(options));
         }
         if options.steps.tmux_format {
             planned.extend(tmux.plan_format(options, prompt));
@@ -893,7 +893,7 @@ impl TmuxPlan {
         })
     }
 
-    fn plan_hook(&self, options: &Options, prompt: &prompt::Prompt) -> Vec<Planned> {
+    fn plan_hook(&self, options: &Options) -> Vec<Planned> {
         if let Some(refusal) = self.refusal() {
             return vec![Planned {
                 step: Step::TmuxHook,
@@ -931,12 +931,12 @@ impl TmuxPlan {
         planned.push(Planned {
             step: Step::TmuxHook,
             what: Step::TmuxHook.title().to_owned(),
-            action: self.plan_source_line(snippet.path(), prompt),
+            action: self.plan_source_line(snippet.path()),
         });
         planned
     }
 
-    fn plan_source_line(&self, snippet: &Path, prompt: &prompt::Prompt) -> Action {
+    fn plan_source_line(&self, snippet: &Path) -> Action {
         let seen = match write::inspect(self.config.path()) {
             Ok(seen) => seen,
             Err(error) => return Action::Manual(format!("    {error}")),
@@ -950,33 +950,107 @@ impl TmuxPlan {
             rebuild: Rebuild::SourceBlock(snippet.to_path_buf()),
             parses: |text| !text.is_empty(),
             creating: !seen.exists,
-            notes: self.probe_notes(prompt),
+            notes: self.probe_notes(),
             verify: self.verification(),
             path: seen.resolved,
         }))
     }
 
+    /// Plan the format step, per option.
+    ///
+    /// Both options need the term - a term in only one of them makes the glyph
+    /// vanish the moment the window becomes current - and a config may set
+    /// them on different lines, in different files, or not at all. So the
+    /// winning assignment is found *per option*, not once for the file: taking
+    /// the last assignment overall edits whichever of the two happens to come
+    /// second and silently leaves the other bare.
     fn plan_format(&self, options: &Options, prompt: &prompt::Prompt) -> Vec<Planned> {
-        let action = match self.refusal() {
-            Some(refusal) => refusal,
-            None => self.plan_format_action(options, prompt),
-        };
-        vec![Planned {
-            step: Step::TmuxFormat,
-            what: Step::TmuxFormat.title().to_owned(),
-            action,
-        }]
+        if let Some(refusal) = self.refusal() {
+            return vec![Planned {
+                step: Step::TmuxFormat,
+                what: Step::TmuxFormat.title().to_owned(),
+                action: refusal,
+            }];
+        }
+        let found = tmux_conf::assignments(self.config.path());
+        let winners: Vec<Option<&tmux_conf::Assignment>> = format::OPTIONS
+            .iter()
+            .map(|option| found.iter().rfind(|found| found.option() == Some(option)))
+            .collect();
+
+        // Neither is assigned: the user is on tmux's compiled-in default, and
+        // one marked block sets both.
+        if winners.iter().all(Option::is_none) {
+            return vec![Planned {
+                step: Step::TmuxFormat,
+                what: Step::TmuxFormat.title().to_owned(),
+                action: self.plan_new_pair(options),
+            }];
+        }
+
+        format::OPTIONS
+            .iter()
+            .zip(winners)
+            .map(|(option, winner)| Planned {
+                step: Step::TmuxFormat,
+                what: format!("the term in {option}"),
+                action: match winner {
+                    Some(winner) => self.plan_splice(option, winner, prompt),
+                    // One is assigned and the other is not, so the bare one
+                    // gets a line of its own spliced from tmux's default.
+                    None => self.plan_one_line(option, options),
+                },
+            })
+            .collect()
     }
 
-    fn plan_format_action(&self, options: &Options, prompt: &prompt::Prompt) -> Action {
-        let entry = self.config.path();
-        let found = tmux_conf::assignments(entry);
-        // The last assignment in tmux's own order is the one that wins, and so
-        // the one to edit. Editing any earlier one produces a line tmux
-        // discards: a successful-looking install with no glyph.
-        let Some(last) = found.last() else {
-            return self.plan_new_pair(options, prompt);
+    /// The default this tmux would use, asked rather than remembered.
+    fn compiled_in_default(&self, options: &Options) -> String {
+        match options.probe {
+            true => probe::compiled_in_default(),
+            false => None,
+        }
+        .unwrap_or_else(|| format::FALLBACK_DEFAULT.to_owned())
+    }
+
+    /// Append a line for an option nothing assigns.
+    fn plan_one_line(&self, option: &str, options: &Options) -> Action {
+        let spliced = format::splice(&self.compiled_in_default(options));
+        let Some(line) = format::assignment(option, &spliced) else {
+            return self.manual_term("    this tmux's default format cannot be quoted safely");
         };
+        let seen = match write::inspect(self.config.path()) {
+            Ok(seen) => seen,
+            Err(error) => return self.manual_term(&format!("    {error}")),
+        };
+        Action::Write(Box::new(Change {
+            what: format!("the term in {option}"),
+            preview: append_marked(&seen.contents, &line),
+            rebuild: Rebuild::FormatPair(line.clone()),
+            parses: |text| !text.is_empty(),
+            creating: !seen.exists,
+            notes: {
+                let mut notes = vec![format!("nothing assigns {option}, so a line is added")];
+                notes.push(format!("  {}", line.trim_end()));
+                notes.extend(self.probe_notes());
+                notes
+            },
+            verify: self.verification(),
+            path: seen.resolved,
+        }))
+    }
+
+    /// Splice the term into the winning assignment of one option.
+    ///
+    /// The last assignment in tmux's own order is the one that wins, and so the
+    /// one to edit. Editing any earlier one produces a line tmux discards:
+    /// a successful-looking install with no glyph and nothing in the diff.
+    fn plan_splice(
+        &self,
+        option: &str,
+        last: &tmux_conf::Assignment,
+        prompt: &prompt::Prompt,
+    ) -> Action {
         let Some(line) = last.candidate.clone().line() else {
             let why = last
                 .candidate
@@ -1011,7 +1085,7 @@ impl TmuxPlan {
             Err(error) => return self.manual_term(&format!("    {error}")),
         };
         Action::Write(Box::new(Change {
-            what: Step::TmuxFormat.title().to_owned(),
+            what: format!("the term in {option}"),
             preview: tmux_conf::replace_lines(
                 &seen.contents,
                 last.line.first,
@@ -1029,7 +1103,7 @@ impl TmuxPlan {
             notes: {
                 let mut notes = vec![format!("  before: {}", last.line.text)];
                 notes.push(format!("  after:  {rewritten}"));
-                notes.extend(self.probe_notes(prompt));
+                notes.extend(self.probe_notes());
                 notes
             },
             verify: self.verification(),
@@ -1038,7 +1112,7 @@ impl TmuxPlan {
     }
 
     /// No format line at all: the user is on tmux's compiled-in default.
-    fn plan_new_pair(&self, options: &Options, prompt: &prompt::Prompt) -> Action {
+    fn plan_new_pair(&self, options: &Options) -> Action {
         // Asked rather than remembered: the default has changed between tmux
         // versions and the one in *this* tmux is the only one that is right.
         let default = match options.probe {
@@ -1066,7 +1140,7 @@ impl TmuxPlan {
                         .to_owned(),
                 ];
                 notes.extend(block.lines().map(|line| format!("  {line}")));
-                notes.extend(self.probe_notes(prompt));
+                notes.extend(self.probe_notes());
                 notes
             },
             verify: self.verification(),
@@ -1096,8 +1170,7 @@ impl TmuxPlan {
         })
     }
 
-    fn probe_notes(&self, prompt: &prompt::Prompt) -> Vec<String> {
-        let _ = prompt;
+    fn probe_notes(&self) -> Vec<String> {
         match self.baseline.is_some() {
             // It loads the user's real config in a throwaway server, so their
             // `run-shell`, `if-shell` and any plugin-manager bootstrap actually
