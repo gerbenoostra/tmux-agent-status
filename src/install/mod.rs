@@ -9,6 +9,7 @@
 pub mod agents;
 pub mod format;
 pub mod probe;
+pub mod prompt;
 pub mod tmux_conf;
 pub mod write;
 

@@ -12,6 +12,10 @@ keywords = ["tmux", "agent", "status", "hook"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+# The agent list is genuinely a checkbox and a 300-character format string
+# genuinely needs an editor. Only the `editor` feature: `password` and
+# `zeroize` are for something this tool never asks for.
+dialoguer = { version = "0.12.0", default-features = false, features = ["editor"] }
 pico-args = "0.5.0"
 # `preserve_order`: a merge that reorders a user's keys is a diff they did not
 # ask for, and this tool edits files it did not write.

@@ -23,13 +23,21 @@ test:
 # Run the test suite with 100% line and region coverage.
 # The bell path writes to /dev/tty, so the runner needs a controlling terminal;
 # `script` creates one and is available on both Linux (util-linux) and macOS.
+#
+# `src/install/prompt.rs` is the one file excluded, and the exception is kept to
+# one named file so it stays reviewable: it is the only module that knows there
+# is a terminal, and exercising it means driving a pty, which would prove that
+# `dialoguer` works rather than that we do. Everything worth asserting about a
+# run's decisions lives in the modules it feeds, which hold the bar.
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
+    args=(--summary-only --fail-under-lines 100 --fail-under-regions 100
+          --ignore-filename-regex 'src/install/prompt\.rs$')
     if [[ "{{os()}}" == "macos" ]]; then
-        script -q /dev/null cargo llvm-cov --summary-only --fail-under-lines 100 --fail-under-regions 100
+        script -q /dev/null cargo llvm-cov "${args[@]}"
     else
-        script -q /dev/null -c 'cargo llvm-cov --summary-only --fail-under-lines 100 --fail-under-regions 100'
+        script -q /dev/null -c "cargo llvm-cov ${args[*]}"
     fi
 
 # What CI runs.
