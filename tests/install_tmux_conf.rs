@@ -226,7 +226,8 @@ fn a_refused_line_is_still_reported_so_it_can_be_handed_back() {
 
     let found = tmux_conf::assignments(&entry);
     assert_eq!(found.len(), 1);
-    assert!(matches!(found[0].candidate, Candidate::Refused(_)));
+    assert!(matches!(&found[0].candidate, Candidate::Refused { .. }));
+    assert_eq!(found[0].option(), Some("window-status-format"));
     assert_eq!(found[0].file, entry);
     assert_eq!((found[0].line.first, found[0].line.last), (0, 0));
 }

@@ -228,8 +228,12 @@ pub enum Rebuild {
         was: String,
         with: String,
     },
-    /// Append a marked block setting both format options.
+    /// Append a marked block setting both format options, for a config that
+    /// assigns neither.
     FormatPair(String),
+    /// Append a marked block setting one option, for a config that assigns the
+    /// other and leaves this one on tmux's default.
+    FormatOne { option: String, line: String },
 }
 
 impl Rebuild {
@@ -272,8 +276,26 @@ impl Rebuild {
                 true => write::Plan::AlreadyInstalled,
                 false => write::Plan::Write(append_marked(current, block)),
             }),
+            // Per option, not per file: by the time this runs, the *other*
+            // option may already have been spliced, and asking whether the
+            // file mentions `@agent_status` anywhere would read that as this
+            // option being done too.
+            Rebuild::FormatOne { option, line } => {
+                Ok(match already_carries_the_term(current, option) {
+                    true => write::Plan::AlreadyInstalled,
+                    false => write::Plan::Write(append_marked(current, line)),
+                })
+            }
         }
     }
+}
+
+/// Whether some config text already assigns `option` a value carrying the term.
+fn already_carries_the_term(text: &str, option: &str) -> bool {
+    format::logical_lines(text)
+        .iter()
+        .filter_map(|line| format::parse(&line.text).line())
+        .any(|line| line.option == option && line.already_installed())
 }
 
 /// The first physical line of a logical one.
@@ -455,7 +477,7 @@ fn without_index(name: &str) -> String {
 /// output, so a failure cannot corrupt what follows. The glyph does need all
 /// three to appear, but a run that does what it can and says exactly what it
 /// did not beats one that abandons work it was able to finish.
-pub fn run(options: &Options, prompt: &prompt::Prompt) -> Report {
+pub fn run(options: &Options, prompt: &dyn prompt::Interaction) -> Report {
     let mut report = Report::default();
 
     // Phases 1 and 2, for every step, before a single byte is written.
@@ -497,30 +519,34 @@ pub fn run(options: &Options, prompt: &prompt::Prompt) -> Report {
 }
 
 /// Show every planned change and take the answers, in one pass.
-fn confirm(planned: &[Planned], prompt: &prompt::Prompt, report: &mut Report) -> Vec<usize> {
+fn confirm(
+    planned: &[Planned],
+    prompt: &dyn prompt::Interaction,
+    report: &mut Report,
+) -> Vec<usize> {
     let mut approved = Vec::new();
     for (index, item) in planned.iter().enumerate() {
         match &item.action {
             Action::AlreadyInstalled => {
-                prompt.say(format!("  {} - already installed", item.what));
+                prompt.say(&format!("  {} - already installed", item.what));
                 report.record(item.step, Outcome::AlreadyInstalled);
             }
             Action::Manual(advice) => {
-                prompt.say(format!("  {} - not installed\n{advice}", item.what));
+                prompt.say(&format!("  {} - not installed\n{advice}", item.what));
                 report.record(item.step, Outcome::NotInstalled);
             }
             Action::Failed(why) => {
-                prompt.say(format!("  {} - failed\n    {why}", item.what));
+                prompt.say(&format!("  {} - failed\n    {why}", item.what));
                 report.record(item.step, Outcome::Failed);
             }
             Action::Plugin {
                 marketplace,
                 claude,
             } => {
-                prompt.say(format!("  {} - install the Claude Code plugin", item.what));
+                prompt.say(&format!("  {} - install the Claude Code plugin", item.what));
                 prompt.say("    This clones the marketplace from GitHub:");
                 for command in claude.plugin_commands(marketplace) {
-                    prompt.say(format!("      {}", command.join(" ")));
+                    prompt.say(&format!("      {}", command.join(" ")));
                 }
                 match prompt.confirm(&format!("Install {}?", item.what), true) {
                     true => approved.push(index),
@@ -528,7 +554,7 @@ fn confirm(planned: &[Planned], prompt: &prompt::Prompt, report: &mut Report) ->
                 }
             }
             Action::Write(change) => {
-                prompt.say(format!(
+                prompt.say(&format!(
                     "  {} - {} {}",
                     item.what,
                     match change.creating {
@@ -538,7 +564,7 @@ fn confirm(planned: &[Planned], prompt: &prompt::Prompt, report: &mut Report) ->
                     change.path.display()
                 ));
                 for note in &change.notes {
-                    prompt.say(format!("    {note}"));
+                    prompt.say(&format!("    {note}"));
                 }
                 match prompt.confirm(&format!("Write {}?", change.path.display()), true) {
                     true => approved.push(index),
@@ -552,7 +578,12 @@ fn confirm(planned: &[Planned], prompt: &prompt::Prompt, report: &mut Report) ->
 
 /// Phases 4 and 5: the safe write, per target, in the order the list was built
 /// - agents, then the tmux hook, then the tmux format.
-fn apply(planned: Vec<Planned>, approved: &[usize], prompt: &prompt::Prompt, report: &mut Report) {
+fn apply(
+    planned: Vec<Planned>,
+    approved: &[usize],
+    prompt: &dyn prompt::Interaction,
+    report: &mut Report,
+) {
     for (index, item) in planned.into_iter().enumerate() {
         if !approved.contains(&index) {
             continue;
@@ -573,7 +604,7 @@ fn apply(planned: Vec<Planned>, approved: &[usize], prompt: &prompt::Prompt, rep
                 // on a machine where the user was promised it would not be, as
                 // the silent consequence of a network blip.
                 Err(why) => {
-                    prompt.say(format!(
+                    prompt.say(&format!(
                         "{}: failed\n{why}\n  To merge into ~/.claude/settings.json instead, \
                          re-run with --claude-route=settings.",
                         item.what
@@ -591,7 +622,12 @@ fn apply(planned: Vec<Planned>, approved: &[usize], prompt: &prompt::Prompt, rep
     }
 }
 
-fn write_one(what: &str, change: Change, prompt: &prompt::Prompt, report: &mut Report) -> Outcome {
+fn write_one(
+    what: &str,
+    change: Change,
+    prompt: &dyn prompt::Interaction,
+    report: &mut Report,
+) -> Outcome {
     let verify = change.verify.as_ref().map(|v| v as &dyn write::Verify);
     let writer = write::SafeWrite {
         path: &change.path,
@@ -609,7 +645,7 @@ fn write_one(what: &str, change: Change, prompt: &prompt::Prompt, report: &mut R
         }
     });
     if let Some(why) = refused {
-        prompt.say(format!("{what}: failed\n  {why}"));
+        prompt.say(&format!("{what}: failed\n  {why}"));
         return Outcome::Failed;
     }
     match outcome {
@@ -621,7 +657,7 @@ fn write_one(what: &str, change: Change, prompt: &prompt::Prompt, report: &mut R
             }
         }
         Err(error) => {
-            prompt.say(format!("{what}: failed\n  {error}"));
+            prompt.say(&format!("{what}: failed\n  {error}"));
             Outcome::Failed
         }
     }
@@ -649,13 +685,13 @@ fn summary_line(what: &str, written: &write::Written) -> String {
 /// a user whose other agent configs *are* versioned, an unmanaged write is
 /// state that quietly does not exist on their next machine, and the one moment
 /// they can act on that is while reading this. Reporting, never policy.
-fn summarise(report: &Report, prompt: &prompt::Prompt, options: &Options) {
+fn summarise(report: &Report, prompt: &dyn prompt::Interaction, options: &Options) {
     if report.lines.is_empty() {
         return;
     }
     prompt.say("\nWhat changed:");
     for line in &report.lines {
-        prompt.say(format!("  {line}"));
+        prompt.say(&format!("  {line}"));
     }
     let versioned: Vec<&String> = report
         .lines
@@ -677,7 +713,7 @@ fn repo_in_line(line: &str) -> Option<PathBuf> {
 }
 
 /// Plan the agent step: choose the agents, then work out each one's write.
-fn plan_agents(options: &Options, prompt: &prompt::Prompt) -> Vec<Planned> {
+fn plan_agents(options: &Options, prompt: &dyn prompt::Interaction) -> Vec<Planned> {
     chosen_agents(options, prompt)
         .into_iter()
         .map(|agent| plan_agent(agent, options))
@@ -689,7 +725,10 @@ fn plan_agents(options: &Options, prompt: &prompt::Prompt) -> Vec<Planned> {
 /// Named on the command line wins outright. Otherwise every agent is listed,
 /// preselected when either signal hits, so nothing is ever installed without
 /// having been shown.
-fn chosen_agents(options: &Options, prompt: &prompt::Prompt) -> Vec<&'static agents::Agent> {
+fn chosen_agents(
+    options: &Options,
+    prompt: &dyn prompt::Interaction,
+) -> Vec<&'static agents::Agent> {
     if let Some(named) = &options.agents {
         return named.clone();
     }
@@ -836,13 +875,13 @@ struct TmuxPlan {
 }
 
 impl TmuxPlan {
-    fn detect(options: &Options, prompt: &prompt::Prompt) -> TmuxPlan {
+    fn detect(options: &Options, prompt: &dyn prompt::Interaction) -> TmuxPlan {
         let config = tmux_conf::discover_config(options.tmux_config.as_deref(), &options.home);
 
         if let Some(listed) = probe::config_files() {
             for candidate in tmux_conf::candidates(&listed) {
                 if tmux_conf::is_system_wide(&candidate) && candidate.exists() {
-                    prompt.say(format!(
+                    prompt.say(&format!(
                         "  {} exists and is not being touched: it needs root and it would \
                          install this for every user of the machine.\n  \
                          Pass --tmux-config if that really was the intent.",
@@ -964,7 +1003,7 @@ impl TmuxPlan {
     /// winning assignment is found *per option*, not once for the file: taking
     /// the last assignment overall edits whichever of the two happens to come
     /// second and silently leaves the other bare.
-    fn plan_format(&self, options: &Options, prompt: &prompt::Prompt) -> Vec<Planned> {
+    fn plan_format(&self, options: &Options, prompt: &dyn prompt::Interaction) -> Vec<Planned> {
         if let Some(refusal) = self.refusal() {
             return vec![Planned {
                 step: Step::TmuxFormat,
@@ -1026,7 +1065,10 @@ impl TmuxPlan {
         Action::Write(Box::new(Change {
             what: format!("the term in {option}"),
             preview: append_marked(&seen.contents, &line),
-            rebuild: Rebuild::FormatPair(line.clone()),
+            rebuild: Rebuild::FormatOne {
+                option: option.to_owned(),
+                line: line.clone(),
+            },
             parses: |text| !text.is_empty(),
             creating: !seen.exists,
             notes: {
@@ -1049,7 +1091,7 @@ impl TmuxPlan {
         &self,
         option: &str,
         last: &tmux_conf::Assignment,
-        prompt: &prompt::Prompt,
+        prompt: &dyn prompt::Interaction,
     ) -> Action {
         let Some(line) = last.candidate.clone().line() else {
             let why = last
@@ -1149,7 +1191,7 @@ impl TmuxPlan {
     }
 
     /// Offer to edit the proposed line, and re-check whatever comes back.
-    fn offer_edit(&self, proposed: String, prompt: &prompt::Prompt) -> String {
+    fn offer_edit(&self, proposed: String, prompt: &dyn prompt::Interaction) -> String {
         if prompt.confirm("Edit the proposed line before writing it?", false) {
             if let Some(edited) = prompt.edit(&proposed) {
                 let edited = edited.trim_end().to_owned();
@@ -1204,7 +1246,7 @@ impl TmuxPlan {
 /// Never `set-option`. By this point the probe has already loaded that exact
 /// file in a throwaway server and found it sound, so the reload is offered on a
 /// file that is known to parse rather than hoped to.
-pub fn offer_reload(config: &Path, prompt: &prompt::Prompt) {
+pub fn offer_reload(config: &Path, prompt: &dyn prompt::Interaction) {
     let Some(listed) = probe::config_files() else {
         // No running server, so there is nothing to reload into.
         return;
@@ -1217,7 +1259,7 @@ pub fn offer_reload(config: &Path, prompt: &prompt::Prompt) {
         .iter()
         .any(|candidate| same_file(candidate, config));
     if !loaded {
-        prompt.say(format!(
+        prompt.say(&format!(
             "\nNot offering a reload: the running tmux does not load {}.\n\
              Start a new server, or source it yourself if that is what you meant.",
             config.display()
@@ -1230,7 +1272,7 @@ pub fn offer_reload(config: &Path, prompt: &prompt::Prompt) {
     ) {
         match probe::reload(config) {
             Ok(()) => prompt.say("  tmux reloaded."),
-            Err(error) => prompt.say(format!("  {error}")),
+            Err(error) => prompt.say(&format!("  {error}")),
         }
     }
 }
@@ -1299,6 +1341,247 @@ mod tests {
         assert!(!has_marked_block(
             "# a comment mentioning tmux-agent-status\n"
         ));
+    }
+
+    #[test]
+    fn every_step_names_its_flag_and_itself() {
+        for step in Step::ALL {
+            assert!(step.flag().starts_with("--"), "{step:?}");
+            assert!(!step.title().is_empty(), "{step:?}");
+        }
+        assert_eq!(Step::Agents.flag(), "--agents");
+        assert_eq!(Step::TmuxHook.flag(), "--tmux-hook");
+        assert_eq!(Step::TmuxFormat.flag(), "--tmux-format");
+    }
+
+    #[test]
+    fn the_step_algebra_is_the_table_the_plan_gives() {
+        let all = Steps {
+            agents: true,
+            tmux_hook: true,
+            tmux_format: true,
+        };
+        // Nothing said: all three.
+        assert_eq!(select(&[], &[]).unwrap(), all);
+        // One or more positive: exactly those.
+        assert_eq!(
+            select(&[Step::Agents], &[]).unwrap(),
+            Steps {
+                tmux_hook: false,
+                tmux_format: false,
+                ..all
+            }
+        );
+        assert_eq!(
+            select(&[Step::TmuxHook, Step::TmuxFormat], &[]).unwrap(),
+            Steps {
+                agents: false,
+                ..all
+            }
+        );
+        // Only negative: all three minus those.
+        assert_eq!(
+            select(&[], &[Step::Agents]).unwrap(),
+            Steps {
+                agents: false,
+                ..all
+            }
+        );
+        // A positive and a negative: a usage error.
+        assert!(select(&[Step::Agents], &[Step::TmuxHook]).is_err());
+
+        for step in Step::ALL {
+            assert!(all.has(step));
+            assert!(!select(&[], &[step]).unwrap().has(step));
+        }
+    }
+
+    #[test]
+    fn a_mixed_step_error_names_both_flags() {
+        let message = select(&[Step::Agents], &[Step::TmuxFormat]).unwrap_err();
+        assert!(message.contains("--agents"), "{message}");
+        assert!(message.contains("--no-tmux-format"), "{message}");
+    }
+
+    #[test]
+    fn a_step_reports_the_worst_of_what_its_targets_did() {
+        // The agent step has one target per agent, and the summary has to say
+        // something true about all of them at once.
+        let mut report = Report::default();
+        report.record(Step::Agents, Outcome::AlreadyInstalled);
+        assert_eq!(
+            report.outcome(Step::Agents),
+            Some(Outcome::AlreadyInstalled)
+        );
+        report.record(Step::Agents, Outcome::Installed);
+        assert_eq!(report.outcome(Step::Agents), Some(Outcome::Installed));
+        report.record(Step::Agents, Outcome::NotInstalled);
+        assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotInstalled));
+        report.record(Step::Agents, Outcome::Failed);
+        assert_eq!(report.outcome(Step::Agents), Some(Outcome::Failed));
+
+        assert_eq!(report.outcome(Step::TmuxHook), None);
+        assert_eq!(report.exit_code(), 1);
+    }
+
+    #[test]
+    fn a_run_that_installed_or_was_already_installed_exits_zero() {
+        let mut report = Report::default();
+        for outcome in [
+            Outcome::Installed,
+            Outcome::AlreadyInstalled,
+            // A refusal the user chose is not an error.
+            Outcome::NotInstalled,
+        ] {
+            report.record(Step::TmuxFormat, outcome);
+        }
+        assert_eq!(report.exit_code(), 0);
+        assert_eq!(Report::default().exit_code(), 0);
+    }
+
+    #[test]
+    fn every_rebuild_is_a_pure_function_of_what_is_on_disk() {
+        // Whole: ours, so replaced, then left alone.
+        let whole = Rebuild::Whole("ours\n".to_owned());
+        assert_eq!(
+            whole.apply("theirs\n"),
+            Ok(write::Plan::Write("ours\n".to_owned()))
+        );
+        assert_eq!(whole.apply("ours\n"), Ok(write::Plan::AlreadyInstalled));
+
+        // The source block, which must see the file as it is at apply time.
+        let block = Rebuild::SourceBlock(PathBuf::from("/x/tmux-agent-status.conf"));
+        let out = block
+            .apply("set -g status on\n")
+            .unwrap()
+            .written()
+            .unwrap();
+        assert!(out.contains("source-file /x/tmux-agent-status.conf"));
+        assert_eq!(block.apply(&out), Ok(write::Plan::AlreadyInstalled));
+
+        // The new pair.
+        let pair =
+            Rebuild::FormatPair("set -g window-status-format 'x#{?@agent_status,y,}'\n".to_owned());
+        let out = pair.apply("").unwrap().written().unwrap();
+        assert!(has_marked_block(&out));
+        assert_eq!(pair.apply(&out), Ok(write::Plan::AlreadyInstalled));
+
+        // An agent merge, which is the agent's own function.
+        let codex = Rebuild::Agent(agents::by_name("codex").expect("a row"));
+        assert!(codex.apply("").unwrap().written().is_some());
+        assert!(codex.apply("not json").is_err());
+    }
+
+    #[test]
+    fn a_format_line_that_moved_under_us_is_not_rewritten() {
+        let rebuild = Rebuild::FormatLine {
+            first: 1,
+            last: 1,
+            was: "set -g window-status-format 'x'".to_owned(),
+            with: "set -g window-status-format 'x!'".to_owned(),
+        };
+        let unchanged = "set -g status on\nset -g window-status-format 'x'\n";
+        assert_eq!(
+            rebuild.apply(unchanged).unwrap().written().unwrap(),
+            "set -g status on\nset -g window-status-format 'x!'\n"
+        );
+
+        // Another step wrote the file and the line is no longer where it was.
+        // Nothing is written, because the cost of being wrong is a line tmux
+        // discards in silence.
+        assert!(rebuild.apply("set -g status on\n").is_err());
+        assert!(rebuild.apply("one\ntwo\nthree\n").is_err());
+    }
+
+    #[test]
+    fn a_continuation_is_matched_on_the_line_it_started() {
+        assert_eq!(first_of("set -g x \\\ncontinued"), "set -g x \\");
+        assert_eq!(first_of("single"), "single");
+    }
+
+    #[test]
+    fn a_hooks_index_is_not_part_of_its_name() {
+        // tmux reports an unset hook bare and a set one indexed, so one edit
+        // shows up as two changes under two spellings of the same thing.
+        assert_eq!(
+            without_index("session-window-changed[50]"),
+            "session-window-changed"
+        );
+        assert_eq!(
+            without_index("session-window-changed"),
+            "session-window-changed"
+        );
+        assert_eq!(
+            without_index("window-status-format"),
+            "window-status-format"
+        );
+    }
+
+    #[test]
+    fn everything_install_may_move_is_named() {
+        let ours = ours_to_change();
+        for option in format::OPTIONS {
+            assert!(ours.contains(&option.to_owned()), "{option}");
+        }
+        for hook in ["session-window-changed", "window-pane-changed"] {
+            assert!(ours.contains(&hook.to_owned()), "{hook}");
+        }
+        // And nothing else, because anything else moving is the tell that tmux
+        // abandoned the config.
+        assert_eq!(ours.len(), 4);
+    }
+
+    #[test]
+    fn a_summary_line_says_what_happened_and_names_the_backup() {
+        let written = write::Written {
+            resolved: PathBuf::from("/home/u/.tmux.conf"),
+            outcome: write::Outcome::Edited,
+            backup: Some(PathBuf::from("/home/u/.tmux.conf.bak-19700101T000000Z")),
+        };
+        let line = summary_line("the term", &written);
+        assert!(line.contains("edited"), "{line}");
+        assert!(line.contains(".bak-"), "{line}");
+
+        let created = write::Written {
+            outcome: write::Outcome::Created,
+            backup: None,
+            ..written.clone()
+        };
+        assert!(summary_line("x", &created).contains("created"));
+        assert!(!summary_line("x", &created).contains("backup"));
+
+        let already = write::Written {
+            outcome: write::Outcome::AlreadyInstalled,
+            ..created
+        };
+        assert!(summary_line("x", &already).contains("already installed"));
+    }
+
+    #[test]
+    fn this_checkout_is_a_git_repository_and_the_root_is_not() {
+        // Reporting, never policy: for a user whose other agent configs are
+        // versioned, an unmanaged write is state that quietly does not exist
+        // on their next machine.
+        let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        assert_eq!(git_repo_of(&here.join("src/install/mod.rs")), Some(here));
+        assert_eq!(git_repo_of(Path::new("/")), None);
+    }
+
+    #[test]
+    fn two_names_for_one_file_are_the_same_file() {
+        let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        assert!(same_file(&here.join("src/../src"), &here.join("src")));
+        assert!(!same_file(&here.join("src"), &here.join("tests")));
+        // Two paths that do not exist are the same only if they are written
+        // the same way, which is all there is to go on.
+        assert!(same_file(Path::new("/nowhere/x"), Path::new("/nowhere/x")));
+        assert!(!same_file(Path::new("/nowhere/x"), Path::new("/nowhere/y")));
+    }
+
+    #[test]
+    fn an_indented_block_is_readable_where_it_is_printed() {
+        assert_eq!(indent("one\ntwo\n"), "      one\n      two\n");
+        assert_eq!(indent(""), "");
     }
 
     #[test]

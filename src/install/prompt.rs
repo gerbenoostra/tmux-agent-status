@@ -13,6 +13,25 @@ use dialoguer::{Confirm, Editor, MultiSelect};
 
 use super::write::{Ask, Warning};
 
+/// Everything the run needs a person for.
+///
+/// A trait so that the orchestration depends on the questions rather than on
+/// the terminal: `Prompt` is the one implementation that talks to a tty, and a
+/// test supplies one that answers from a script. Without this, every branch
+/// behind "the user said no" would be unreachable from a test suite, which is
+/// the same thing as unread.
+pub trait Interaction: Ask {
+    fn say(&self, line: &str);
+    /// `recommended` is what `-y` answers and what a bare return takes.
+    fn confirm(&self, question: &str, recommended: bool) -> bool;
+    /// Choose from a list of `(label, preselected)` rows.
+    fn choose(&self, question: &str, rows: &[(String, bool)]) -> Vec<usize>;
+    /// Hand a value to an editor and take back what comes out.
+    fn edit(&self, value: &str) -> Option<String>;
+    /// Whether this run writes nothing whatever it is told.
+    fn is_dry_run(&self) -> bool;
+}
+
 /// A question that cannot be answered, which is a usage error rather than a
 /// guess.
 ///
@@ -65,27 +84,30 @@ impl Prompt {
         self.answers
     }
 
-    pub fn is_dry_run(&self) -> bool {
+    fn tell(&self, line: &str) {
+        let _ = writeln!(io::stdout(), "{line}");
+    }
+}
+
+impl Interaction for Prompt {
+    fn is_dry_run(&self) -> bool {
         self.answers == Answers::DryRun
     }
 
     /// Say something the user needs to read. Plain stdout: this is the output
     /// of the command, not a diagnostic.
-    pub fn say(&self, line: impl AsRef<str>) {
-        let _ = writeln!(io::stdout(), "{}", line.as_ref());
+    fn say(&self, line: &str) {
+        self.tell(line);
     }
 
-    /// Ask a yes or no question.
-    ///
-    /// `recommended` is what `-y` answers, and what a bare return takes.
-    pub fn confirm(&self, question: &str, recommended: bool) -> bool {
+    fn confirm(&self, question: &str, recommended: bool) -> bool {
         match self.answers {
             // A dry run performs no write, so every question is moot; taking
             // the recommended answer is what makes the printed plan the plan
             // that a real `-y` run would carry out.
             Answers::DryRun => recommended,
             Answers::Recommended => {
-                self.say(format!("{question} [{}, -y]", yes_or_no(recommended)));
+                self.tell(&format!("{question} [{}, -y]", yes_or_no(recommended)));
                 recommended
             }
             Answers::Interactive => Confirm::new()
@@ -100,7 +122,7 @@ impl Prompt {
     ///
     /// Every agent appears, preselected or not, so nothing is ever installed
     /// without having been shown.
-    pub fn choose(&self, question: &str, rows: &[(String, bool)]) -> Vec<usize> {
+    fn choose(&self, question: &str, rows: &[(String, bool)]) -> Vec<usize> {
         let preselected = || {
             rows.iter()
                 .enumerate()
@@ -111,9 +133,9 @@ impl Prompt {
         match self.answers {
             Answers::DryRun => preselected(),
             Answers::Recommended => {
-                self.say(question);
+                self.tell(question);
                 for (label, on) in rows {
-                    self.say(format!("  [{}] {label}", if *on { 'x' } else { ' ' }));
+                    self.tell(&format!("  [{}] {label}", if *on { 'x' } else { ' ' }));
                 }
                 preselected()
             }
@@ -135,7 +157,7 @@ impl Prompt {
     /// Editing a 300-character format string in a one-line prompt is hostile,
     /// which is the whole reason this exists. `None` means the user changed
     /// nothing, or there was no editor to open.
-    pub fn edit(&self, value: &str) -> Option<String> {
+    fn edit(&self, value: &str) -> Option<String> {
         match self.answers {
             Answers::Interactive => Editor::new().edit(value).ok().flatten(),
             // Nobody is there to edit anything.
@@ -147,7 +169,7 @@ impl Prompt {
 /// A warning is a question, and `-y` proceeds on every one and says so.
 impl Ask for Prompt {
     fn warn(&self, warning: &Warning) -> bool {
-        self.say(warning.message());
+        self.tell(&warning.message());
         self.confirm("Go ahead anyway?", true)
     }
 }

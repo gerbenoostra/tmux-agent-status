@@ -240,15 +240,12 @@ pub struct Assignment {
 }
 
 impl Assignment {
-    /// Which of the two options this line assigns, when the line can be read.
+    /// Which of the two options this line assigns.
     ///
-    /// `None` for a line that names one of them and is being handed back: it is
-    /// still reported, but it is not a winner anything can be spliced into.
+    /// A line that is being handed back still assigns its option, which is what
+    /// stops the caller appending a second assignment beside it.
     pub fn option(&self) -> Option<&str> {
-        match &self.candidate {
-            Candidate::Line(line) => Some(&line.option),
-            _ => None,
-        }
+        self.candidate.option()
     }
 }
 

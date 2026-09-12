@@ -74,8 +74,10 @@ impl Refusal {
 pub enum Candidate {
     /// Not an assignment of either format option.
     NotOurs,
-    /// An assignment of one of them that will not be rewritten.
-    Refused(Refusal),
+    /// An assignment of one of them that will not be rewritten. The option is
+    /// carried anyway, because which one it is still decides what happens to
+    /// the *other* one.
+    Refused { option: String, why: Refusal },
     /// An assignment this module can read and splice.
     Line(Box<FormatLine>),
 }
@@ -92,8 +94,21 @@ impl Candidate {
     /// Why the line is being handed back, when it is one of ours and refused.
     pub fn refusal(self) -> Option<Refusal> {
         match self {
-            Candidate::Refused(refusal) => Some(refusal),
+            Candidate::Refused { why, .. } => Some(why),
             _ => None,
+        }
+    }
+
+    /// Which option this line assigns, whether or not it can be rewritten.
+    ///
+    /// A refused line still assigns its option, and pretending otherwise makes
+    /// the caller treat the option as unset and append a second assignment
+    /// beside a perfectly good one.
+    pub fn option(&self) -> Option<&str> {
+        match self {
+            Candidate::Line(line) => Some(&line.option),
+            Candidate::Refused { option, .. } => Some(option),
+            Candidate::NotOurs => None,
         }
     }
 }
@@ -253,17 +268,21 @@ pub fn parse(line: &str) -> Candidate {
 
     // From here the line is one of ours, so every exit is a refusal the user
     // hears about rather than a line silently passed over.
+    let refuse = |why| Candidate::Refused {
+        option: option.text.clone(),
+        why,
+    };
     match stop {
-        Stop::SecondCommand => return Candidate::Refused(Refusal::SecondCommand),
-        Stop::Unreadable => return Candidate::Refused(Refusal::Unreadable),
+        Stop::SecondCommand => return refuse(Refusal::SecondCommand),
+        Stop::Unreadable => return refuse(Refusal::Unreadable),
         Stop::End => {}
     }
 
     let Some(value) = words.next() else {
-        return Candidate::Refused(Refusal::NoValue);
+        return refuse(Refusal::NoValue);
     };
     if words.next().is_some() {
-        return Candidate::Refused(Refusal::ExtraArgument);
+        return refuse(Refusal::ExtraArgument);
     }
 
     Candidate::Line(Box::new(FormatLine {
@@ -500,6 +519,19 @@ mod tests {
 
     fn refusal(text: &str) -> Refusal {
         parse(text).refusal().expect("is refused")
+    }
+
+    #[test]
+    fn a_refused_line_still_says_which_option_it_assigns() {
+        // Otherwise the caller reads the option as unset and appends a second
+        // assignment beside a perfectly good one.
+        let refused = parse("set -g window-status-format 'x' ; set -g status on");
+        assert_eq!(refused.option(), Some("window-status-format"));
+        assert_eq!(
+            parse("set -g window-status-current-format 'x'").option(),
+            Some("window-status-current-format")
+        );
+        assert_eq!(parse("set -g status on").option(), None);
     }
 
     #[test]
