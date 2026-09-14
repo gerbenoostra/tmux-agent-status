@@ -222,10 +222,17 @@ fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
 
     let mut positive = Vec::new();
     let mut negative = Vec::new();
+    // A bare `--agents` is taken first, so that only `--agents=<names>` is left
+    // for the value lookup. The other way round, a bare `--agents` swallows
+    // whatever follows it - `--agents --tmux-hook` would install an agent
+    // called `--tmux-hook` - and the flag could never be given on its own,
+    // which is half of what it is for. That is also why the value form is
+    // spelled with `=`.
+    let bare = pargs.contains("--agents");
     let named = opt_value(&mut pargs, "--agents")?;
     // `--agents=codex,cursor` selects the step *and* narrows it; a bare
     // `--agents` selects the step and leaves the choice to detection.
-    if named.is_some() || pargs.contains("--agents") {
+    if bare || named.is_some() {
         positive.push(install::Step::Agents);
     }
     if pargs.contains("--tmux-hook") {
@@ -281,6 +288,9 @@ fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
         probe,
         home,
         exe: std::env::current_exe().ok(),
+        prefix: std::env::var_os("PREFIX")
+            .filter(|prefix| !prefix.is_empty())
+            .map(PathBuf::from),
     };
     Ok(ExitCode::from(install::run(&options, &prompt).exit_code()))
 }

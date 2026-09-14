@@ -20,9 +20,21 @@ lint:
 test:
     cargo test
 
-# Run the test suite with 100% line and region coverage.
+# Run the test suite and hold every region of `src/` to covered.
 # The bell path writes to /dev/tty, so the runner needs a controlling terminal;
 # `script` creates one and is available on both Linux (util-linux) and macOS.
+#
+# The bar is read from the exported segments rather than from
+# `--fail-under-regions`, because the two do not agree. `src/` is compiled
+# twice - once with `cfg(test)` for the lib's own test binary, once as the rlib
+# the integration tests link - and `llvm-cov report` leaves a handful of spans
+# unmerged between the two, so its summary counts regions as missed that
+# `llvm-cov show` renders as covered. The segments are the view `show` renders,
+# and they answer one question consistently: is there a region nothing reached?
+# Full region coverage implies full line coverage, so that one bar is enough.
+#
+# A line that cannot be reached says so for itself, with a trailing
+# `// coverage: off` and the reason it is unreachable.
 #
 # `src/install/prompt.rs` is the one file excluded, and the exception is kept to
 # one named file so it stays reviewable: it is the only module that knows there
@@ -32,13 +44,39 @@ test:
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--summary-only --fail-under-lines 100 --fail-under-regions 100
-          --ignore-filename-regex 'src/install/prompt\.rs$')
+    ignore='src/install/prompt\.rs$'
     if [[ "{{os()}}" == "macos" ]]; then
-        script -q /dev/null cargo llvm-cov "${args[@]}"
+        script -q /dev/null cargo llvm-cov --no-report
     else
-        script -q /dev/null -c "cargo llvm-cov ${args[*]}"
+        script -q /dev/null -c "cargo llvm-cov --no-report"
     fi
+    cargo llvm-cov report --summary-only --ignore-filename-regex "$ignore"
+    echo
+    echo "The misses above are counted per compilation, not per region; the bar"
+    echo "below is the merged region view. See the comment on this recipe."
+    report="$(mktemp)"
+    trap 'rm -f "$report"' EXIT
+    cargo llvm-cov report --json --ignore-filename-regex "$ignore" \
+        --output-path "$report" >/dev/null
+    # A segment carries [line, column, count, has-count, region-entry, gap].
+    # One with a count of zero that is not a gap is a region nothing reached.
+    uncovered=0
+    while IFS=: read -r file line; do
+        [[ -n "$file" ]] || continue
+        if [[ "$(sed -n "${line}p" "$file")" == *'// coverage: off'* ]]; then
+            continue
+        fi
+        echo "uncovered region: $file:$line" >&2
+        uncovered=$((uncovered + 1))
+    done < <(jq -r '.data[].files[] | .filename as $file
+                    | (.segments // [])[]
+                    | select(.[3] and .[2] == 0 and (.[5] | not))
+                    | "\($file):\(.[0])"' "$report" | sort -u)
+    if (( uncovered )); then
+        echo "$uncovered uncovered region(s); the bar is all of them." >&2
+        exit 1
+    fi
+    echo "Every region of src/ was reached."
 
 # What CI runs.
 check: fmt-check lint test

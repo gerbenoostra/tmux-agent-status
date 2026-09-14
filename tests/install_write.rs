@@ -897,13 +897,41 @@ fn a_filesystem_that_refuses_for_its_own_reasons_fails_cleanly() {
 }
 
 #[test]
+fn an_inspection_that_cannot_stat_the_target_says_so() {
+    let dir = TempDir::new("inspect-lstat");
+    let target = dir.write("tmux.conf", "before\n");
+
+    let error = write::inspect(&target, &Faults::parse("lstat"))
+        .expect_err("a stat that refuses is not an empty document");
+
+    assert!(matches!(error, Error::Io { .. }), "{error}");
+}
+
+#[test]
+fn a_lock_line_with_a_pid_that_is_not_a_number_is_not_ours() {
+    let dir = TempDir::new("lock-nonsense-pid");
+    let target = dir.write("tmux.conf", "before\n");
+    let lock = dir.join("tmux.conf.tmux-agent-status.lock");
+    // Three fields, so the shape is right and only the pid is nonsense.
+    fs::write(&lock, "not-a-pid\tsome-host\tsomething\n").expect("the lock file");
+
+    let ask = Answer::yes();
+    let error = writer(&target, &ask)
+        .apply(|_| Plan::Write("after\n".to_owned()))
+        .expect_err("a lock we cannot read is reported");
+
+    assert!(matches!(error, Error::Locked { .. }), "{error}");
+    assert_eq!(read(&target), "before\n");
+}
+
+#[test]
 fn inspect_reports_without_touching_anything() {
     let dir = TempDir::new("inspect");
     let real = dir.write("dotfiles/tmux.conf", "before\n");
     let front = dir.join("tmux.conf");
     std::os::unix::fs::symlink(&real, &front).expect("the link");
 
-    let seen = write::inspect(&front).expect("the target can be inspected");
+    let seen = write::inspect(&front, &Faults::default()).expect("the target can be inspected");
 
     assert_eq!(seen.named, front);
     assert_eq!(seen.resolved, real);
@@ -925,7 +953,8 @@ fn inspect_reads_a_missing_file_as_an_empty_document() {
     let dir = TempDir::new("inspect-missing");
     let target = dir.join("config/tmux/tmux.conf");
 
-    let seen = write::inspect(&target).expect("a missing target can be inspected");
+    let seen =
+        write::inspect(&target, &Faults::default()).expect("a missing target can be inspected");
 
     assert!(!seen.exists);
     assert_eq!(seen.contents, "");
@@ -945,7 +974,7 @@ fn inspect_refuses_what_apply_would_refuse() {
     let a_directory = dir.join("a-directory");
     fs::create_dir(&a_directory).expect("the directory");
     assert!(matches!(
-        write::inspect(&a_directory),
+        write::inspect(&a_directory, &Faults::default()),
         Err(Error::NotARegularFile(_))
     ));
 
@@ -955,7 +984,7 @@ fn inspect_refuses_what_apply_would_refuse() {
     fs::write(&target, "before\n").expect("the file");
     fs::set_permissions(&inner, fs::Permissions::from_mode(0o555)).expect("chmod");
     assert!(matches!(
-        write::inspect(&target),
+        write::inspect(&target, &Faults::default()),
         Err(Error::Unwritable { .. })
     ));
 }

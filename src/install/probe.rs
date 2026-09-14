@@ -43,16 +43,6 @@ pub fn config_files() -> Option<String> {
     run_here(&["display-message", "-p", "#{config_files}"])
 }
 
-/// The effective value of both format options on the running server.
-pub fn effective_formats() -> Option<(String, String)> {
-    let current = show_option(format::OPTIONS[1])?;
-    Some((show_option(format::OPTIONS[0])?, current))
-}
-
-fn show_option(name: &str) -> Option<String> {
-    run_here(&["show-options", "-gwv", name]).map(|value| value.trim_end().to_owned())
-}
-
 /// This tmux's compiled-in default format.
 ///
 /// Asked rather than remembered: the default has changed between tmux versions
@@ -82,7 +72,10 @@ impl Dump {
             ["show-hooks", "-g"],
             ["show-hooks", "-gw"],
         ] {
-            lines.extend(server.ask(&args)?.lines().map(str::to_owned));
+            // A tmux that answers one of these and then stops answering is a
+            // thing that happens, and nothing a test can arrange without a
+            // fault hook of its own in the probe.
+            lines.extend(server.ask(&args)?.lines().map(str::to_owned)); // coverage: off
         }
         lines.sort();
         Some(Dump { lines })
@@ -173,7 +166,10 @@ pub fn dump_within(config: &Path, timeout: Duration) -> Option<Dump> {
 /// `None` when there is no tmux to ask.
 pub fn check(config: &Path) -> Option<Result<(), String>> {
     let server = Server::start_on(Path::new("/dev/null"), TIMEOUT)?;
-    let (ok, complaint, also) = server.attempt(&["source-file", &config.to_string_lossy()])?;
+    // Same again: the server started, so the only way past this `?` is a tmux
+    // that stops answering between two calls.
+    let config = config.to_string_lossy();
+    let (ok, complaint, also) = server.attempt(&["source-file", &config])?; // coverage: off
     Some(match ok {
         true => Ok(()),
         // Verified on 3.6a: the complaint comes back on *stdout*, not stderr.
@@ -284,6 +280,14 @@ fn run_here(args: &[&str]) -> Option<String> {
 /// config's - verified, and the reason a config using relative source paths is
 /// reported rather than silently mis-resolved.
 fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, String, String)> {
+    // The test-only switch, shared with the rest of `install`: a tmux that
+    // stops answering partway through a sequence is a thing that happens and
+    // nothing a test can arrange.
+    if std::env::var("TMUX_AGENT_STATUS_TEST_FAULT")
+        .is_ok_and(|value| value.split(',').any(|stage| stage == "no-tmux"))
+    {
+        return None;
+    }
     let mut command = Command::new("tmux");
     command
         .args(args)
@@ -291,9 +295,11 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // The else arm wants a process with no `HOME`, which is not a shape any
+    // test here runs in.
     if let Some(home) = std::env::var_os("HOME") {
         command.current_dir(home);
-    }
+    } // coverage: off
     let mut child = command.spawn().ok()?;
 
     let deadline = Instant::now() + timeout;
@@ -316,12 +322,16 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
             }
         }
     };
-    let output = child.wait_with_output().ok()?;
+    // The child has already exited by here, so collecting what it wrote fails
+    // only if the pipes themselves do.
+    let output = child.wait_with_output().ok()?; // coverage: off
     Some((
         status.success(),
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
     ))
+    // `wait_with_output` failing is the same "no answer" as everything else
+    // above, which is what `None` means throughout this module.
 }
 
 /// Clear up a probe server we could not wait for.

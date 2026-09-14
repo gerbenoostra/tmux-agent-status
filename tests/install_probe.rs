@@ -300,5 +300,4 @@ fn the_running_server_can_be_asked_what_it_loaded() {
     // Outside tmux there is usually no server, and every one of these is
     // optional by design: `None` is an answer, not a failure.
     let _ = probe::config_files();
-    let _ = probe::effective_formats();
 }

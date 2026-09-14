@@ -122,6 +122,7 @@ fn options(home: &TempDir, steps: install::Steps) -> Options {
             xdg_config: None,
         },
         exe: None,
+        prefix: None,
     }
 }
 
@@ -640,6 +641,47 @@ fn an_edit_that_drops_the_term_is_refused_and_the_proposal_stands() {
         "{}",
         script.output()
     );
+}
+
+#[test]
+fn declining_the_reload_says_how_to_do_it_later() {
+    let dir = TempDir::new("run-reload-declined");
+    let config = dir.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let script = Script::saying_no();
+
+    // The config is one the running server loads, so the offer is made - and
+    // declined, which must leave the user knowing what to type.
+    install::offer_reload(&config, Some(&config.display().to_string()), &script);
+
+    let output = script.output();
+    assert!(output.contains("Not reloaded"), "{output}");
+    assert!(output.contains("tmux source-file"), "{output}");
+}
+
+#[test]
+fn a_config_the_running_tmux_does_not_load_is_never_sourced_into_it() {
+    // Sourcing anything else applies settings to a live session that nobody
+    // asked that tmux to have, which is a real hazard with --tmux-config.
+    let dir = TempDir::new("run-reload-elsewhere");
+    let config = dir.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let script = Script::saying_yes();
+
+    install::offer_reload(&config, Some("/etc/tmux.conf,~/.tmux.conf"), &script);
+
+    let output = script.output();
+    assert!(output.contains("Not offering a reload"), "{output}");
+    assert!(script.questions().is_empty(), "{}", script.questions());
+}
+
+#[test]
+fn with_no_running_tmux_there_is_nothing_to_reload_into() {
+    let dir = TempDir::new("run-reload-none");
+    let config = dir.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let script = Script::saying_yes();
+
+    install::offer_reload(&config, None, &script);
+
+    assert!(script.output().is_empty(), "{}", script.output());
 }
 
 #[test]

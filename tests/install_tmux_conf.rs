@@ -97,7 +97,7 @@ fn a_snippet_beside_the_binary_is_found() {
     let home = home_in(&dir);
 
     assert_eq!(
-        tmux_conf::discover_snippet(None, Some(&bin), &dir.join(".tmux.conf"), &home),
+        tmux_conf::discover_snippet(None, Some(&bin), &dir.join(".tmux.conf"), &home, None),
         Choice::Existing(snippet)
     );
 }
@@ -112,7 +112,7 @@ fn a_checkout_layout_two_levels_up_is_found_too() {
     let home = home_in(&dir);
 
     assert_eq!(
-        tmux_conf::discover_snippet(None, Some(&bin), &dir.join(".tmux.conf"), &home),
+        tmux_conf::discover_snippet(None, Some(&bin), &dir.join(".tmux.conf"), &home, None),
         Choice::Existing(snippet)
     );
 }
@@ -127,11 +127,17 @@ fn a_binary_with_no_share_beside_it_falls_through_to_a_copy() {
     let home = home_in(&dir);
 
     assert_eq!(
-        tmux_conf::discover_snippet(None, Some(&bin), &dir.join(".tmux.conf"), &home),
+        tmux_conf::discover_snippet(None, Some(&bin), &dir.join(".tmux.conf"), &home, None),
         Choice::Create(dir.join(".tmux/tmux-agent-status.conf"))
     );
     assert_eq!(
-        tmux_conf::discover_snippet(None, Some(&bin), &dir.join(".config/tmux/tmux.conf"), &home),
+        tmux_conf::discover_snippet(
+            None,
+            Some(&bin),
+            &dir.join(".config/tmux/tmux.conf"),
+            &home,
+            None
+        ),
         Choice::Create(dir.join(".config/tmux/tmux-agent-status.conf"))
     );
 }
@@ -143,7 +149,7 @@ fn an_existing_explicit_snippet_is_taken_as_it_is() {
     let home = home_in(&dir);
 
     assert_eq!(
-        tmux_conf::discover_snippet(Some(&explicit), None, &dir.join(".tmux.conf"), &home),
+        tmux_conf::discover_snippet(Some(&explicit), None, &dir.join(".tmux.conf"), &home, None),
         Choice::Existing(explicit)
     );
 }

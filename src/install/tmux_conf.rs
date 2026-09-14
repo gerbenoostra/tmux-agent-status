@@ -110,6 +110,7 @@ pub fn discover_snippet(
     exe: Option<&Path>,
     config: &Path,
     home: &Home,
+    prefix: Option<&Path>,
 ) -> Choice {
     if let Some(path) = explicit {
         return match path.is_file() {
@@ -117,7 +118,7 @@ pub fn discover_snippet(
             false => Choice::Create(path.to_path_buf()),
         };
     }
-    for candidate in search_path(exe, home) {
+    for candidate in search_path(exe, home, prefix) {
         if candidate.is_file() {
             return Choice::Existing(candidate);
         }
@@ -128,7 +129,7 @@ pub fn discover_snippet(
 }
 
 /// Everywhere a shipped snippet might already be.
-fn search_path(exe: Option<&Path>, home: &Home) -> Vec<PathBuf> {
+fn search_path(exe: Option<&Path>, home: &Home, prefix: Option<&Path>) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Some(exe) = exe.and_then(|exe| exe.canonicalize().ok()) {
         // Two levels above the binary is `<prefix>/share`, which covers the nix
@@ -142,11 +143,9 @@ fn search_path(exe: Option<&Path>, home: &Home) -> Vec<PathBuf> {
                 .map(|prefix| prefix.join("share")),
         );
     }
-    roots.extend(
-        std::env::var_os("PREFIX")
-            .filter(|prefix| !prefix.is_empty())
-            .map(|prefix| PathBuf::from(prefix).join("share")),
-    );
+    // `$PREFIX` is read at the edge and passed in, like `$HOME`: a search path
+    // that reaches for the environment itself is one a test cannot steer.
+    roots.extend(prefix.map(|prefix| prefix.join("share")));
     roots.push(home.join(".nix-profile/share"));
     roots.push(PathBuf::from("/usr/local/share"));
     roots.push(PathBuf::from("/opt/homebrew/share"));
@@ -182,17 +181,17 @@ pub fn sources_snippet(text: &str) -> bool {
 
 /// The path a `source`/`source-file` line names, if it is one.
 fn source_argument(line: &str) -> Option<String> {
-    let words = format::words(line)?;
-    let (command, rest) = words.split_first()?;
-    if !matches!(command.as_str(), "source" | "source-file") {
-        return None;
+    match format::words(line)?.as_slice() {
+        [command, rest @ ..] if matches!(command.as_str(), "source" | "source-file") => {
+            // tmux's own flags here take no values, so the path is simply the
+            // last word that is not one.
+            rest.iter()
+                .rev()
+                .find(|word| !word.starts_with('-'))
+                .cloned()
+        }
+        _ => None,
     }
-    // tmux's own flags here take no values, so the path is simply the last word
-    // that is not one.
-    rest.iter()
-        .rev()
-        .find(|word| !word.starts_with('-'))
-        .cloned()
 }
 
 /// The block that sources the snippet.
@@ -504,7 +503,7 @@ mod tests {
     fn the_search_path_covers_the_layouts_the_binary_ships_in() {
         let home = home_at("/home/u");
         let exe = std::env::current_exe().expect("the test binary has a path");
-        let found = search_path(Some(&exe), &home);
+        let found = search_path(Some(&exe), &home, Some(Path::new("/opt/prefix")));
         assert!(
             found
                 .iter()
@@ -521,8 +520,8 @@ mod tests {
             "/opt/homebrew/share/tmux/tmux-agent-status.conf"
         )));
         // A binary whose path cannot be resolved simply contributes nothing.
-        assert!(!search_path(None, &home).is_empty());
-        assert!(!search_path(Some(Path::new("/nowhere/at/all")), &home).is_empty());
+        assert!(!search_path(None, &home, None).is_empty());
+        assert!(!search_path(Some(Path::new("/nowhere/at/all")), &home, None).is_empty());
     }
 
     #[test]
@@ -530,7 +529,7 @@ mod tests {
         let home = home_at("/home/u");
         let explicit = PathBuf::from("/nowhere/snippet.conf");
         assert_eq!(
-            discover_snippet(Some(&explicit), None, Path::new("/x"), &home),
+            discover_snippet(Some(&explicit), None, Path::new("/x"), &home, None),
             Choice::Create(explicit)
         );
     }

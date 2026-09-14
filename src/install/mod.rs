@@ -182,6 +182,9 @@ pub struct Options {
     pub probe: bool,
     pub home: Home,
     pub exe: Option<PathBuf>,
+    /// `$PREFIX`, read at the edge like `$HOME`, and searched for a shipped
+    /// snippet.
+    pub prefix: Option<PathBuf>,
 }
 
 /// What one target's write would be, before anything is written.
@@ -604,7 +607,7 @@ pub fn run(options: &Options, prompt: &dyn prompt::Interaction) -> Report {
     summarise(&report, prompt, options);
     if let Some(tmux) = &tmux {
         if report.exit_code() == 0 {
-            offer_reload(tmux.config.path(), prompt);
+            offer_reload(tmux.config.path(), probe::config_files().as_deref(), prompt);
         }
     }
     report
@@ -925,7 +928,7 @@ fn plan_plugin(claude: &agents::Claude, options: &Options) -> Action {
 
 fn plan_merge(agent: &'static agents::Agent, options: &Options) -> Action {
     let target = agent.target(&options.home);
-    let seen = match write::inspect(&target) {
+    let seen = match write::inspect(&target, &write::Faults::from_env()) {
         Ok(seen) => seen,
         Err(error) => return Action::Manual(format!("    {error}")),
     };
@@ -1080,6 +1083,7 @@ impl TmuxPlan {
             options.exe.as_deref(),
             self.config.path(),
             &options.home,
+            options.prefix.as_deref(),
         );
         let mut planned = Vec::new();
 
@@ -1092,7 +1096,7 @@ impl TmuxPlan {
                 // Inspected like every other target, so that somewhere we
                 // cannot write is handed back while nothing has been written,
                 // rather than failing halfway through the step.
-                action: match write::inspect(path) {
+                action: match write::inspect(path, &write::Faults::from_env()) {
                     Err(error) => Action::Manual(format!("    {error}")),
                     Ok(seen) => Action::Write(Box::new(Change {
                         what: "the tmux snippet".to_owned(),
@@ -1129,7 +1133,7 @@ impl TmuxPlan {
     }
 
     fn plan_source_line(&self, snippet: &Path) -> Action {
-        let seen = match write::inspect(self.config.path()) {
+        let seen = match write::inspect(self.config.path(), &write::Faults::from_env()) {
             Ok(seen) => seen,
             Err(error) => return Action::Manual(format!("    {error}")),
         };
@@ -1222,7 +1226,7 @@ impl TmuxPlan {
         let Some(line) = self.spliced_default(options, option) else {
             return self.manual_term("    this tmux's default format cannot be quoted safely");
         };
-        let seen = match write::inspect(self.config.path()) {
+        let seen = match write::inspect(self.config.path(), &write::Faults::from_env()) {
             Ok(seen) => seen,
             Err(error) => return self.manual_term(&format!("    {error}")),
         };
@@ -1283,7 +1287,7 @@ impl TmuxPlan {
         };
         let rewritten = self.offer_edit(rewritten, prompt);
 
-        let seen = match write::inspect(&last.file) {
+        let seen = match write::inspect(&last.file, &write::Faults::from_env()) {
             Ok(seen) => seen,
             // The winning line lives in a file we may not write. Editing an
             // earlier one would produce a line tmux discards, so the step
@@ -1335,7 +1339,7 @@ impl TmuxPlan {
         let Some(block) = block else {
             return self.manual_term("    this tmux's default format cannot be quoted safely");
         };
-        let seen = match write::inspect(self.config.path()) {
+        let seen = match write::inspect(self.config.path(), &write::Faults::from_env()) {
             Ok(seen) => seen,
             Err(error) => return self.manual_term(&format!("    {error}")),
         };
@@ -1415,8 +1419,8 @@ impl TmuxPlan {
 /// Never `set-option`. By this point the probe has already loaded that exact
 /// file in a throwaway server and found it sound, so the reload is offered on a
 /// file that is known to parse rather than hoped to.
-pub fn offer_reload(config: &Path, prompt: &dyn prompt::Interaction) {
-    let Some(listed) = probe::config_files() else {
+pub fn offer_reload(config: &Path, listed: Option<&str>, prompt: &dyn prompt::Interaction) {
+    let Some(listed) = listed else {
         // No running server, so there is nothing to reload into.
         return;
     };
@@ -1424,7 +1428,7 @@ pub fn offer_reload(config: &Path, prompt: &dyn prompt::Interaction) {
     // applies settings the user never asked that tmux to have - which is a
     // real hazard with `--tmux-config`, and how a scratch config ends up in
     // somebody's live session.
-    let loaded = tmux_conf::candidates(&listed)
+    let loaded = tmux_conf::candidates(listed)
         .iter()
         .any(|candidate| same_file(candidate, config));
     if !loaded {
@@ -1447,6 +1451,11 @@ pub fn offer_reload(config: &Path, prompt: &dyn prompt::Interaction) {
             Ok(()) => prompt.say("  tmux reloaded."),
             Err(error) => prompt.say(&format!("  {error}")),
         }
+    } else {
+        prompt.say(&format!(
+            "  Not reloaded. Run `tmux source-file {}` when you are ready.",
+            config.display()
+        ));
     }
 }
 

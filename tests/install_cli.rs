@@ -770,6 +770,152 @@ fn every_fault_stage_reaches_the_branch_it_stands_for() {
 }
 
 #[test]
+fn a_flag_given_without_its_value_is_a_usage_error_naming_it() {
+    for flag in [
+        "--agents",
+        "--claude-route",
+        "--marketplace",
+        "--tmux-config",
+        "--snippet",
+    ] {
+        let home = TempDir::new("cli-no-value");
+        // The flag last, so there is nothing for it to take.
+        let out = install(&home, &["--dry-run", flag]);
+
+        match flag {
+            // A bare `--agents` is the documented way to say "only the
+            // agents", so it is the one flag that means something on its own.
+            "--agents" => assert_eq!(code(&out), 0, "{}", stderr(&out)),
+            _ => {
+                assert_eq!(code(&out), 2, "{flag}: {}", stdout(&out));
+                assert!(
+                    stderr(&out).contains(flag),
+                    "{flag} is not named: {}",
+                    stderr(&out)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_agents_flag_given_twice_is_a_usage_error() {
+    // The bare form is taken first, so the second one is left for the value
+    // lookup with nothing to take.
+    let home = TempDir::new("cli-agents-twice");
+    let out = install(&home, &["--dry-run", "--agents", "--agents"]);
+
+    assert_eq!(code(&out), 2, "{}", stdout(&out));
+    assert!(stderr(&out).contains("--agents"), "{}", stderr(&out));
+}
+
+#[test]
+fn an_empty_prefix_is_no_prefix() {
+    let home = TempDir::new("cli-empty-prefix");
+    let out = command(&home, &["--dry-run", "--tmux-hook"])
+        .env("PREFIX", "")
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+}
+
+#[test]
+fn a_stray_argument_is_a_usage_error() {
+    let home = TempDir::new("cli-stray");
+    let out = install(&home, &["--dry-run", "nonsense"]);
+
+    assert_eq!(code(&out), 2);
+    assert!(stderr(&out).contains("nonsense"), "{}", stderr(&out));
+}
+
+#[test]
+fn with_no_home_there_is_nowhere_to_install_to() {
+    let home = TempDir::new("cli-no-home");
+    let out = command(&home, &["--dry-run"])
+        .env_remove("HOME")
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&out), 2, "{}", stdout(&out));
+    assert!(stderr(&out).contains("$HOME"), "{}", stderr(&out));
+}
+
+#[test]
+fn an_xdg_config_home_elsewhere_is_where_the_config_goes() {
+    let home = TempDir::new("cli-xdg");
+    let elsewhere = home.join("elsewhere");
+    fs::create_dir_all(&elsewhere).expect("the directory");
+
+    let out = command(&home, &["-y", "--tmux-hook"])
+        .env("XDG_CONFIG_HOME", &elsewhere)
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    assert!(
+        elsewhere.join("tmux/tmux.conf").is_file(),
+        "the config did not follow $XDG_CONFIG_HOME: {}",
+        stdout(&out)
+    );
+    assert!(!home.join(".config/tmux/tmux.conf").exists());
+}
+
+#[test]
+fn a_file_we_cannot_read_is_reported_rather_than_guessed_at() {
+    let home = TempDir::new("cli-unreadable");
+    fs::create_dir_all(home.join(".codex")).expect("the directory");
+    let target = home.join(".codex/hooks.json");
+    fs::write(&target, "{}\n").expect("the config");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o000)).expect("chmod");
+
+    let out = install(&home, &["-y", "--agents=codex"]);
+
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    assert!(stdout(&out).contains("not installed"), "{}", stdout(&out));
+}
+
+#[test]
+fn with_no_tmux_an_existing_config_is_still_edited_unchecked() {
+    let home = TempDir::new("cli-no-tmux-config");
+    let empty = home.join("bin");
+    fs::create_dir_all(&empty).expect("the bin directory");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    fs::write(&config, "set -g window-status-format '#I:#W'\n").expect("the config");
+
+    let out = command(&home, &["-y", "--no-agents"])
+        .env("PATH", only(&empty))
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&out), 0, "{}", stdout(&out));
+    let written = fs::read_to_string(&config).expect("the config");
+    assert!(written.contains("@agent_status"), "{written}");
+    assert!(
+        stdout(&out).contains("not be checked against a live tmux"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn a_read_that_fails_after_the_write_is_reported() {
+    let home = TempDir::new("cli-read-back");
+    fs::create_dir_all(home.join(".codex")).expect("the directory");
+    let target = home.join(".codex/hooks.json");
+    fs::write(&target, "{\"theirs\": 1}\n").expect("the config");
+
+    let out = command(&home, &["-y", "--agents=codex"])
+        .env("TMUX_AGENT_STATUS_TEST_FAULT", "read-back")
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&out), 1, "{}", stdout(&out));
+    assert!(stdout(&out).contains("read-back"), "{}", stdout(&out));
+}
+
+#[test]
 fn the_help_text_documents_the_subcommand_and_its_flags() {
     let out = Command::new(support::BIN)
         .arg("--help")

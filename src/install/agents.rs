@@ -331,9 +331,15 @@ impl Agent {
     }
 
     /// The event keys we own, which are the only ones a merge touches.
-    fn events(&self) -> Result<Map<String, Value>, Refused> {
-        let parsed: Value = serde_json::from_str(self.contents)
-            .map_err(|error| Refused::OurOwnDropIn(error.to_string()))?;
+    ///
+    /// The drop-in is embedded in this binary and `tests/agent_configs.rs`
+    /// asserts that every one of them is a JSON object of events, so this is an
+    /// invariant rather than something that can go wrong at a user's machine.
+    /// A binary that got here would have shipped a broken drop-in.
+    fn events(&self) -> Map<String, Value> {
+        let parsed: Value = serde_json::from_str(self.contents).unwrap_or_else(|error| {
+            panic!("{}'s embedded drop-in is not JSON: {error}", self.name)
+        });
         let object = match self.shape {
             // The drop-in wraps its events; the target nests them the same way.
             Shape::JsonUnderHooks => parsed.get("hooks").cloned().unwrap_or(parsed),
@@ -342,7 +348,7 @@ impl Agent {
         object
             .as_object()
             .cloned()
-            .ok_or_else(|| Refused::OurOwnDropIn("the drop-in is not an object".to_owned()))
+            .unwrap_or_else(|| panic!("{}'s embedded drop-in is not an object", self.name))
     }
 
     fn merge_json(&self, current: &str) -> Result<Plan, Refused> {
@@ -353,7 +359,7 @@ impl Agent {
                 .map_err(|error| Refused::Unparseable(error.to_string()))?,
         };
         let before = document.clone();
-        let ours = self.events()?;
+        let ours = self.events();
 
         let root = document
             .as_object_mut()
@@ -405,8 +411,10 @@ impl Agent {
         if document == before {
             return Ok(Plan::AlreadyInstalled);
         }
-        let mut out = serde_json::to_string_pretty(&document)
-            .map_err(|error| Refused::OurOwnDropIn(error.to_string()))?;
+        // Serialising a `Value` cannot fail: there is no type in it that has
+        // no JSON spelling.
+        let mut out =
+            serde_json::to_string_pretty(&document).expect("a JSON value serialises as JSON");
         out.push('\n');
         Ok(Plan::Write(out))
     }
@@ -443,8 +451,6 @@ pub enum Refused {
     TomlNotAtTopLevel,
     /// Devin's eight-key constraint would be broken by the result.
     DevinUnknownEvent(String),
-    /// Our own embedded drop-in is wrong, which is a bug in this binary.
-    OurOwnDropIn(String),
 }
 
 impl fmt::Display for Refused {
@@ -460,9 +466,6 @@ impl fmt::Display for Refused {
                 "`{key}` is not one of Devin's documented events, and one unknown key \
                  discards its entire hook map"
             ),
-            Refused::OurOwnDropIn(why) => {
-                write!(f, "the drop-in built into this binary is wrong: {why}")
-            }
         }
     }
 }
@@ -788,6 +791,30 @@ mod tests {
         plan.written().expect("the merge produces a write")
     }
 
+    /// The embedded drop-ins are an invariant the drift tests keep, so a
+    /// binary that got here shipped a broken one. These two pin the message
+    /// rather than the possibility.
+    #[test]
+    #[should_panic(expected = "embedded drop-in is not JSON")]
+    fn a_drop_in_that_is_not_json_is_a_bug_in_this_binary() {
+        let broken = Agent {
+            contents: "not json at all",
+            ..*agent("codex")
+        };
+        let _ = broken.merge("{}");
+    }
+
+    #[test]
+    #[should_panic(expected = "embedded drop-in is not an object")]
+    fn a_drop_in_that_is_not_an_object_is_a_bug_in_this_binary() {
+        let broken = Agent {
+            contents: "[1, 2, 3]",
+            shape: Shape::JsonTopLevel,
+            ..*agent("droid")
+        };
+        let _ = broken.merge("{}");
+    }
+
     #[test]
     fn every_name_is_unique_and_resolvable() {
         let mut names = names();
@@ -923,18 +950,19 @@ mod tests {
 
     #[test]
     fn a_file_that_is_not_json_is_refused_rather_than_replaced() {
-        assert!(matches!(
-            agent("codex").merge("this is not json"),
-            Err(Refused::Unparseable(_))
-        ));
-        assert!(matches!(
-            agent("codex").merge("[1, 2, 3]"),
-            Err(Refused::Unparseable(_))
-        ));
-        assert!(matches!(
-            agent("codex").merge(r#"{"hooks": "not an object"}"#),
-            Err(Refused::Unparseable(_))
-        ));
+        for text in [
+            "this is not json",
+            "[1, 2, 3]",
+            r#"{"hooks": "not an object"}"#,
+        ] {
+            let refused = agent("codex").merge(text).expect_err("must be refused");
+            assert!(!refused.to_string().is_empty(), "{text:?}");
+            assert!(
+                // The arm that says "no" is only reached by a failing run.
+                matches!(refused, Refused::Unparseable(_)), // coverage: off
+                "{text:?}: {refused}"
+            );
+        }
     }
 
     #[test]
@@ -958,17 +986,17 @@ mod tests {
         // One unknown key discards the entire hook map, ours included, so the
         // constraint is checked on the whole result rather than trusted.
         let devin = agent("devin");
-        assert!(matches!(
+        assert_eq!(
             devin.merge(r#"{"hooks": {"StopFailure": []}}"#),
-            Err(Refused::DevinUnknownEvent(key)) if key == "StopFailure"
-        ));
+            Err(Refused::DevinUnknownEvent("StopFailure".to_owned()))
+        );
 
         // And a key the user had before we arrived is fatal in the same way,
         // which is worth saying rather than writing hooks that never fire.
-        assert!(matches!(
+        assert_eq!(
             devin.merge(r#"{"hooks": {"TheirTypo": []}}"#),
-            Err(Refused::DevinUnknownEvent(_))
-        ));
+            Err(Refused::DevinUnknownEvent("TheirTypo".to_owned()))
+        );
     }
 
     #[test]
@@ -1186,7 +1214,6 @@ mod tests {
             Refused::Unparseable("trailing comma".to_owned()),
             Refused::TomlNotAtTopLevel,
             Refused::DevinUnknownEvent("MadeUp".to_owned()),
-            Refused::OurOwnDropIn("not an object".to_owned()),
         ] {
             assert!(refused.to_string().len() > 20, "{refused:?}");
         }

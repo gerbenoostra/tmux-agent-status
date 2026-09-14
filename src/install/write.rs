@@ -231,7 +231,7 @@ impl SafeWrite<'_> {
         if self.faults.hits("verify-race") {
             let _ = fs::write(&target.resolved, "{\"raced\": true}\n");
         }
-        let found = read_to_string(&target.resolved, &self.faults)?;
+        let found = read_back(&target.resolved, &self.faults)?;
         if found == written {
             return Ok(());
         }
@@ -290,17 +290,21 @@ impl Target {
         }
     }
 
+    /// What `stat` says about the target, or nothing at all in create mode.
+    fn metadata(&self, faults: &Faults) -> Result<Option<fs::Metadata>, Error> {
+        match self.exists {
+            true => faults
+                .guard("lstat")
+                .and_then(|()| fs::symlink_metadata(&self.resolved))
+                .map(Some)
+                .map_err(|source| Error::io("reading the file's metadata", source)),
+            false => Ok(None),
+        }
+    }
+
     /// Step 2. Refuse what must not be edited; ask about what is merely odd.
     fn permit(&self, ask: &dyn Ask, faults: &Faults) -> Result<(), Error> {
-        let metadata = match self.exists {
-            true => Some(
-                faults
-                    .guard("lstat")
-                    .and_then(|()| fs::symlink_metadata(&self.resolved))
-                    .map_err(|source| Error::io("reading the file's metadata", source))?,
-            ),
-            false => None,
-        };
+        let metadata = self.metadata(faults)?;
 
         if let Some(metadata) = &metadata {
             if !metadata.is_file() {
@@ -379,19 +383,9 @@ pub struct Inspection {
 }
 
 /// Look at a target without touching it.
-pub fn inspect(path: &Path) -> Result<Inspection, Error> {
-    // Read-only, so nothing here is ever asked to fail: the fault switch is
-    // for the write, and a plan that could be made to fail on demand would
-    // only be testing the switch.
-    let faults = Faults::default();
+pub fn inspect(path: &Path, faults: &Faults) -> Result<Inspection, Error> {
     let target = Target::resolve(path);
-    let metadata = match target.exists {
-        true => Some(
-            fs::symlink_metadata(&target.resolved)
-                .map_err(|source| Error::io("reading the file's metadata", source))?,
-        ),
-        false => None,
-    };
+    let metadata = target.metadata(faults)?;
     if let Some(metadata) = &metadata {
         if !metadata.is_file() {
             return Err(Error::NotARegularFile(target.resolved.clone()));
@@ -407,7 +401,7 @@ pub fn inspect(path: &Path) -> Result<Inspection, Error> {
     Ok(Inspection {
         named: path.to_path_buf(),
         warnings: target.warnings(metadata.as_ref()),
-        contents: target.read(&faults)?,
+        contents: target.read(faults)?,
         resolved: target.resolved,
         exists: target.exists,
     })
@@ -603,6 +597,15 @@ fn keep(target: &Path, contents: &str, faults: &Faults) -> Option<PathBuf> {
         // backup are still named, and neither has been touched.
         Err(_) => None,
     }
+}
+
+/// Step 11's re-read, a different syscall at a different moment from step 4's,
+/// which fails for its own reasons.
+fn read_back(path: &Path, faults: &Faults) -> Result<String, Error> {
+    faults
+        .guard("read-back")
+        .and_then(|()| fs::read_to_string(path))
+        .map_err(|source| Error::io("reading the file back", source))
 }
 
 fn read_to_string(path: &Path, faults: &Faults) -> Result<String, Error> {
@@ -812,14 +815,14 @@ impl Holder {
     }
 
     fn from_line(line: &str) -> Option<Holder> {
-        let mut fields = line.splitn(3, '\t');
-        let pid = fields.next()?.parse().ok()?;
-        let host = fields.next()?.to_owned();
-        let identity = fields.next()?.to_owned();
+        let fields: Vec<&str> = line.splitn(3, '\t').collect();
+        let [pid, host, identity] = fields.as_slice() else {
+            return None;
+        };
         Some(Holder {
-            pid,
-            host,
-            identity,
+            pid: pid.parse().ok()?,
+            host: (*host).to_owned(),
+            identity: (*identity).to_owned(),
         })
     }
 
