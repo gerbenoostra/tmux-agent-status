@@ -513,6 +513,11 @@ mod tests {
         assert!(found.contains(&PathBuf::from(
             "/home/u/.nix-profile/share/tmux/tmux-agent-status.conf"
         )));
+        // The prefix handed in is a root of its own, or passing it would be
+        // free of consequence and this test would prove nothing about it.
+        assert!(found.contains(&PathBuf::from(
+            "/opt/prefix/share/tmux/tmux-agent-status.conf"
+        )));
         assert!(found.contains(&PathBuf::from(
             "/usr/local/share/tmux/tmux-agent-status.conf"
         )));

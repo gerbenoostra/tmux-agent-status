@@ -72,9 +72,11 @@ impl Dump {
             ["show-hooks", "-g"],
             ["show-hooks", "-gw"],
         ] {
-            // A tmux that answers one of these and then stops answering is a
-            // thing that happens, and nothing a test can arrange without a
-            // fault hook of its own in the probe.
+            // The `?` arm: a tmux that answers one of these and then stops
+            // answering. The fault switch below cannot arrange it, because
+            // `no-tmux` fails `Server::start_on` first and nothing downstream
+            // is reached; a staged spelling of it could. The marker exempts
+            // this whole line, success path included.
             lines.extend(server.ask(&args)?.lines().map(str::to_owned)); // coverage: off
         }
         lines.sort();
@@ -167,7 +169,8 @@ pub fn dump_within(config: &Path, timeout: Duration) -> Option<Dump> {
 pub fn check(config: &Path) -> Option<Result<(), String>> {
     let server = Server::start_on(Path::new("/dev/null"), TIMEOUT)?;
     // Same again: the server started, so the only way past this `?` is a tmux
-    // that stops answering between two calls.
+    // that stops answering between two calls, which the all-or-nothing fault
+    // switch cannot stage. The marker exempts this whole line.
     let config = config.to_string_lossy();
     let (ok, complaint, also) = server.attempt(&["source-file", &config])?; // coverage: off
     Some(match ok {
@@ -295,8 +298,10 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // The else arm wants a process with no `HOME`, which is not a shape any
-    // test here runs in.
+    // The else arm wants a process with no `HOME`. That is reachable - a test
+    // binary of its own could remove the variable, the way
+    // `tests/install_probe_no_tmux.rs` sets one - and is exempted rather than
+    // impossible: a third single-test binary buys less than it costs.
     if let Some(home) = std::env::var_os("HOME") {
         command.current_dir(home);
     } // coverage: off
@@ -323,7 +328,7 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
         }
     };
     // The child has already exited by here, so collecting what it wrote fails
-    // only if the pipes themselves do.
+    // only if the pipes themselves do. The marker exempts this whole line.
     let output = child.wait_with_output().ok()?; // coverage: off
     Some((
         status.success(),

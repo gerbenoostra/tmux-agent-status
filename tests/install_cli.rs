@@ -809,15 +809,24 @@ fn the_agents_flag_given_twice_is_a_usage_error() {
     assert!(stderr(&out).contains("--agents"), "{}", stderr(&out));
 }
 
+/// `$PREFIX` set to nothing has to mean what leaving it unset means. Without
+/// the filter at the edge, an empty value becomes a root of `/share`, which is
+/// not a search path anyone asked for.
 #[test]
-fn an_empty_prefix_is_no_prefix() {
+fn an_empty_prefix_runs_exactly_as_an_unset_one_does() {
     let home = TempDir::new("cli-empty-prefix");
-    let out = command(&home, &["--dry-run", "--tmux-hook"])
+    let empty = command(&home, &["--dry-run", "--tmux-hook"])
         .env("PREFIX", "")
         .output()
         .expect("the binary runs");
+    let unset = command(&home, &["--dry-run", "--tmux-hook"])
+        .env_remove("PREFIX")
+        .output()
+        .expect("the binary runs");
 
-    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert_eq!(code(&empty), 0, "{}", stderr(&empty));
+    assert_eq!(stdout(&empty), stdout(&unset));
+    assert_eq!(stderr(&empty), stderr(&unset));
 }
 
 #[test]

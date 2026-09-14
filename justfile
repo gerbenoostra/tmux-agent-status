@@ -34,7 +34,10 @@ test:
 # Full region coverage implies full line coverage, so that one bar is enough.
 #
 # A line that cannot be reached says so for itself, with a trailing
-# `// coverage: off` and the reason it is unreachable.
+# `// coverage: off` and the reason it is unreachable. The marker is matched
+# against the whole line, so it exempts every region on that line and not only
+# the one that is uncovered today: keep it to lines that carry nothing else, or
+# say in the comment what else it covers.
 #
 # `src/install/prompt.rs` is the one file excluded, and the exception is kept to
 # one named file so it stays reviewable: it is the only module that knows there
@@ -44,6 +47,7 @@ test:
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
+    command -v jq >/dev/null || { echo "the coverage gate needs jq." >&2; exit 1; }
     ignore='src/install/prompt\.rs$'
     if [[ "{{os()}}" == "macos" ]]; then
         script -q /dev/null cargo llvm-cov --no-report
@@ -55,28 +59,41 @@ coverage:
     echo "The misses above are counted per compilation, not per region; the bar"
     echo "below is the merged region view. See the comment on this recipe."
     report="$(mktemp)"
-    trap 'rm -f "$report"' EXIT
-    cargo llvm-cov report --json --ignore-filename-regex "$ignore" \
-        --output-path "$report" >/dev/null
+    regions="$(mktemp)"
+    trap 'rm -f "$report" "$regions"' EXIT
+    cargo llvm-cov report --json --ignore-filename-regex "$ignore" --output-path "$report"
     # A segment carries [line, column, count, has-count, region-entry, gap].
     # One with a count of zero that is not a gap is a region nothing reached.
+    # Written to a file rather than piped into the loop: a gate that cannot
+    # fail is worse than no gate, and `set -e` does not reach into a process
+    # substitution, so a `jq` that dies there would read as "nothing to report".
+    jq -r '.data[].files[] | .filename as $file
+           | (.segments // [])[]
+           | select(.[3] and .[2] == 0 and (.[5] | not))
+           | "\($file):\(.[0])"' "$report" | sort -u > "$regions"
+    # The same argument: a report naming no file at all is a broken run, not a
+    # clean one.
+    files="$(jq -r '[.data[].files[].filename] | length' "$report")"
+    if (( files == 0 )); then
+        echo "the coverage report names no files; nothing was measured." >&2
+        exit 1
+    fi
     uncovered=0
-    while IFS=: read -r file line; do
-        [[ -n "$file" ]] || continue
+    while IFS= read -r region; do
+        [[ -n "$region" ]] || continue
+        file="${region%:*}"
+        line="${region##*:}"
         if [[ "$(sed -n "${line}p" "$file")" == *'// coverage: off'* ]]; then
             continue
         fi
         echo "uncovered region: $file:$line" >&2
         uncovered=$((uncovered + 1))
-    done < <(jq -r '.data[].files[] | .filename as $file
-                    | (.segments // [])[]
-                    | select(.[3] and .[2] == 0 and (.[5] | not))
-                    | "\($file):\(.[0])"' "$report" | sort -u)
+    done < "$regions"
     if (( uncovered )); then
-        echo "$uncovered uncovered region(s); the bar is all of them." >&2
+        echo "$uncovered uncovered region(s) in $files file(s); the bar is all of them." >&2
         exit 1
     fi
-    echo "Every region of src/ was reached."
+    echo "Every region of src/ was reached, across $files files."
 
 # What CI runs.
 check: fmt-check lint test

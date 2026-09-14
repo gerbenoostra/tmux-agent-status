@@ -332,10 +332,13 @@ impl Agent {
 
     /// The event keys we own, which are the only ones a merge touches.
     ///
-    /// The drop-in is embedded in this binary and `tests/agent_configs.rs`
-    /// asserts that every one of them is a JSON object of events, so this is an
-    /// invariant rather than something that can go wrong at a user's machine.
-    /// A binary that got here would have shipped a broken drop-in.
+    /// The drop-in is embedded in this binary, and
+    /// `every_json_drop_in_parses_as_an_object_of_events` below asserts that
+    /// every one that reaches here is a JSON object - while
+    /// `tests/agent_configs.rs` asserts those embedded bytes are the shipped
+    /// file. Between them this is an invariant rather than something that can
+    /// go wrong at a user's machine: a binary that got here shipped a broken
+    /// drop-in.
     fn events(&self) -> Map<String, Value> {
         let parsed: Value = serde_json::from_str(self.contents).unwrap_or_else(|error| {
             panic!("{}'s embedded drop-in is not JSON: {error}", self.name)
@@ -789,6 +792,23 @@ mod tests {
 
     fn written(plan: Plan) -> String {
         plan.written().expect("the merge produces a write")
+    }
+
+    /// The invariant `events` rests on, held by a test rather than by hope.
+    /// `tests/agent_configs.rs` holds the other half: that these embedded
+    /// bytes are byte-for-byte the file a user is shipped.
+    #[test]
+    fn every_json_drop_in_parses_as_an_object_of_events() {
+        let mut checked = 0;
+        for name in names() {
+            let row = by_name(name).expect("a name from the table resolves");
+            if !matches!(row.shape, Shape::JsonUnderHooks | Shape::JsonTopLevel) {
+                continue;
+            }
+            assert!(!row.events().is_empty(), "{name} carries no events");
+            checked += 1;
+        }
+        assert!(checked > 0, "no JSON drop-ins were checked");
     }
 
     /// The embedded drop-ins are an invariant the drift tests keep, so a
