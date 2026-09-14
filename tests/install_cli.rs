@@ -1065,3 +1065,40 @@ fn a_dry_run_exits_zero_even_when_a_step_cannot_be_planned() {
     );
     assert_eq!(home.entries(), before, "a dry run created something");
 }
+
+// A snippet path holding both a `'` and something double quotes would expand
+// cannot be written into a `source-file` line at all: a stray second argument
+// or an unterminated quote makes tmux abandon the whole config file. Handed
+// back before anything is written, which leaves the user where they started.
+#[test]
+fn a_snippet_path_no_quoting_can_carry_is_handed_back() {
+    let home = TempDir::new("cli-unspellable-snippet");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    fs::write(&config, "set -g status on\n").expect("the config");
+    let snippet = home.join("it's $HOME/tmux-agent-status.conf");
+
+    let out = install(
+        &home,
+        &[
+            "-y",
+            "--tmux-hook",
+            "--snippet",
+            &snippet.display().to_string(),
+        ],
+    );
+
+    // Not a failure: a refusal the user can act on leaves them no worse off.
+    assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
+    let text = stdout(&out);
+    assert!(
+        text.contains("cannot be written into a tmux config line"),
+        "{text}"
+    );
+    assert!(text.contains("--snippet"), "{text}");
+    assert_eq!(
+        fs::read_to_string(&config).expect("the config"),
+        "set -g status on\n",
+        "the config was edited anyway"
+    );
+}

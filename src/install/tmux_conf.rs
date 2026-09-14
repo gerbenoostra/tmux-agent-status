@@ -198,17 +198,42 @@ fn source_argument(line: &str) -> Option<String> {
 ///
 /// Appended at the end: the snippet sets hooks only, and a hook set late is a
 /// hook set, so position does not matter here the way it does for the format.
-pub fn with_source_block(text: &str, snippet: &Path) -> String {
-    append_marked(text, &format!("source-file {}", quote(snippet)))
+/// `None` when the snippet's path cannot be spelled safely, which sends the
+/// step to the manual path like any other line this module will not write.
+pub fn with_source_block(text: &str, snippet: &Path) -> Option<String> {
+    Some(append_marked(
+        text,
+        &format!("source-file {}", quote(snippet)?),
+    ))
 }
 
 /// A path as a tmux config line should spell it.
-fn quote(path: &Path) -> String {
+///
+/// Bare when nothing in it needs quoting, which is the spelling the README
+/// asks the user to paste. Otherwise the choice `format::requote` makes for the
+/// same reasons: single quotes first, because nothing is an escape inside them
+/// and a path is full of things that would otherwise be one; double quotes for
+/// a path that holds a single quote; and `None` for one that defeats both.
+///
+/// The bare case is not a formatting preference. A path with a space in it is
+/// two words to tmux, and a stray second argument makes tmux abandon the whole
+/// config file - so is an unterminated quote, which is what a bare path holding
+/// a `'` is. Either costs the user their entire configuration rather than just
+/// our glyph.
+fn quote(path: &Path) -> Option<String> {
     let text = path.to_string_lossy();
-    match text.contains(' ') && !text.contains('\'') {
-        true => format!("'{text}'"),
-        false => text.into_owned(),
+    if !text.contains([' ', '\t', ';', '#', '\'', '"', '\\', '$', '`']) {
+        return Some(text.into_owned());
     }
+    if !text.contains('\'') {
+        return Some(format!("'{text}'"));
+    }
+    // Inside double quotes tmux resolves escapes and expands `$`, so a path
+    // carrying any of those cannot go in them either.
+    if !text.contains(['"', '$', '`', '\\']) {
+        return Some(format!("\"{text}\""));
+    }
+    None
 }
 
 /// Replace a run of physical lines with one line.
@@ -496,21 +521,50 @@ mod tests {
         let out = with_source_block(
             "set -g status on\n",
             Path::new("/home/u/.config/tmux/tmux-agent-status.conf"),
-        );
+        )
+        .expect("an ordinary path can be spelled");
+        // Bare, which is the spelling the README asks the user to paste.
         assert!(out.contains("source-file /home/u/.config/tmux/tmux-agent-status.conf"));
         assert!(sources_snippet(&out));
         assert!(super::super::has_marked_block(&out));
     }
 
     #[test]
-    fn a_path_with_a_space_is_quoted() {
-        let out = with_source_block("", Path::new("/odd path/tmux-agent-status.conf"));
-        assert!(out.contains("'/odd path/tmux-agent-status.conf'"), "{out}");
-        assert!(sources_snippet(&out));
-        // A path that cannot be single-quoted is left as it is, and tmux's own
-        // parse of it is the answer; the probe is what checks that.
-        let odd = with_source_block("", Path::new("/it's odd/tmux-agent-status.conf"));
-        assert!(odd.contains("/it's odd/"), "{odd}");
+    fn a_path_tmux_would_read_as_two_words_is_quoted() {
+        // A space makes it two arguments, and a stray second argument makes
+        // tmux abandon the whole config file.
+        let spaced = quote(Path::new("/odd path/tmux-agent-status.conf")).expect("single quotes");
+        assert_eq!(spaced, "'/odd path/tmux-agent-status.conf'");
+
+        // A bare `'` opens a quoted section that never closes, which costs the
+        // same config file whether or not there is also a space.
+        let quoted = quote(Path::new("/it's odd/tmux-agent-status.conf")).expect("double quotes");
+        assert_eq!(quoted, "\"/it's odd/tmux-agent-status.conf\"");
+        assert_eq!(
+            quote(Path::new("/it's/tmux-agent-status.conf")),
+            Some("\"/it's/tmux-agent-status.conf\"".to_owned())
+        );
+
+        // So do the rest of what tmux gives a meaning to.
+        for odd in ["/a;b/x.conf", "/a#b/x.conf", "/a\\b/x.conf", "/a$b/x.conf"] {
+            let spelled = quote(Path::new(odd)).expect("single quotes");
+            assert_eq!(spelled, format!("'{odd}'"), "{odd}");
+        }
+
+        // And a path that defeats both quotings is handed back rather than
+        // written: inside double quotes tmux resolves escapes and expands `$`.
+        for hopeless in [
+            "/it's $HOME/x.conf",
+            "/it's \"quoted\"/x.conf",
+            "/it's `x`/x.conf",
+        ] {
+            assert_eq!(quote(Path::new(hopeless)), None, "{hopeless}");
+            assert_eq!(
+                with_source_block("", Path::new(hopeless)),
+                None,
+                "{hopeless}"
+            );
+        }
     }
 
     #[test]

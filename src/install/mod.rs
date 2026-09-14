@@ -261,10 +261,12 @@ impl Rebuild {
                 false => write::Plan::Write(contents.clone()),
             }),
             Rebuild::Agent(agent) => agent.merge(current).map_err(|why| why.to_string()),
-            Rebuild::SourceBlock(snippet) => Ok(match tmux_conf::sources_snippet(current) {
-                true => write::Plan::AlreadyInstalled,
-                false => write::Plan::Write(tmux_conf::with_source_block(current, snippet)),
-            }),
+            Rebuild::SourceBlock(snippet) => match tmux_conf::sources_snippet(current) {
+                true => Ok(write::Plan::AlreadyInstalled),
+                false => tmux_conf::with_source_block(current, snippet)
+                    .map(write::Plan::Write)
+                    .ok_or_else(|| unspellable(snippet)),
+            },
             Rebuild::FormatLine {
                 reported,
                 was,
@@ -632,6 +634,20 @@ fn ordering_notes(relative: &[String]) -> Vec<String> {
             relative.join(", ")
         )],
     }
+}
+
+/// What to say about a snippet path no tmux quoting can carry.
+///
+/// A path holding both a `'` and one of the characters double quotes give a
+/// meaning to. Rare, and the answer is to move the snippet rather than to
+/// write a line that makes tmux abandon the config file it sits in.
+fn unspellable(snippet: &Path) -> String {
+    format!(
+        "{} cannot be written into a tmux config line: it holds both a single quote \
+         and something double quotes would expand.\n    Pass --snippet with a path \
+         that holds neither.",
+        snippet.display()
+    )
 }
 
 /// The two hooks the shipped snippet registers.
@@ -1247,9 +1263,15 @@ impl TmuxPlan {
         if tmux_conf::sources_snippet(&seen.contents) {
             return Action::AlreadyInstalled;
         }
+        // A path no quoting can carry is handed back before anything is
+        // written: a `source-file` line tmux cannot read costs the user the
+        // whole config file, not just our glyph.
+        let Some(preview) = tmux_conf::with_source_block(&seen.contents, snippet) else {
+            return Action::Manual(format!("    {}", unspellable(snippet)));
+        };
         Action::Write(Box::new(Change {
             what: Step::TmuxHook.title().to_owned(),
-            preview: tmux_conf::with_source_block(&seen.contents, snippet),
+            preview,
             rebuild: Rebuild::SourceBlock(snippet.to_path_buf()),
             parses: not_empty,
             creating: !seen.exists,
@@ -1774,6 +1796,14 @@ mod tests {
             Ok(write::Plan::Write("ours\n".to_owned()))
         );
         assert_eq!(whole.apply("ours\n"), Ok(write::Plan::AlreadyInstalled));
+
+        // A snippet path no tmux quoting can carry is a refusal rather than a
+        // line that makes tmux abandon the config file it sits in.
+        assert!(
+            Rebuild::SourceBlock(PathBuf::from("/it's $HOME/tmux-agent-status.conf"))
+                .apply("set -g status on\n")
+                .is_err()
+        );
 
         // The source block, which must see the file as it is at apply time.
         let block = Rebuild::SourceBlock(PathBuf::from("/x/tmux-agent-status.conf"));

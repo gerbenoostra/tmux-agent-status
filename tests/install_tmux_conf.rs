@@ -382,16 +382,16 @@ fn the_source_block_round_trips_through_the_reader_that_looks_for_it() {
     let snippet = dir.join(".config/tmux/tmux-agent-status.conf");
     let before = "set -g status on\n";
 
-    let after = tmux_conf::with_source_block(before, &snippet);
+    let after = tmux_conf::with_source_block(before, &snippet).expect("the path can be spelled");
 
     assert!(!tmux_conf::sources_snippet(before));
     assert!(tmux_conf::sources_snippet(&after));
     assert!(has_marked_block(&after));
     // Appending twice would be two sets of hooks, which is what the
     // idempotency check exists to prevent.
-    assert!(tmux_conf::sources_snippet(&tmux_conf::with_source_block(
-        &after, &snippet
-    )));
+    assert!(tmux_conf::sources_snippet(
+        &tmux_conf::with_source_block(&after, &snippet).expect("the path can be spelled")
+    ));
 }
 
 #[test]
@@ -400,7 +400,8 @@ fn a_sourced_snippet_is_recognised_through_the_walk_as_well() {
     let snippet = dir.write(".tmux/tmux-agent-status.conf", tmux_conf::SNIPPET);
     let entry = dir.write(
         "tmux.conf",
-        &tmux_conf::with_source_block("set -g status on\n", &snippet),
+        &tmux_conf::with_source_block("set -g status on\n", &snippet)
+            .expect("the path can be spelled"),
     );
 
     let text = fs::read_to_string(&entry).expect("the config can be read");
