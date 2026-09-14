@@ -905,23 +905,46 @@ fn summarise(report: &Report, prompt: &dyn prompt::Interaction, options: &Option
     for line in &report.lines {
         prompt.say(&format!("  {line}"));
     }
-    let versioned: Vec<&String> = report
-        .lines
-        .iter()
-        .filter(|line| repo_in_line(line).is_some())
-        .collect();
-    if !versioned.is_empty() {
-        prompt.say("\nSome of those landed in a git repository; the rest live only in $HOME.");
+    if let Some(line) = where_they_landed(&report.lines) {
+        prompt.say(&line);
     }
     if options.steps.agents {
         prompt.say("\nAgents load their hooks at startup: restart any running session.");
     }
 }
 
-/// Whether a summary line names a path inside a git repository.
-fn repo_in_line(line: &str) -> Option<PathBuf> {
-    let path = line.split_whitespace().find(|word| word.starts_with('/'))?;
-    git_repo_of(Path::new(path))
+/// What to say about where the run's writes ended up, or nothing to say.
+///
+/// "Some of those" is false when it was all of them, and a user whose configs
+/// are *all* versioned is the one who most wants to hear which sentence it is.
+/// Lines that name no path at all - the plugin route installs commands rather
+/// than a file - are not counted either way.
+fn where_they_landed(lines: &[String]) -> Option<String> {
+    let landed: Vec<&Path> = lines.iter().filter_map(|line| path_in_line(line)).collect();
+    let versioned = landed
+        .iter()
+        .filter(|path| git_repo_of(path).is_some())
+        .count();
+    match (versioned, landed.len()) {
+        (0, _) => None,
+        (versioned, all) if versioned == all => {
+            Some("\nEvery one of those landed in a git repository.".to_owned())
+        }
+        _ => Some(
+            "\nSome of those landed in a git repository; the rest live only in $HOME.".to_owned(),
+        ),
+    }
+}
+
+/// The path a summary line names, which is its first absolute word.
+///
+/// A line that names two - the target and its backup - is about the target,
+/// which `summary_line` prints first, and prints a comma after when a backup
+/// follows it. The comma is not part of the path.
+fn path_in_line(line: &str) -> Option<&Path> {
+    line.split_whitespace()
+        .find(|word| word.starts_with('/'))
+        .map(|word| Path::new(word.trim_end_matches(',')))
 }
 
 /// Plan the agent step: choose the agents, then work out each one's write.
@@ -1922,6 +1945,40 @@ mod tests {
             ..created
         };
         assert!(summary_line("x", &already).contains("already installed"));
+    }
+
+    #[test]
+    fn the_summary_says_which_of_some_and_all_it_actually_was() {
+        let here = env!("CARGO_MANIFEST_DIR");
+        let versioned = format!("Codex CLI: edited {here}/src/install/mod.rs");
+        let unmanaged = "Cursor: edited /nowhere/at/all/hooks.json".to_owned();
+        // A line naming no path: the plugin route installs commands, not a
+        // file, and it is neither versioned nor unmanaged.
+        let plugin = "Claude Code: plugin installed".to_owned();
+
+        assert_eq!(where_they_landed(&[]), None);
+        assert_eq!(where_they_landed(std::slice::from_ref(&unmanaged)), None);
+        assert_eq!(where_they_landed(std::slice::from_ref(&plugin)), None);
+
+        let all = where_they_landed(&[versioned.clone(), plugin]).expect("something to say");
+        assert!(all.contains("Every one of those"), "{all}");
+
+        let some = where_they_landed(&[versioned, unmanaged]).expect("something to say");
+        assert!(some.contains("Some of those"), "{some}");
+    }
+
+    #[test]
+    fn a_summary_line_names_the_target_before_its_backup() {
+        let line = summary_line(
+            "the term",
+            &write::Written {
+                resolved: PathBuf::from("/home/u/.tmux.conf"),
+                outcome: write::Outcome::Edited,
+                backup: Some(PathBuf::from("/home/u/.tmux.conf.bak-19700101T000000Z")),
+            },
+        );
+        assert_eq!(path_in_line(&line), Some(Path::new("/home/u/.tmux.conf")));
+        assert_eq!(path_in_line("nothing absolute here"), None);
     }
 
     #[test]
