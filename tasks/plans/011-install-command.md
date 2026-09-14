@@ -1,9 +1,8 @@
 # 011 - `install`: write the hooks and configs from the tool
 
-Status: in progress on `feat/install-command`. Implementation code is committed and holds the
-coverage bar; documentation updates are not started. See
-[task_status.md](./011-install-command/task_status.md) for current state, next steps, and pending
-manual checks.
+Status: in progress on `feat/install-command`. All ten work items are implemented and the code holds
+the coverage bar; the manual real-machine checks are what remain. See
+[task_status.md](./011-install-command/task_status.md) for current state and those checks.
 
 For details see
 [implementation steps](./011-install-command/implementation_steps.md)

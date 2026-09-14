@@ -3,7 +3,11 @@
 ## Current state
 
 - Branch: `feat/install-command`
-- Work items 1-9 are implemented and committed. Item 10, documentation, has not started.
+- All ten work items are implemented. `Cargo.toml` already carried both dependencies item 10 asks
+  for, so that item was docs only: the README leads on `install` and keeps the four manual steps,
+  every route in `docs/install.md` ends with the one-liner, `docs/agents/README.md` says which
+  agents are covered and by which of the three deliveries, and the plugin doctor names the
+  repairing command per failing check without ever running it.
 - The coverage gate passes: every region of `src/` is reached, bar five that carry a
   `// coverage: off` marker and the reason they cannot be.
 
@@ -19,9 +23,7 @@
 
 ## Next steps
 
-1. Item 10: documentation. README, `docs/agents/README.md`, `docs/install.md` and the plugin
-   doctor, following the docs-placement rule in `AGENTS.md`.
-2. The manual real-machine checks below.
+The manual real-machine checks below are all that is left before this branch is ready to merge.
 
 ## Manual checks
 
