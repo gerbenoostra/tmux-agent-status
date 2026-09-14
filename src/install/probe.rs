@@ -29,15 +29,6 @@ use super::format;
 /// this is the bound on it.
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Whether there is a tmux to talk to at all.
-///
-/// Every tmux invocation in this plan is optional and its failure is not an
-/// error: installing the config before installing tmux is a legitimate order to
-/// do things in.
-pub fn available() -> bool {
-    run_here(&["-V"]).is_some()
-}
-
 /// What the running server says it would load: candidates, never a decision.
 pub fn config_files() -> Option<String> {
     run_here(&["display-message", "-p", "#{config_files}"])

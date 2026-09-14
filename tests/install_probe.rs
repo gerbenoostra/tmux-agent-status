@@ -17,17 +17,7 @@ use tmux_agent_status::install::probe;
 mod support;
 
 use support::tempdir::TempDir;
-
-/// tmux is installed everywhere this suite runs, and the CI job installs it
-/// before running the tests; a machine without one skips rather than fails,
-/// which is the same promise the tool itself makes.
-fn tmux_or_skip() -> bool {
-    if probe::available() {
-        return true;
-    }
-    eprintln!("no tmux on PATH: skipping");
-    false
-}
+use support::tmux_or_skip;
 
 fn dump(path: &Path) -> probe::Dump {
     probe::dump(path).expect("a throwaway server can be started on the config")

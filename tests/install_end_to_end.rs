@@ -114,14 +114,6 @@ fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-fn tmux_available() -> bool {
-    Command::new("tmux")
-        .arg("-V")
-        .stdin(Stdio::null())
-        .output()
-        .is_ok_and(|out| out.status.success())
-}
-
 /// Wait for a rendered status line to settle, because tmux redraws when it
 /// feels like it rather than when a test would prefer.
 fn wait_for(read: impl Fn() -> String, done: impl Fn(&str) -> bool) -> String {
@@ -140,8 +132,7 @@ fn wait_for(read: impl Fn() -> String, done: impl Fn(&str) -> bool) -> String {
 // `@agent_status` renders in the window entry.
 #[test]
 fn an_installed_config_puts_a_real_glyph_on_a_real_window() {
-    if !tmux_available() {
-        eprintln!("no tmux on PATH: skipping");
+    if !support::tmux_or_skip() {
         return;
     }
     let home = TempDir::new("e2e-format");
@@ -220,8 +211,7 @@ fn an_installed_config_puts_a_real_glyph_on_a_real_window() {
 // produces a working pair.
 #[test]
 fn a_config_with_no_format_line_gets_a_working_pair_from_tmuxs_own_default() {
-    if !tmux_available() {
-        eprintln!("no tmux on PATH: skipping");
+    if !support::tmux_or_skip() {
         return;
     }
     let home = TempDir::new("e2e-default");
@@ -276,8 +266,7 @@ fn a_config_with_no_format_line_gets_a_working_pair_from_tmuxs_own_default() {
 
 #[test]
 fn installing_into_a_config_twice_leaves_exactly_one_of_everything() {
-    if !tmux_available() {
-        eprintln!("no tmux on PATH: skipping");
+    if !support::tmux_or_skip() {
         return;
     }
     let home = TempDir::new("e2e-twice");
@@ -331,8 +320,7 @@ fn installing_into_a_config_twice_leaves_exactly_one_of_everything() {
 // original config still produces its original options.
 #[test]
 fn a_malformed_splice_is_rolled_back_and_the_config_still_works() {
-    if !tmux_available() {
-        eprintln!("no tmux on PATH: skipping");
+    if !support::tmux_or_skip() {
         return;
     }
     let home = TempDir::new("e2e-rollback");
@@ -392,8 +380,7 @@ fn a_malformed_splice_is_rolled_back_and_the_config_still_works() {
 // config the running server actually loads.
 #[test]
 fn the_reload_sources_the_config_into_the_server_that_loads_it() {
-    if !tmux_available() {
-        eprintln!("no tmux on PATH: skipping");
+    if !support::tmux_or_skip() {
         return;
     }
     let home = TempDir::new("e2e-reload");
@@ -434,8 +421,7 @@ fn the_reload_sources_the_config_into_the_server_that_loads_it() {
 
 #[test]
 fn a_reload_tmux_refuses_is_reported_without_undoing_the_edit() {
-    if !tmux_available() {
-        eprintln!("no tmux on PATH: skipping");
+    if !support::tmux_or_skip() {
         return;
     }
     let home = TempDir::new("e2e-reload-refused");
@@ -580,8 +566,7 @@ fn rust_files(dir: &Path) -> Vec<std::path::PathBuf> {
 // see in the diff.
 #[test]
 fn a_splice_a_later_assignment_overrides_is_rolled_back_and_reported() {
-    if !tmux_available() {
-        eprintln!("no tmux on PATH: skipping");
+    if !support::tmux_or_skip() {
         return;
     }
     let home = TempDir::new("e2e-overridden");
@@ -627,8 +612,7 @@ fn a_splice_a_later_assignment_overrides_is_rolled_back_and_reported() {
 // pointing at a file that registers no hooks is a line that does nothing.
 #[test]
 fn a_source_line_pointing_at_a_snippet_that_sets_no_hooks_is_rolled_back() {
-    if !tmux_available() {
-        eprintln!("no tmux on PATH: skipping");
+    if !support::tmux_or_skip() {
         return;
     }
     let home = TempDir::new("e2e-hookless");

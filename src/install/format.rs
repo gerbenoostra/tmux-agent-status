@@ -202,17 +202,6 @@ pub fn assignment(option: &str, value: &str) -> Option<String> {
     ))
 }
 
-/// The same for both options at once, for a config with no format line at all.
-///
-/// Both, always: a term in only one of them makes the glyph vanish the moment
-/// the window becomes current.
-pub fn pair(value: &str) -> Option<String> {
-    OPTIONS
-        .iter()
-        .map(|option| assignment(option, value))
-        .collect()
-}
-
 /// The words of one logical config line, unquoted.
 ///
 /// `None` for a comment, a blank line, a line carrying a second command, or
@@ -789,19 +778,6 @@ mod tests {
     }
 
     #[test]
-    fn the_pair_installs_both_options() {
-        let block = pair(&splice(FALLBACK_DEFAULT)).unwrap();
-        for option in OPTIONS {
-            assert!(
-                block.contains(&format!("set -g {option} '#I:#W{TERM}")),
-                "{option} missing from {block}"
-            );
-        }
-        assert!(block.ends_with('\n'));
-        assert_eq!(block.lines().count(), 2);
-    }
-
-    #[test]
     fn a_single_option_can_be_assigned_on_its_own() {
         // The case of a config that sets one of the two and leaves the other
         // on tmux's default.
@@ -817,14 +793,14 @@ mod tests {
         // The default comes back from tmux rather than from a bare word, so it
         // can hold anything; single quotes are the first choice and double
         // quotes the fallback.
-        assert!(pair("#I:#W").unwrap().contains("'#I:#W'"));
-        assert!(pair("it's").unwrap().contains("\"it's\""));
+        assert!(assignment(OPTIONS[0], "#I:#W").unwrap().contains("'#I:#W'"));
+        assert!(assignment(OPTIONS[0], "it's").unwrap().contains("\"it's\""));
     }
 
     #[test]
-    fn a_pair_value_that_defeats_both_quotes_has_no_block() {
+    fn a_default_that_defeats_both_quotes_has_no_line() {
         for value in ["it's$HOME", "it's\"quoted\"", "it's`x`", "back\\slash"] {
-            assert!(pair(value).is_none(), "value {value:?}");
+            assert!(assignment(OPTIONS[0], value).is_none(), "value {value:?}");
         }
     }
 

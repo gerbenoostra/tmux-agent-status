@@ -522,15 +522,6 @@ fn is_ours(entry: &Value) -> bool {
     }
 }
 
-/// Whether a document mentions us at all, in a way that is neither an entry we
-/// manage nor an entry we would replace.
-///
-/// A comment or a wrapper of the user's own is a warning to review, never a
-/// silent skip.
-pub fn mentions_us(text: &str) -> bool {
-    text.contains("tmux-agent-status")
-}
-
 fn parses_as_json(text: &str) -> bool {
     serde_json::from_str::<Value>(text).is_ok()
 }
@@ -1110,12 +1101,6 @@ mod tests {
             &serde_json::json!({"command": "my-tmux-agent-status-wrapper"})
         ));
         assert!(!is_ours(&serde_json::json!(42)));
-    }
-
-    #[test]
-    fn a_mention_that_is_neither_ours_nor_replaceable_is_still_visible() {
-        assert!(mentions_us("# a wrapper around tmux-agent-status\n"));
-        assert!(!mentions_us("# nothing to do with us\n"));
     }
 
     #[test]
