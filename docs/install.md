@@ -5,11 +5,17 @@ After installing, you need to finish with the configuration setup steps in the [
 to capture agent events, trigger tmux events, and present the glyph.
 The binary on its own does nothing until tmux and your agent know about it.
 
+Those remaining steps are what `tmux-agent-status install` does, so every route below ends with it.
+Each route also spells the steps out by hand, because a generated or read-only configuration is a
+file the installer will refuse to edit, and because it is worth being able to see what would be
+written. `tmux-agent-status install --dry-run` prints the plan and changes nothing.
+
 ## Requirements
 
 tmux 3.0 or newer. The per-pane state is a pane option (`set-option -p`), which 3.0 added; every
 format the tool writes is older than that. Nothing checks the version: on an older tmux the writes
 fail and the hooks stay silent, the same as when tmux cannot be reached at all.
+
 
 ## Choose installation paths
 
@@ -68,6 +74,17 @@ For step 4, the agent configs are in the package at
 `${inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status}/share/agents/<agent>/`.
 Copy or merge the appropriate file as described on [your agent's page](agents/README.md).
 
+Or let the tool do steps 2 to 4, once the package is on your `PATH`:
+
+```sh
+tmux-agent-status install
+```
+
+It finds the snippet inside the Nix store by itself. A `.tmux.conf` that home-manager generates is
+read-only, so the tmux steps will be reported with the lines to add to your home-manager
+configuration instead of being written; the agent steps still apply, for agents whose config files
+you maintain yourself.
+
 ## nix profile
 
 ```sh
@@ -81,6 +98,12 @@ source-file ~/.nix-profile/share/tmux/tmux-agent-status.conf
 
 For step 4, the agent configs are under `~/.nix-profile/share/agents/<agent>/`. Copy or merge the
 appropriate file as described on [your agent's page](agents/README.md).
+
+Or let the tool do steps 2 to 4; it looks under `~/.nix-profile/share` for the snippet:
+
+```sh
+tmux-agent-status install
+```
 
 ## Prebuilt binary
 
@@ -115,6 +138,12 @@ mkdir -p ~/.codex
 cp "tmux-agent-status-$tag-$target/share/agents/codex/hooks.json" ~/.codex/hooks.json
 ```
 
+Or let the tool do steps 2 to 4 instead, pointing it at the snippet you just copied:
+
+```sh
+tmux-agent-status install --snippet "$tmux_conf_dir/tmux-agent-status.conf"
+```
+
 ## cargo
 
 ```sh
@@ -131,6 +160,13 @@ source-file ~/.tmux/tmux-agent-status.conf
 
 For step 4, use `share/agents/<agent>/` from the same checkout or extracted tarball. Copy or merge
 the appropriate file as described on [your agent's page](agents/README.md).
+
+Or let the tool do steps 2 to 4. `cargo install` ships the binary and nothing else, so name the
+snippet you copied:
+
+```sh
+tmux-agent-status install --snippet ~/.tmux/tmux-agent-status.conf
+```
 
 ## From source
 
@@ -157,3 +193,9 @@ source-file ~/.tmux/tmux-agent-status.conf
 
 For step 4, the agent configs are in the checkout under `share/agents/<agent>/`. Copy or merge the
 appropriate file as described on [your agent's page](agents/README.md).
+
+Or let the tool do steps 2 to 4:
+
+```sh
+tmux-agent-status install --snippet "$tmux_conf_dir/tmux-agent-status.conf"
+```

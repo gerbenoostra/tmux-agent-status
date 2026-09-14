@@ -448,6 +448,9 @@ Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every write into a no-op. Set
 
 install flags:
   --agents[=<name>[,<name>...]]  agent hooks; with names, only those agents
+                                 the names need the `=`: a bare `--agents`
+                                 leaves the choice to detection, so a space
+                                 would swallow whatever flag came next
   --tmux-hook                    the source-file line for the shipped snippet
   --tmux-format                  the glyph term in both window status formats
   --no-agents --no-tmux-hook --no-tmux-format

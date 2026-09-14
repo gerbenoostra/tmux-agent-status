@@ -75,6 +75,39 @@ defensively.
 - **Session start / end**: whether events map onto `reset` and `finish`. Agents
 without both keep the known limit that a crashed agent can strand `working`.
 
+## Installing these hooks
+
+`tmux-agent-status install` writes them for you. It covers every agent in the table above that has
+a drop-in file or a settings merge:
+
+`claude-code`, `codex`, `copilot`, `cursor`, `devin`, `droid`, `gemini`, `grok`, `kiro`,
+`mistral-vibe`
+
+An agent is preselected when its config directory exists or its command is on `PATH`; the rest of
+the list is offered as a checklist. Every change is asked about first and every edited file is
+backed up. `--agents=codex,cursor` narrows it to a subset - the `=` is required, because a bare
+`--agents` selects the step and leaves the choice to detection, so `--agents codex` is a usage
+error rather than a selection.
+
+Three deliveries sit behind the one command:
+
+- **A file of its own**, for agents that read a hooks directory. Copilot, Grok and Kiro each get a
+  `tmux-agent-status.json`, and nothing else in the directory is touched.
+- **A merge**, for agents with a single settings file. Codex, Cursor, Devin, Droid, Gemini and
+  Mistral Vibe keep everything the file already held; only our event keys are added, and key order
+  is preserved so the diff is ours alone.
+- **The Claude Code plugin**, which ships its hook config in its own directory, so
+  `~/.claude/settings.json` is not written at all. That is the default whenever `claude` is on
+  `PATH`; without it the run falls back to merging into `settings.json`. `--claude-route=plugin`
+  refuses to fall back, `--claude-route=settings` asks for the merge. See
+  [claude-code.md](claude-code.md).
+
+OpenCode and Antigravity are not covered, because shape C is not implemented.
+
+The per-agent instructions below stay correct and stay supported. They are what to follow when a
+config file is generated or read-only - which the installer reports rather than edits - or when you
+would simply rather place the lines yourself.
+
 ## Shared hook behaviour
 
 These apply to every agent page:
