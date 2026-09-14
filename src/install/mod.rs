@@ -437,9 +437,56 @@ fn worst(a: Outcome, b: Outcome) -> Outcome {
 /// shows up as two changes under two spellings of the same thing.
 fn ours_to_change() -> Vec<String> {
     let mut names: Vec<String> = format::OPTIONS.iter().map(|o| (*o).to_owned()).collect();
-    names.push("session-window-changed".to_owned());
-    names.push("window-pane-changed".to_owned());
+    names.extend(HOOKS.iter().map(|hook| (*hook).to_owned()));
     names
+}
+
+/// What the edit was for, and so what the probe has to find afterwards.
+///
+/// "Nothing unexpected moved" is only half the question, and on its own it is
+/// the half an edit that does nothing passes perfectly: a line spliced where a
+/// later assignment overrides it - an `if-shell` below it, a fragment sourced
+/// after it - leaves the file edited, the run reporting success, and no glyph
+/// anywhere. That is the worst outcome this module has, so the probe is asked
+/// for the other half directly.
+pub enum Landed {
+    /// The hook step: both hooks are registered afterwards, which is what says
+    /// the sourced snippet actually ran.
+    Hooks,
+    /// The format step: these options carry the term afterwards. Per option,
+    /// because the two are written one at a time and the second has not been
+    /// written yet when the first is checked.
+    Term(Vec<String>),
+}
+
+impl Landed {
+    /// Whether what this edit was for is in the dump tmux just gave us.
+    fn found(&self, dumped: &probe::Dump) -> Result<(), String> {
+        match self {
+            Landed::Hooks => match HOOKS
+                .iter()
+                .find(|hook| !dumped.any_value(hook, |set| set.contains(agents::COMMAND_PREFIX)))
+            {
+                None => Ok(()),
+                Some(missing) => Err(format!(
+                    "the source-file line landed, but tmux read the config back without the \
+                     {missing} hook: the file it points at does not set it."
+                )),
+            },
+            Landed::Term(options) => match options
+                .iter()
+                .find(|option| !dumped.any_value(option, format::references_agent_status))
+            {
+                None => Ok(()),
+                Some(option) => Err(format!(
+                    "the edit landed, but tmux still reads {option} without the term: \
+                     something further down the config assigns it again and wins.\n  \
+                     Add {} to that assignment by hand.",
+                    format::TERM
+                )),
+            },
+        }
+    }
 }
 
 /// The semantic check for a tmux step: start a throwaway server on the config
@@ -453,6 +500,9 @@ pub struct TmuxVerify {
     pub baseline: probe::Dump,
     /// The option and hook names allowed to differ.
     pub expected: Vec<String>,
+    /// What this edit was for, which is the half of the question that
+    /// "nothing unexpected moved" cannot answer.
+    pub landed: Landed,
 }
 
 impl write::Verify for TmuxVerify {
@@ -488,19 +538,26 @@ impl write::Verify for TmuxVerify {
         let unexpected: Vec<String> = moved
             .into_iter()
             .map(|change| change.name)
-            .filter(|name| !self.expected.contains(&without_index(name)))
+            .filter(|name| {
+                !self
+                    .expected
+                    .iter()
+                    .any(|ours| ours == probe::without_index(name))
+            })
             .collect();
-        match unexpected.is_empty() {
-            true => Ok(()),
+        if !unexpected.is_empty() {
             // Everything reverting at once is what an abandoned config looks
             // like, and it costs the user their whole configuration rather
             // than just our glyph.
-            false => Err(format!(
+            return Err(format!(
                 "tmux read the edited config back differently than we meant: {} \
                  also changed. A config tmux cannot parse is abandoned whole.",
                 unexpected.join(", ")
-            )),
+            ));
         }
+        // And the other half: that what the edit was *for* is there. An edit
+        // that changed nothing at all passes every check above.
+        self.landed.found(&candidate)
     }
 }
 
@@ -548,16 +605,12 @@ fn system_wide_note(listed: Option<&str>, exists: impl Fn(&Path) -> bool) -> Str
         .collect()
 }
 
-/// A hook name with its `[index]` removed.
+/// The two hooks the shipped snippet registers.
 ///
-/// tmux reports an unset hook under its bare name and a set one under
-/// `name[index]`, so one edit shows up as two changes under two spellings of
-/// the same thing.
-fn without_index(name: &str) -> String {
-    name.split_once('[')
-        .map_or(name, |(head, _)| head)
-        .to_owned()
-}
+/// Named here as well as in the snippet because this is the list the probe
+/// checks actually arrived: a `source-file` line pointing at something that
+/// sets neither of them is a line that does nothing.
+const HOOKS: [&str; 2] = ["session-window-changed", "window-pane-changed"];
 
 /// Run the whole thing.
 ///
@@ -1148,7 +1201,7 @@ impl TmuxPlan {
             parses: not_empty,
             creating: !seen.exists,
             notes: self.probe_notes(),
-            verify: self.verification(),
+            verify: self.verification(Landed::Hooks),
             path: seen.resolved,
         }))
     }
@@ -1246,7 +1299,7 @@ impl TmuxPlan {
                 notes.extend(self.probe_notes());
                 notes
             },
-            verify: self.verification(),
+            verify: self.verification(TmuxPlan::term_in(option)),
             path: seen.resolved,
         }))
     }
@@ -1323,7 +1376,7 @@ impl TmuxPlan {
                 notes.extend(self.probe_notes());
                 notes
             },
-            verify: self.verification(),
+            verify: self.verification(TmuxPlan::term_in(option)),
             path: seen.resolved,
         }))
     }
@@ -1358,7 +1411,9 @@ impl TmuxPlan {
                 notes.extend(self.probe_notes());
                 notes
             },
-            verify: self.verification(),
+            verify: self.verification(Landed::Term(
+                format::OPTIONS.iter().map(|o| (*o).to_owned()).collect(),
+            )),
             path: seen.resolved,
         }))
     }
@@ -1377,12 +1432,18 @@ impl TmuxPlan {
         proposed
     }
 
-    fn verification(&self) -> Option<TmuxVerify> {
+    fn verification(&self, landed: Landed) -> Option<TmuxVerify> {
         Some(TmuxVerify {
             entry: self.config.path().to_path_buf(),
             baseline: self.baseline.clone()?,
             expected: ours_to_change(),
+            landed,
         })
+    }
+
+    /// The landing check for one option's edit.
+    fn term_in(option: &str) -> Landed {
+        Landed::Term(vec![option.to_owned()])
     }
 
     fn probe_notes(&self) -> Vec<String> {
@@ -1721,24 +1782,6 @@ mod tests {
         assert!(system_wide_note(Some("~/.tmux.conf"), |_| true).is_empty());
         // And no listing at all says nothing rather than guessing.
         assert!(system_wide_note(None, |_| true).is_empty());
-    }
-
-    #[test]
-    fn a_hooks_index_is_not_part_of_its_name() {
-        // tmux reports an unset hook bare and a set one indexed, so one edit
-        // shows up as two changes under two spellings of the same thing.
-        assert_eq!(
-            without_index("session-window-changed[50]"),
-            "session-window-changed"
-        );
-        assert_eq!(
-            without_index("session-window-changed"),
-            "session-window-changed"
-        );
-        assert_eq!(
-            without_index("window-status-format"),
-            "window-status-format"
-        );
     }
 
     #[test]

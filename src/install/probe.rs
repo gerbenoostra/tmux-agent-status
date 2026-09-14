@@ -94,6 +94,28 @@ impl Dump {
             })
             .collect()
     }
+
+    /// Whether anything tmux reads under `name` satisfies `holds`.
+    ///
+    /// Any, rather than the first: one name can appear more than once, because
+    /// tmux reports an unset hook bare and a set one under `name[index]`, and
+    /// the bare spelling sorts first. Asking "is there one that holds" is the
+    /// question either way.
+    pub fn any_value(&self, name: &str, holds: impl Fn(&str) -> bool) -> bool {
+        self.named()
+            .into_iter()
+            .filter(|(found, _)| without_index(found) == name)
+            .any(|(_, value)| holds(value))
+    }
+}
+
+/// A hook name with its `[index]` removed.
+///
+/// tmux reports an unset hook under its bare name and a set one under
+/// `name[index]`, so one edit shows up as two changes under two spellings of
+/// the same thing.
+pub fn without_index(name: &str) -> &str {
+    name.split_once('[').map_or(name, |(head, _)| head)
 }
 
 /// One option or hook whose value the edit moved.
@@ -422,6 +444,43 @@ mod tests {
         ]);
 
         assert_eq!(changes(&before, &defaults).len(), 2);
+    }
+
+    #[test]
+    fn a_hooks_index_is_not_part_of_its_name() {
+        // tmux reports an unset hook bare and a set one indexed, so one edit
+        // shows up as two changes under two spellings of the same thing.
+        assert_eq!(
+            without_index("session-window-changed[50]"),
+            "session-window-changed"
+        );
+        assert_eq!(
+            without_index("session-window-changed"),
+            "session-window-changed"
+        );
+        assert_eq!(
+            without_index("window-status-format"),
+            "window-status-format"
+        );
+    }
+
+    #[test]
+    fn a_name_is_looked_up_at_whatever_index_tmux_gave_it() {
+        // The bare spelling sorts first, so taking the first match would read
+        // an unset hook's empty value as the answer for the set one below it.
+        let dump = dump_of(&[
+            "session-window-changed",
+            "session-window-changed[50] run-shell -b \"tmux-agent-status clear-window\"",
+            "window-status-format \"#I:#W\"",
+        ]);
+        assert!(dump.any_value("session-window-changed", |set| {
+            set.contains("tmux-agent-status")
+        }));
+        assert!(dump.any_value("window-status-format", |value| value.contains("#I:#W")));
+        assert!(!dump.any_value("window-status-format", |value| {
+            value.contains("@agent_status")
+        }));
+        assert!(!dump.any_value("status-left", |_| true));
     }
 
     #[test]

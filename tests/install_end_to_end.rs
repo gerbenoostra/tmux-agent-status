@@ -571,3 +571,95 @@ fn rust_files(dir: &Path) -> Vec<std::path::PathBuf> {
     }
     found
 }
+
+// An edit that changes the file and changes nothing about tmux. Checking that
+// nothing *unexpected* moved passes such an edit perfectly, so the probe is
+// asked for what the edit was for as well: without that, this run reported
+// both options installed, exited 0, and left a config whose effective format
+// carries no term - a successful-looking install with no glyph and nothing to
+// see in the diff.
+#[test]
+fn a_splice_a_later_assignment_overrides_is_rolled_back_and_reported() {
+    if !tmux_available() {
+        eprintln!("no tmux on PATH: skipping");
+        return;
+    }
+    let home = TempDir::new("e2e-overridden");
+    let config = home.write(
+        ".config/tmux/tmux.conf",
+        "set -g status on\n\
+         set -g window-status-format '#I:#W'\n\
+         set -g window-status-current-format '#I:#W'\n\
+         if-shell 'true' 'set -g window-status-format \"#I:#W-late\"'\n\
+         if-shell 'true' 'set -g window-status-current-format \"#I:#W-late\"'\n",
+    );
+    let before = fs::read_to_string(&config).expect("the config");
+
+    let out = install(
+        &home,
+        &[
+            "-y",
+            "--tmux-format",
+            "--tmux-config",
+            &config.display().to_string(),
+        ],
+    );
+
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    let text = stdout(&out);
+    assert!(
+        text.contains("still reads window-status-format without the term"),
+        "{text}"
+    );
+    // The term to add, so the user is left holding what they need.
+    assert!(
+        text.contains("#{?@agent_status, #{@agent_status},}"),
+        "{text}"
+    );
+    assert_eq!(
+        fs::read_to_string(&config).expect("the config"),
+        before,
+        "the rejected edit was not rolled back"
+    );
+}
+
+// The same half of the question for the hook step: a `source-file` line
+// pointing at a file that registers no hooks is a line that does nothing.
+#[test]
+fn a_source_line_pointing_at_a_snippet_that_sets_no_hooks_is_rolled_back() {
+    if !tmux_available() {
+        eprintln!("no tmux on PATH: skipping");
+        return;
+    }
+    let home = TempDir::new("e2e-hookless");
+    let config = home.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let snippet = home.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "# a snippet that sets no hooks at all\n",
+    );
+    let before = fs::read_to_string(&config).expect("the config");
+
+    let out = install(
+        &home,
+        &[
+            "-y",
+            "--tmux-hook",
+            "--tmux-config",
+            &config.display().to_string(),
+            "--snippet",
+            &snippet.display().to_string(),
+        ],
+    );
+
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("without the session-window-changed hook"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(
+        fs::read_to_string(&config).expect("the config"),
+        before,
+        "the rejected edit was not rolled back"
+    );
+}
