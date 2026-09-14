@@ -44,3 +44,8 @@ a state file, never edit any config file, and never spawn a daemon. The one exce
 ## Development
 
 Run development tools within the shell `nix develop` creates, or use `. "$HOME/.cargo/env" && [cmd]`.
+
+## Docs Placement
+
+Agent/tool setup documentation goes in the agent-setup section (`docs/agents/`), not `docs/install.md`.
+Per-agent config docs follow the naming of the sibling agent docs (e.g. `claude-code.md`), not `CLAUDE.md`.
