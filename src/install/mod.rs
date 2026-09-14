@@ -380,6 +380,8 @@ pub enum Outcome {
 pub struct Report {
     pub lines: Vec<String>,
     outcomes: Vec<(Step, Outcome)>,
+    /// Whether this run wrote nothing whatever it found.
+    dry_run: bool,
 }
 
 impl Report {
@@ -397,11 +399,17 @@ impl Report {
 
     /// 0 when every requested step is installed or was already; 1 when at
     /// least one failed, with every file it touched back the way it was.
+    ///
+    /// A dry run is always 0. Nothing ran, so nothing failed: what it printed
+    /// is a plan, and a step it could not plan is part of the plan rather than
+    /// a step that went wrong. The outcomes are still recorded, because the
+    /// printed plan is built from them.
     pub fn exit_code(&self) -> u8 {
-        match self
-            .outcomes
-            .iter()
-            .any(|(_, outcome)| *outcome == Outcome::Failed)
+        match !self.dry_run
+            && self
+                .outcomes
+                .iter()
+                .any(|(_, outcome)| *outcome == Outcome::Failed)
         {
             true => 1,
             false => 0,
@@ -674,6 +682,7 @@ pub fn run(options: &Options, prompt: &dyn prompt::Interaction) -> Report {
 
     if prompt.is_dry_run() {
         prompt.say("\n--dry-run: nothing above was written.");
+        report.dry_run = true;
         return report;
     }
 
@@ -1695,6 +1704,26 @@ mod tests {
         assert_eq!(report.outcome(Step::Agents), Some(Outcome::Failed));
 
         assert_eq!(report.outcome(Step::TmuxHook), None);
+        assert_eq!(report.exit_code(), 1);
+    }
+
+    #[test]
+    fn a_dry_run_exits_zero_even_when_it_could_not_plan_a_step() {
+        // Nothing ran, so nothing failed: what a dry run prints is a plan, and
+        // a step it could not plan is part of that plan. Exiting 1 told a
+        // caller a file had been touched and put back, which is the one thing
+        // that certainly did not happen.
+        let mut report = Report {
+            dry_run: true,
+            ..Report::default()
+        };
+        report.record(Step::Agents, Outcome::Failed);
+        assert_eq!(report.exit_code(), 0);
+        // And the outcome is still there, because the plan is printed from it.
+        assert_eq!(report.outcome(Step::Agents), Some(Outcome::Failed));
+
+        // The same outcomes in a real run are what exit 1 is for.
+        report.dry_run = false;
         assert_eq!(report.exit_code(), 1);
     }
 

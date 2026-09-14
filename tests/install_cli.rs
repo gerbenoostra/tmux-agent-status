@@ -1037,3 +1037,31 @@ fn a_relative_source_is_followed_from_home_and_the_guess_is_reported() {
         "the fragment beside the config was edited"
     );
 }
+
+// A dry run that cannot plan a step still exits 0. Nothing ran, so nothing
+// failed, and exit 1 told a caller that a file had been touched and put back -
+// the one thing a dry run certainly did not do.
+#[test]
+fn a_dry_run_exits_zero_even_when_a_step_cannot_be_planned() {
+    let home = TempDir::new("cli-dry-run-unplannable");
+    let before = home.entries();
+
+    // The plugin route asked for by name, with no `claude` to take it.
+    let out = command(
+        &home,
+        &["--dry-run", "--agents=claude-code", "--claude-route=plugin"],
+    )
+    .env("PATH", only(&home.join("nothing")))
+    .output()
+    .expect("the binary runs");
+
+    assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
+    let text = stdout(&out);
+    // The step it could not plan is still part of the plan it printed.
+    assert!(text.contains("is not on PATH"), "{text}");
+    assert!(
+        text.contains("--dry-run: nothing above was written."),
+        "{text}"
+    );
+    assert_eq!(home.entries(), before, "a dry run created something");
+}
