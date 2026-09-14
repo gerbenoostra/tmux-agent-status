@@ -302,8 +302,8 @@ fn run_here(args: &[&str]) -> Option<String> {
 /// `$TMUX` is cleared so a probe started from inside tmux cannot reach the
 /// server it is running in, and the working directory is `$HOME` because tmux
 /// resolves a relative `source-file` against the process's cwd rather than the
-/// config's - verified, and the reason a config using relative source paths is
-/// reported rather than silently mis-resolved.
+/// config's - verified. The walk in `tmux_conf` resolves one the same way, so
+/// the two read the same files, and reports that it had to guess.
 fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, String, String)> {
     // The test-only switch, shared with the rest of `install`: a tmux that
     // stops answering partway through a sequence is a thing that happens and

@@ -26,7 +26,8 @@ fn home_in(dir: &TempDir) -> Home {
 
 /// The values assigned by every format line the walk found, in order.
 fn values(entry: &Path) -> Vec<String> {
-    tmux_conf::assignments(entry)
+    tmux_conf::walk(entry)
+        .assignments
         .into_iter()
         .filter_map(|found| found.candidate.line())
         .map(|line| line.raw)
@@ -230,7 +231,7 @@ fn a_refused_line_is_still_reported_so_it_can_be_handed_back() {
         "set -g window-status-format 'a' ; set -g status on\n",
     );
 
-    let found = tmux_conf::assignments(&entry);
+    let found = tmux_conf::walk(&entry).assignments;
     assert_eq!(found.len(), 1);
     assert!(matches!(&found[0].candidate, Candidate::Refused { .. }));
     assert_eq!(found[0].option(), Some("window-status-format"));
@@ -287,12 +288,45 @@ fn a_glob_is_expanded_and_sorted() {
 }
 
 #[test]
-fn a_relative_source_resolves_against_the_config_it_sits_in() {
+fn a_relative_source_is_reported_and_never_read_from_beside_the_config() {
+    // tmux resolves a relative `source-file` against the directory the server
+    // was started in, not against the config file's own. Reading it from
+    // beside the config is the one answer that is wrong for every layout but
+    // `~/.tmux.conf`, and it is wrong silently: the walk picks a winner out of
+    // a file tmux never read. So it is resolved from `$HOME`, which is where
+    // the probe puts its cwd, and the guess is reported.
     let dir = TempDir::new("order-relative");
-    dir.write("fragment.conf", "set -g window-status-format 'relative'\n");
-    let entry = dir.write("tmux.conf", "source-file fragment.conf\n");
+    dir.write(
+        "order-relative-fragment.conf",
+        "set -g window-status-format 'beside the config'\n",
+    );
+    let entry = dir.write("tmux.conf", "source-file order-relative-fragment.conf\n");
 
-    assert_eq!(values(&entry), ["relative"]);
+    let found = tmux_conf::walk(&entry);
+    assert!(
+        found.assignments.is_empty(),
+        "the fragment beside the config was read: {:?}",
+        found.assignments
+    );
+    assert_eq!(found.relative_sources, ["order-relative-fragment.conf"]);
+}
+
+#[test]
+fn an_absolute_or_tilde_source_is_not_reported_as_a_guess() {
+    let dir = TempDir::new("order-absolute");
+    let fragment = dir.write("fragment.conf", "set -g window-status-format 'absolute'\n");
+    let entry = dir.write(
+        "tmux.conf",
+        &format!("source-file {}\n", fragment.display()),
+    );
+
+    let found = tmux_conf::walk(&entry);
+    assert_eq!(values(&entry), ["absolute"]);
+    assert!(
+        found.relative_sources.is_empty(),
+        "{:?}",
+        found.relative_sources
+    );
 }
 
 #[test]
@@ -308,14 +342,18 @@ fn a_source_of_something_that_is_not_there_is_not_an_error() {
 
 #[test]
 fn a_config_that_is_not_there_at_all_yields_nothing() {
-    assert!(tmux_conf::assignments(Path::new("/nowhere/at/all.conf")).is_empty());
+    assert!(
+        tmux_conf::walk(Path::new("/nowhere/at/all.conf"))
+            .assignments
+            .is_empty()
+    );
 }
 
 #[test]
 fn a_config_that_assigns_nothing_yields_nothing() {
     let dir = TempDir::new("order-empty");
     let entry = dir.write("tmux.conf", "set -g status on\n# a comment\n\n");
-    assert!(tmux_conf::assignments(&entry).is_empty());
+    assert!(tmux_conf::walk(&entry).assignments.is_empty());
 }
 
 #[test]

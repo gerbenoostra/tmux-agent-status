@@ -248,18 +248,35 @@ impl Assignment {
     }
 }
 
-/// Every format assignment tmux would execute, in the order it executes them.
+/// What walking a config found.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Walked {
+    /// Every format assignment tmux would execute, in the order it executes
+    /// them. The last one for a given option is the one that wins, and so the
+    /// one to edit.
+    pub assignments: Vec<Assignment>,
+    /// The relative `source-file` arguments met on the way.
+    ///
+    /// tmux resolves these against the working directory of whatever started
+    /// the server, which is not knowable from here. They are followed from
+    /// `$HOME`, which is where the probe puts its own cwd so that the walk and
+    /// the check that marks its homework agree - and they are reported,
+    /// because a server started from somewhere else read different files and
+    /// may have a different winner.
+    pub relative_sources: Vec<String>,
+}
+
+/// Walk a config the way tmux executes it.
 ///
-/// The last one for a given option is the one that wins, and so the one to
-/// edit. Globs are expanded and sorted; a cycle is caught by the visited set.
-pub fn assignments(entry: &Path) -> Vec<Assignment> {
-    let mut found = Vec::new();
+/// Globs are expanded and sorted; a cycle is caught by the visited set.
+pub fn walk(entry: &Path) -> Walked {
+    let mut found = Walked::default();
     let mut visited = Vec::new();
-    walk(entry, 0, &mut visited, &mut found);
+    descend(entry, 0, &mut visited, &mut found);
     found
 }
 
-fn walk(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Vec<Assignment>) {
+fn descend(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Walked) {
     if depth > MAX_DEPTH {
         return;
     }
@@ -275,14 +292,17 @@ fn walk(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Vec<A
         // Descend at the point the `source-file` appears, because that is when
         // tmux runs it, and a fragment sourced early loses to a line below it.
         if let Some(argument) = source_argument(&line.text) {
-            for sourced in expand(&argument, &resolved) {
-                walk(&sourced, depth + 1, visited, found);
+            if is_relative(&argument) && !found.relative_sources.contains(&argument) {
+                found.relative_sources.push(argument.clone());
+            }
+            for sourced in expand(&argument) {
+                descend(&sourced, depth + 1, visited, found);
             }
             continue;
         }
         let candidate = format::parse(&line.text);
         if candidate != Candidate::NotOurs {
-            found.push(Assignment {
+            found.assignments.push(Assignment {
                 file: resolved.clone(),
                 line,
                 candidate,
@@ -291,23 +311,36 @@ fn walk(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Vec<A
     }
 }
 
+/// Whether a `source-file` argument is one tmux has to resolve against a
+/// working directory.
+fn is_relative(argument: &str) -> bool {
+    !argument.starts_with('/') && !argument.starts_with("~/")
+}
+
 /// The files a `source-file` argument names, sorted.
 ///
-/// `~` is expanded, a relative path resolves against the process's working
-/// directory rather than the config's - verified, and the reason the probe runs
-/// with its cwd set to `$HOME` - and a trailing-component glob is expanded by
-/// reading the directory and sorting, the way tmux sorts it.
-fn expand(argument: &str, from: &Path) -> Vec<PathBuf> {
-    let path = match (argument.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(tail), Some(home)) => PathBuf::from(home).join(tail),
+/// `~` is expanded and a trailing-component glob is expanded by reading the
+/// directory and sorting, the way tmux sorts it.
+///
+/// A relative path is resolved against `$HOME`. Verified: tmux resolves it
+/// against the working directory of the process that started the server, not
+/// against the config file's own directory, so the config's directory would be
+/// wrong for every layout but `~/.tmux.conf`. `$HOME` is both the common case
+/// for a server started from a login shell and the cwd the probe runs with, so
+/// the walk and the check that marks its homework read the same files. The
+/// guess is reported either way; see `Walked::relative_sources`.
+fn expand(argument: &str) -> Vec<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let path = match (argument.strip_prefix("~/"), &home) {
+        (Some(tail), Some(home)) => home.join(tail),
         _ => PathBuf::from(argument),
     };
-    let path = match path.is_absolute() {
-        true => path,
-        // A relative path is tmux's to resolve against its own cwd. We are not
-        // tmux, so the config's directory is the only guess worth making, and
-        // the plan says the case is reported rather than silently resolved.
-        false => from.parent().unwrap_or(Path::new(".")).join(&path),
+    let path = match (path.is_absolute(), &home) {
+        (true, _) => path,
+        (false, Some(home)) => home.join(&path),
+        // A process with no `$HOME` has nothing to resolve against, so the
+        // path stands as the config wrote it.
+        (false, None) => path,
     };
     let Some(pattern) = glob_pattern(&path) else {
         return vec![path];

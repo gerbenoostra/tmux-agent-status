@@ -994,3 +994,46 @@ fn a_format_line_split_over_continuations_is_spliced_like_any_other() {
     // the formatting change the confirmation discloses.
     assert!(!after.contains('\\'), "a continuation survived:\n{after}");
 }
+
+// A relative `source-file` is tmux's to resolve against the directory the
+// server was started in, which is `$HOME` for a server started from a login
+// shell and the cwd the probe runs with. Resolving it from beside the config
+// instead picked a winner out of a file tmux never read, and then spliced the
+// term into a line tmux discards.
+#[test]
+fn a_relative_source_is_followed_from_home_and_the_guess_is_reported() {
+    let home = TempDir::new("cli-relative-source");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    fs::write(
+        &config,
+        "set -g window-status-format '#I:#W'\n\
+         set -g window-status-current-format '#I:#W'\n\
+         source-file fragment.conf\n",
+    )
+    .expect("the config");
+    // Beside the config as well as in $HOME, so that reading the wrong one is
+    // a failure rather than an accident of which file exists.
+    let beside = home.join(".config/tmux/fragment.conf");
+    fs::write(&beside, "set -g window-status-format '#I:#W-beside'\n").expect("the decoy");
+    let from_home = home.join("fragment.conf");
+    fs::write(&from_home, "set -g window-status-format '#I:#W-home'\n").expect("the fragment");
+
+    let out = install(&home, &["-y", "--tmux-format"]);
+
+    assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
+    // The guess is disclosed before anything is written.
+    assert!(stdout(&out).contains("relative path"), "{}", stdout(&out));
+    // The winning assignment is the one in the fragment tmux would have read,
+    // and it is the one that gained the term.
+    let edited = fs::read_to_string(&from_home).expect("the fragment");
+    assert!(
+        edited.contains("#{?@agent_status, #{@agent_status},}"),
+        "the fragment $HOME holds was not the one edited:\n{edited}"
+    );
+    assert_eq!(
+        fs::read_to_string(&beside).expect("the decoy"),
+        "set -g window-status-format '#I:#W-beside'\n",
+        "the fragment beside the config was edited"
+    );
+}
