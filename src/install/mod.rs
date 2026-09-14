@@ -227,11 +227,18 @@ pub enum Rebuild {
     /// Append the marked `source-file` block.
     SourceBlock(PathBuf),
     /// Replace one logical line with the spliced version of itself.
+    ///
+    /// The line is found again by its own text rather than by the number the
+    /// plan recorded. Two things move a number: a logical line spans as many
+    /// physical lines as it has continuations, and the *other* format target
+    /// writes the same file first and may have collapsed such a run above this
+    /// one. Matching the text answers the question the plan actually asks -
+    /// is the line we read still there - at every line number it can be at.
     FormatLine {
-        first: usize,
-        last: usize,
-        /// The line as it was when the plan was made. If the file has moved
-        /// under us, the bytes are not the ones we read and nothing is written.
+        /// Where the plan found it, for the message when it has gone.
+        reported: usize,
+        /// The logical line as it was when the plan was made. Gone, and
+        /// nothing is written: the bytes are not the ones we read.
         was: String,
         with: String,
     },
@@ -259,26 +266,25 @@ impl Rebuild {
                 false => write::Plan::Write(tmux_conf::with_source_block(current, snippet)),
             }),
             Rebuild::FormatLine {
-                first,
-                last,
+                reported,
                 was,
                 with,
             } => {
-                let found: Vec<&str> = current.lines().collect();
-                // The line numbers were worked out before the confirmation, and
-                // another step may have written the same file since. Appending
-                // at the end leaves earlier lines where they were, which is
-                // what both other writers do - but check rather than assume,
-                // because the cost of being wrong is a line tmux discards.
-                if found.get(*first).is_none_or(|line| line != &first_of(was)) {
+                // The last one carrying those bytes, for the same reason the
+                // plan chose the last assignment: that is the one tmux ends up
+                // honouring. Gone entirely, and nothing is written, because the
+                // cost of being wrong is a line tmux discards.
+                let Some(line) = format::logical_lines(current)
+                    .into_iter()
+                    .rfind(|line| &line.text == was)
+                else {
                     return Err(format!(
-                        "{} moved under us: line {} is no longer the one we read",
-                        "the config",
-                        first + 1
+                        "the config moved under us: line {} is no longer the one we read",
+                        reported + 1
                     ));
-                }
+                };
                 Ok(write::Plan::Write(tmux_conf::replace_lines(
-                    current, *first, *last, with,
+                    current, line.first, line.last, with,
                 )))
             }
             Rebuild::Adopt(agent) => Ok(match has_marked_block(current) {
@@ -309,11 +315,6 @@ fn already_carries_the_term(text: &str, option: &str) -> bool {
         .iter()
         .filter_map(|line| format::parse(&line.text).line())
         .any(|line| line.option == option && line.already_installed())
-}
-
-/// The first physical line of a logical one.
-fn first_of(logical: &str) -> &str {
-    logical.split('\n').next().unwrap_or(logical)
 }
 
 /// One planned piece of work.
@@ -1303,8 +1304,7 @@ impl TmuxPlan {
                 &rewritten,
             ),
             rebuild: Rebuild::FormatLine {
-                first: last.line.first,
-                last: last.line.last,
+                reported: last.line.first,
                 was: last.line.text.clone(),
                 // The fault hands the writer a deliberately malformed splice -
                 // a stray argument after the value, which is what a quoting
@@ -1657,8 +1657,7 @@ mod tests {
     #[test]
     fn a_format_line_that_moved_under_us_is_not_rewritten() {
         let rebuild = Rebuild::FormatLine {
-            first: 1,
-            last: 1,
+            reported: 1,
             was: "set -g window-status-format 'x'".to_owned(),
             with: "set -g window-status-format 'x!'".to_owned(),
         };
@@ -1668,17 +1667,44 @@ mod tests {
             "set -g status on\nset -g window-status-format 'x!'\n"
         );
 
-        // Another step wrote the file and the line is no longer where it was.
-        // Nothing is written, because the cost of being wrong is a line tmux
-        // discards in silence.
+        // Another step wrote the file and the line is gone. Nothing is
+        // written, because the cost of being wrong is a line tmux discards in
+        // silence.
         assert!(rebuild.apply("set -g status on\n").is_err());
         assert!(rebuild.apply("one\ntwo\nthree\n").is_err());
+
+        // But a line that merely moved is still the line we read. The other
+        // format target writes this same file first, and collapsing a run of
+        // continuations above this one shifts every number below it.
+        assert_eq!(
+            rebuild
+                .apply("set -g status on\nset -g other 'y'\nset -g window-status-format 'x'\n")
+                .unwrap()
+                .written()
+                .unwrap(),
+            "set -g status on\nset -g other 'y'\nset -g window-status-format 'x!'\n"
+        );
     }
 
     #[test]
-    fn a_continuation_is_matched_on_the_line_it_started() {
-        assert_eq!(first_of("set -g x \\\ncontinued"), "set -g x \\");
-        assert_eq!(first_of("single"), "single");
+    fn a_line_spread_over_continuations_is_still_the_line_we_read() {
+        // The plan records the *logical* line, which `logical_lines` joins with
+        // its backslashes and newlines removed. Matching that against one
+        // physical line can never succeed, and the whole continuation path -
+        // parsed, spliced, collapsed by `replace_lines` - was unreachable
+        // because of it: the step failed with "the config moved under us" on a
+        // file nothing had touched.
+        let rebuild = Rebuild::FormatLine {
+            reported: 1,
+            was: "set -g window-status-format   'x'".to_owned(),
+            with: "set -g window-status-format 'x!'".to_owned(),
+        };
+        let wrapped =
+            "set -g status on\nset -g window-status-format \\\n  'x'\nset -g status-left 'L'\n";
+        assert_eq!(
+            rebuild.apply(wrapped).unwrap().written().unwrap(),
+            "set -g status on\nset -g window-status-format 'x!'\nset -g status-left 'L'\n"
+        );
     }
 
     #[test]

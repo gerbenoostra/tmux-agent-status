@@ -953,3 +953,44 @@ fn the_help_text_documents_the_subcommand_and_its_flags() {
         assert!(text.contains(name), "{name} is not listed: {text}");
     }
 }
+
+// A format line spread over continuations is still a line the splice can
+// rewrite. Matching the joined logical line against one physical line never
+// succeeded, so the step failed with "the config moved under us" on a file
+// nothing had touched - and when only one of the two options wrapped, the run
+// left the term in exactly one of them, which is the arrangement that makes
+// the glyph vanish the moment the window becomes current.
+#[test]
+fn a_format_line_split_over_continuations_is_spliced_like_any_other() {
+    let home = TempDir::new("cli-continuation");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    fs::write(
+        &config,
+        "set -g status on\n\
+         set -g window-status-format \\\n  '#I:#W'\n\
+         set -g window-status-current-format '#I:#W'\n",
+    )
+    .expect("the config");
+
+    let out = install(&home, &["-y", "--tmux-format"]);
+
+    assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
+    assert!(!stdout(&out).contains("moved under us"), "{}", stdout(&out));
+    let after = fs::read_to_string(&config).expect("the config");
+    // Both options, because a term in only one of them is the arrangement this
+    // whole step exists to avoid.
+    for option in ["window-status-format", "window-status-current-format"] {
+        let assigned = after
+            .lines()
+            .find(|line| line.contains(&format!("set -g {option} ")))
+            .unwrap_or_else(|| panic!("{option} is not assigned:\n{after}"));
+        assert!(
+            assigned.contains("#{?@agent_status, #{@agent_status},}"),
+            "{option} has no term:\n{after}"
+        );
+    }
+    // The run collapses the continuation into the one line it wrote, which is
+    // the formatting change the confirmation discloses.
+    assert!(!after.contains('\\'), "a continuation survived:\n{after}");
+}
