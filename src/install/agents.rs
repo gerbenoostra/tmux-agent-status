@@ -325,7 +325,11 @@ impl Agent {
             && !toml_names(self.contents).is_empty()
     }
 
-    /// Rewrap entries the user placed by hand, changing no behaviour.
+    /// Mark a file whose hooks are already present as seen by us.
+    ///
+    /// The markers are a sentinel that stops a second append, not a container
+    /// that encloses specific lines; TOML entries are found by their `name`
+    /// keys when they need to be managed later.
     pub fn adopt(&self, current: &str) -> String {
         append_marked(current, "")
     }
