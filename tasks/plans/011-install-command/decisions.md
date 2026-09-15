@@ -169,6 +169,12 @@ is:
 4. `~/.tmux.conf` if it exists
 5. none exist: offer to create `~/.config/tmux/tmux.conf`
 
+A relative `source-file` inside whichever config is chosen is followed from `$HOME`. tmux resolves
+one against the working directory of whatever started the server, which is not knowable from here;
+`$HOME` is the common case for a server started from a login shell and is the cwd the probe runs
+with, so the walk and the check that marks its homework read the same files. The guess is reported
+in the plan, because a server started elsewhere may have a different winning line.
+
 `/etc/tmux.conf` is never chosen, even when it is the only one that exists and even under `-y`. It
 needs root and installs the tool for every user of the machine, which is not what anyone typing this
 command meant. It is reported with the suggestion to pass `--tmux-config` if that really was the
@@ -190,7 +196,7 @@ be run against a live tmux.
 | drop-in contents | `include_str!` into the binary | `cargo install` ships no `share/`, and that is the largest install route |
 | generated configs | refuse on **writability of the resolved target**, never on a path prefix | verified: a `mkOutOfStoreSymlink` chain passes through `/nix/store` and ends in a writable dotfiles checkout, which a prefix test would have wrongly refused |
 | format string | edit the config file text; never `set-option` | 001's freezing hazard is a property of the option, not the string |
-| checking the format edit | a throwaway `tmux -f <edited config>` whose whole option dump is diffed against a baseline | our parser agreeing with itself proves nothing; and a malformed line costs the user their entire config, not just our glyph |
+| checking the format edit | a throwaway `tmux -f <edited config>` whose whole option dump is diffed against a baseline, *and* asked whether the option now carries the term | our parser agreeing with itself proves nothing; a malformed line costs the user their entire config, not just our glyph; and a diff alone passes an edit that changed nothing |
 | format parser | narrow, and bails to manual when unsure | a general tmux parser is a project; a parser that knows when to stop is a feature |
 | JSON | `serde_json` with `preserve_order` | a merge that reorders a user's keys is a diff they did not ask for |
 | TOML | append marked tables, no parser | valid for any TOML file, and one agent does not justify a formatting-preserving TOML dependency |
@@ -246,10 +252,23 @@ if a server is running, confirmed like everything else. Agents still need their 
 ## Verification by tmux probe
 
 After the byte-level verify, start a throwaway tmux on the edited file and ask it what the format
-actually is. Compare the full option dump against a baseline taken before the edit. The only allowed
-differences are the intended format values and, for the hook step, the two hooks. This catches the
-abandoned-config case, where tmux still answers `show-options -gwv` with the default. The write lands
+actually is. Compare the full option dump against a baseline taken before the edit. The write lands
 first, then the probe runs; a failure rolls back through the backup.
+
+The probe answers **two** questions, and one of them is not a subset of the other:
+
+1. *Did anything else move?* The only allowed differences are our two format options and, for the
+   hook step, the two hooks. This catches the abandoned-config case, where tmux answers
+   `show-options -gwv` with the default because it threw the whole file away.
+2. *Did what we came for arrive?* Each change carries what it was for - the option that must come
+   back carrying the term, or the two hooks that must be registered - and the dump is asked for it
+   by name.
+
+Question 1 alone passes an edit that changes nothing at all, which is not a hypothetical: a line
+spliced where a later assignment overrides it - an `if-shell` below it, a fragment sourced after it,
+a relative `source-file` resolved from a different directory - leaves the file edited, the run
+reporting success, and no glyph anywhere. That is the outcome this plan calls the worst available,
+and it is the one only question 2 can see.
 
 The probe runs with `$TMUX` cleared, a unique socket name, cwd `$HOME`, and is killed on every exit
 path. It is bounded by a timeout and can be skipped with `--no-tmux-probe`.

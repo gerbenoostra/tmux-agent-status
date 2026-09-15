@@ -42,7 +42,12 @@ inside an unclosed multi-line string (`"""` or `'''`) swallows the block into th
 - tmux parses the whole config file before running any of it. An unknown command name or a valid
   command with a stray extra argument causes tmux to abandon the entire config file.
 - tmux resolves a relative `source-file` path against the process's working directory, not the
-  config file's directory.
+  config file's directory. So the walk follows one from `$HOME`, which is the cwd the probe uses,
+  and reports that it had to guess; resolving it beside the config is wrong for every layout but
+  `~/.tmux.conf`, and wrong silently.
+- A `source-file` argument holding a space is two arguments, and one holding a `'` opens a quoted
+  section; either makes tmux abandon the whole config file, so the snippet path is quoted the same
+  way a format value is and refused when no quoting can carry it.
 
 ## Detection
 

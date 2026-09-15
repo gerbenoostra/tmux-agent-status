@@ -8,14 +8,26 @@
   every route in `docs/install.md` ends with the one-liner, `docs/agents/README.md` says which
   agents are covered and by which of the three deliveries, and the plugin doctor names the
   repairing command per failing check without ever running it.
-- The coverage gate passes: every region of `src/` is reached, bar five that carry a
-  `// coverage: off` marker and the reason they cannot be.
+- A review of the branch found nine defects, all fixed on it; each is one commit with the failure
+  it removes in the message. Three were worth the review on their own:
+  - a format line spread over continuations could never be rewritten, because the joined logical
+    line was compared against one physical line. The step failed with "the config moved under us"
+    on a file nothing had touched, and where only one of the two options wrapped it left the term
+    in exactly one of them.
+  - the tmux probe asked only whether anything unexpected moved, which an edit that changes nothing
+    passes. A line spliced where a later assignment overrides it reported success and produced no
+    glyph. The probe is now asked what the edit was *for*.
+  - a relative `source-file` was followed from beside the config rather than from `$HOME`, so the
+    walk could pick a winner out of a file tmux never opened.
+- The coverage gate passes: every region of `src/` is reached, bar four that carry a
+  `// coverage: off` marker and the reason they cannot be. The fifth, a process with no `$HOME`,
+  is now covered by `tests/install_no_home.rs` rather than exempted.
 
 ## Verification
 
 - `just fmt-check`: clean.
 - `just lint`: clean.
-- `cargo test --all-targets`: 405 tests across 18 suites, all passing.
+- `cargo test --all-targets`: 417 tests across 19 suites, all passing.
 - `just coverage`: passes. The summary table it prints still shows misses; those are counted per
   compilation rather than per region and are an llvm-cov artefact, which is why the bar is read
   from the merged region view instead. See [findings.md](./findings.md) and

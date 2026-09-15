@@ -83,8 +83,10 @@ One primitive, used by every file this tool touches. `install::write::safely(pat
     the backup, and the temp file it wrote, all named. That is the only outcome in this plan that
     asks a human to reconcile something, and it is the only one where a human genuinely has to.
 12. **Verify semantically, by asking tmux** - for the two tmux steps only; see "Letting tmux mark
-    our homework". A failure here rolls the file back, and that rollback is unconditionally safe
-    because step 11 just proved the bytes on disk are ours and nobody else's.
+    our homework". Two questions: nothing we are not responsible for moved, *and* what the edit was
+    for arrived - the option carries the term, the hooks are registered. A failure here rolls the
+    file back, and that rollback is unconditionally safe because step 11 just proved the bytes on
+    disk are ours and nobody else's.
 13. **Release the lock**, and name the backup path in the summary.
 
 **Create mode**, for a target that does not exist - the new `~/.config/tmux/tmux.conf`, the written
