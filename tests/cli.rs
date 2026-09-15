@@ -37,7 +37,7 @@ fn run_env(args: &[&str], key: &str, value: &str) -> Output {
 }
 
 fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).to_string()
+    support::stderr_of(out)
 }
 
 fn stdout(out: &Output) -> String {
@@ -49,7 +49,7 @@ fn help_flag_prints_usage() {
     for flag in ["--help", "-h"] {
         let out = run(&[flag]);
         assert!(out.status.success(), "{flag} should exit 0");
-        assert!(out.stderr.is_empty(), "help must not write to stderr");
+        assert!(stderr(&out).is_empty(), "help must not write to stderr");
         let text = stdout(&out);
         assert!(
             text.contains("tmux-agent-status"),
@@ -72,7 +72,7 @@ fn version_flag_prints_name_version_and_path() {
     for flag in ["--version", "-V"] {
         let out = run(&[flag]);
         assert!(out.status.success(), "{flag} should exit 0");
-        assert!(out.stderr.is_empty(), "version must not write to stderr");
+        assert!(stderr(&out).is_empty(), "version must not write to stderr");
         let text = stdout(&out);
         assert!(
             text.contains("tmux-agent-status"),
@@ -202,7 +202,7 @@ fn pane_flag_is_allowed_on_hook_commands() {
         let out = run(args);
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
         assert!(out.stdout.is_empty(), "{args:?}");
-        assert!(out.stderr.is_empty(), "{args:?}");
+        assert!(stderr(&out).is_empty(), "{args:?}");
     }
 }
 
@@ -217,7 +217,7 @@ fn disabled_turns_hook_commands_into_no_ops() {
         let out = run_env(args, "TMUX_AGENT_STATUS_DISABLED", "1");
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
         assert!(out.stdout.is_empty(), "{args:?}");
-        assert!(out.stderr.is_empty(), "{args:?}");
+        assert!(stderr(&out).is_empty(), "{args:?}");
     }
 }
 
@@ -241,7 +241,7 @@ fn json_flag_prints_empty_object_on_hook_commands() {
     ] {
         let out = run(args);
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
-        assert!(out.stderr.is_empty(), "{args:?}");
+        assert!(stderr(&out).is_empty(), "{args:?}");
         assert_eq!(stdout(&out), "{}\n", "{args:?}");
     }
 }
@@ -256,7 +256,7 @@ fn json_flag_prints_empty_object_when_disabled() {
     ] {
         let out = run_env(args, "TMUX_AGENT_STATUS_DISABLED", "1");
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
-        assert!(out.stderr.is_empty(), "{args:?}");
+        assert!(stderr(&out).is_empty(), "{args:?}");
         assert_eq!(stdout(&out), "{}\n", "{args:?}");
     }
 }
@@ -273,7 +273,7 @@ fn json_flag_does_not_hide_usage_errors() {
 fn json_flag_works_with_pane_flag() {
     let out = run(&["set", "done", "--pane", "%0", "--json"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
     assert_eq!(stdout(&out), "{}\n");
 }
 
@@ -312,7 +312,7 @@ fn notify_with_unknown_agent_is_silent_no_op() {
     let out = run(&["notify", "--agent", "no-such-agent", "{}"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn notify_json_flag_prints_empty_object() {
     ]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), "{}\n");
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn notify_json_flag_prints_empty_object_for_unknown_agent() {
     let out = run(&["notify", "--agent", "no-such-agent", "{}", "--json"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), "{}\n");
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]
@@ -352,7 +352,7 @@ fn notify_json_flag_prints_empty_object_when_disabled() {
     );
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), "{}\n");
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn notify_with_unparseable_payload_is_silent_no_op() {
     let out = run(&["notify", "--agent", "mistral-vibe", "not-json"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]
@@ -379,7 +379,7 @@ fn notify_stdin_reads_payload() {
     let out = child.wait_with_output().expect("the binary runs");
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn notify_payload_is_mapped_and_run_as_hook_command() {
     ]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]
@@ -413,7 +413,7 @@ fn notify_disabled_is_a_no_op() {
     );
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]
@@ -497,7 +497,7 @@ fn notify_stdin_with_terminal(json: bool) {
 
     let out = child.wait_with_output().expect("the binary runs");
     assert_eq!(stdout(&out), if json { "{}\n" } else { "" });
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[cfg(unix)]
@@ -569,5 +569,49 @@ fn disabled_notify_still_drains_stdin() {
     let out = child.wait_with_output().expect("the binary runs");
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
-    assert!(out.stderr.is_empty());
+    assert!(stderr(&out).is_empty());
+}
+
+// The profiling runtime shares stderr with the process it instruments, so
+// "the binary wrote nothing to stderr" has to mean the binary. Under
+// `cargo llvm-cov` a `.profraw` that cannot be written puts this line on the
+// stream, and every such assertion in this suite failed with it - a coverage
+// run red in tests that had nothing to do with what was being measured, while
+// `cargo test` stayed green.
+#[test]
+fn the_profilers_own_complaints_are_not_the_binarys_stderr() {
+    let profiler = b"LLVM Profile Error: Failed to write file \
+        \"/nonexistent/probe-13908.profraw\": No such file or directory\n";
+    let out = Output {
+        status: std::process::Command::new("true")
+            .status()
+            .expect("true runs"),
+        stdout: Vec::new(),
+        stderr: profiler.to_vec(),
+    };
+    assert!(support::stderr_of(&out).is_empty(), "{:?}", stderr(&out));
+
+    // And what the binary really says is still there, on its own or beside it.
+    let ours = |text: &str| Output {
+        stderr: text.as_bytes().to_vec(),
+        ..Output {
+            status: std::process::Command::new("true")
+                .status()
+                .expect("true runs"),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }
+    };
+    assert_eq!(
+        support::stderr_of(&ours("tmux-agent-status: set requires a state")),
+        "tmux-agent-status: set requires a state"
+    );
+    let mixed = ours(&format!(
+        "{}tmux-agent-status: set requires a state",
+        String::from_utf8_lossy(profiler)
+    ));
+    assert_eq!(
+        support::stderr_of(&mixed),
+        "tmux-agent-status: set requires a state"
+    );
 }
