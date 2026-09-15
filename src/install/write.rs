@@ -667,10 +667,11 @@ fn nonce() -> String {
     format!("{now:x}{count:x}")
 }
 
-/// `(len, mtime)`, which is what `stat` answers and what step 8 compares.
+/// `(len, ino, mtime)`, which is what `stat` answers and what step 8 compares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Fingerprint {
     len: u64,
+    ino: u64,
     mtime: i64,
     mtime_nanos: i64,
 }
@@ -691,6 +692,7 @@ impl Fingerprint {
         match fs::metadata(path) {
             Ok(meta) => Ok(Some(Fingerprint {
                 len: meta.len(),
+                ino: meta.ino(),
                 mtime: meta.mtime(),
                 mtime_nanos: meta.mtime_nsec(),
             })),
