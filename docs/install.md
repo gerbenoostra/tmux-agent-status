@@ -1,14 +1,11 @@
 # Installing tmux-agent-status
 
-Below we list the different installation options of the helper tool (`tmux-agent-status` cli).
-After installing, you need to finish with the configuration setup steps in the [README](../README.md)
-to capture agent events, trigger tmux events, and present the glyph.
-The binary on its own does nothing until tmux and your agent know about it.
+The `tmux-agent-status` cli can be installed using your package manager of choice.
 
-Those remaining steps are what `tmux-agent-status install` does, so every route below ends with it.
-Each route also spells the steps out by hand, because a generated or read-only configuration is a
-file the installer will refuse to edit, and because it is worth being able to see what would be
-written. `tmux-agent-status install --dry-run` prints the plan and changes nothing.
+After installing, you need to either run `tmux-agent-status install`, or manually finish with the configuration setup steps in the [README](../README.md)
+to capture agent events, trigger tmux events, and present the glyph.
+The documentation below shows where to find the files needed for manual tmux and agent events.
+To add the glyph to the window name, follow the [README](../README.md)
 
 ## Requirements
 
@@ -25,7 +22,7 @@ are examples, not requirements:
 - Linux and other POSIX systems commonly use `~/.local/bin` or `~/bin` for user-installed commands.
 - macOS users can use the same directories. A Homebrew-managed command directory such as
   `$(brew --prefix)/bin` is another possibility, but manually installing into a package manager's
-  prefix makes that file the user's responsibility.
+   edit prefix makes that file the user's responsibility.
 - Cargo normally installs commands into `~/.cargo/bin`.
 - Nix profiles provide their own command directories and should normally be used through the Nix
   installation routes below.
@@ -57,7 +54,7 @@ and add it to the home-manager module:
 home.packages = [ inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status ];
 ```
 
-**2. The tmux snippet and agent drop-ins, at stable paths.**
+**2. Recommended configuration of tmux and agent hooks.**
 
 Place the tmux-agent-status configuration at a deliberate path such that it can be imported from `.tmux.conf`:
 ```nix
@@ -65,45 +62,44 @@ home.file.".tmux/tmux-agent-status.conf".source =
   "${inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status}/share/tmux/tmux-agent-status.conf";
 ```
 
-Then in step 2, use the following line in `.tmux.conf` to register the tmux hooks:
+Then to install tmux hooks, use the following line in `.tmux.conf` to register the tmux hooks:
 ```tmux
 source-file ~/.tmux/tmux-agent-status.conf
 ```
 
-For step 4, the agent configs are in the package at
-`${inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status}/share/agents/<agent>/`.
-Copy or merge the appropriate file as described on [your agent's page](agents/README.md).
+The `tmux-agent-status install` is able to locate the `tmux-agent-status.conf` file in the package, but would then edit your `.tmux.conf` with full paths.
 
-Or let the tool do steps 2 to 4, once the package is on your `PATH`:
-
+Then install glyph and agents:
 ```sh
 tmux-agent-status install
 ```
 
-It finds the snippet inside the Nix store by itself. A `.tmux.conf` that home-manager generates is
-read-only, so the tmux steps will be reported with the lines to add to your home-manager
-configuration instead of being written; the agent steps still apply, for agents whose config files
-you maintain yourself.
+**Manual agent hooks.**
 
+The agent configs can be found in the package at
+`${inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status}/share/agents/<agent>/`.
+Copy or merge the appropriate file as described on [your agent's page](agents/README.md).
 ## nix profile
 
 ```sh
 nix profile install github:gerbenoostra/tmux-agent-status
 ```
 
-Then in step 2, use the following line in `.tmux.conf` to register the tmux hooks:
+**2. Recommended configuration of tmux and agent hooks.**
+Complete configuration with:
+```sh
+tmux-agent-status install
+```
+
+**Manual configuration of tmux and agent hooks.**
+
+If installing manually, use the following line in `.tmux.conf` to register the tmux hooks:
 ```tmux
 source-file ~/.nix-profile/share/tmux/tmux-agent-status.conf
 ```
 
-For step 4, the agent configs are under `~/.nix-profile/share/agents/<agent>/`. Copy or merge the
-appropriate file as described on [your agent's page](agents/README.md).
-
-Or let the tool do steps 2 to 4; it looks under `~/.nix-profile/share` for the snippet:
-
-```sh
-tmux-agent-status install
-```
+The agent configs can be found under `~/.nix-profile/share/agents/<agent>/`.
+Copy or merge the appropriate file as described on [your agent's page](agents/README.md).
 
 ## Prebuilt binary
 
@@ -126,23 +122,26 @@ cp "tmux-agent-status-$tag-$target/share/tmux/tmux-agent-status.conf" "$tmux_con
 chmod 644 "$tmux_conf_dir/tmux-agent-status.conf"
 ```
 
-Then in step 2, use the following line in `.tmux.conf` to register the tmux hooks:
+**2. Recommended configuration of tmux and agent hooks.**
+Point the installer at the snippet you just copied:
+
+```sh
+tmux-agent-status install --snippet "$tmux_conf_dir/tmux-agent-status.conf"
+```
+
+**Manual configuration of tmux and agent hooks.**
+Use the following line in `.tmux.conf` to register the tmux hooks:
 ```tmux
 source-file ~/.tmux/tmux-agent-status.conf
 ```
 
-The tarball also carries `share/agents/<agent>/`. For step 4, copy the file for your agent to the location [its page](agents/README.md) describes, for example:
+The tarball also carries `share/agents/<agent>/`. Copy the file for your agent to the location [its page](agents/README.md) describes, for example:
 
 ```sh
 mkdir -p ~/.codex
 cp "tmux-agent-status-$tag-$target/share/agents/codex/hooks.json" ~/.codex/hooks.json
 ```
 
-Or let the tool do steps 2 to 4 instead, pointing it at the snippet you just copied:
-
-```sh
-tmux-agent-status install --snippet "$tmux_conf_dir/tmux-agent-status.conf"
-```
 
 ## cargo
 
@@ -152,21 +151,19 @@ cargo install --git https://github.com/gerbenoostra/tmux-agent-status
 
 This installs the binary only. Take the tmux snippet and agent configs from a checkout or release
 tarball. Copy `share/tmux/tmux-agent-status.conf` to `~/.tmux/tmux-agent-status.conf`, then use that
-path for step 2:
+path:
+```sh
+tmux-agent-status install --snippet ~/.tmux/tmux-agent-status.conf
+```
 
+**Manual configuration of tmux and agent hooks**
+Configure the tmux hooks manually:
 ```tmux
 source-file ~/.tmux/tmux-agent-status.conf
 ```
 
-For step 4, use `share/agents/<agent>/` from the same checkout or extracted tarball. Copy or merge
-the appropriate file as described on [your agent's page](agents/README.md).
-
-Or let the tool do steps 2 to 4. `cargo install` ships the binary and nothing else, so name the
-snippet you copied:
-
-```sh
-tmux-agent-status install --snippet ~/.tmux/tmux-agent-status.conf
-```
+For the agent hooks, use `share/agents/<agent>/` from the same checkout or extracted tarball.
+Copy or merge the appropriate file as described on [your agent's page](agents/README.md).
 
 ## From source
 
@@ -185,17 +182,18 @@ cp share/tmux/tmux-agent-status.conf "$tmux_conf_dir/tmux-agent-status.conf"
 chmod 644 "$tmux_conf_dir/tmux-agent-status.conf"
 ```
 
-For step 2, source the copied snippet from `.tmux.conf`:
+**Recommended configuration of tmux and agent hooks**
+Point the installer at the source snippet:
+```sh
+tmux-agent-status install --snippet "$tmux_conf_dir/tmux-agent-status.conf"
+```
+
+**Manual configuration of tmux and agent hooks**
+Source the copied snippet from `.tmux.conf`:
 
 ```tmux
 source-file ~/.tmux/tmux-agent-status.conf
 ```
 
-For step 4, the agent configs are in the checkout under `share/agents/<agent>/`. Copy or merge the
-appropriate file as described on [your agent's page](agents/README.md).
-
-Or let the tool do steps 2 to 4:
-
-```sh
-tmux-agent-status install --snippet "$tmux_conf_dir/tmux-agent-status.conf"
-```
+The configs required for the agent hooks are in the checkout under `share/agents/<agent>/`.
+Copy or merge the appropriate file as described on [your agent's page](agents/README.md).

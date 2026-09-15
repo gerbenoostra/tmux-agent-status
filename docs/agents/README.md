@@ -85,11 +85,9 @@ a drop-in file or a settings merge:
 
 An agent is preselected when its config directory exists or its command is on `PATH`; the rest of
 the list is offered as a checklist. Every change is asked about first and every edited file is
-backed up. `--agents=codex,cursor` narrows it to a subset - the `=` is required, because a bare
-`--agents` selects the step and leaves the choice to detection, so `--agents codex` is a usage
-error rather than a selection.
+backed up. `--agents=codex,cursor` narrows it to a subset (note the mandatory `=`).
 
-Three deliveries sit behind the one command:
+The installer combines the three delivery methods, preferring plugin > drop in file > file edit:
 
 - **A file of its own**, for agents that read a hooks directory. Copilot, Grok and Kiro each get a
   `tmux-agent-status.json`, and nothing else in the directory is touched.
