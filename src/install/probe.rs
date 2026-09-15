@@ -320,11 +320,13 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
     let mut child = command.spawn().ok()?;
 
     let deadline = Instant::now() + timeout;
+    let mut delay = Duration::from_millis(10);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(delay);
+                delay = delay.min(Duration::from_millis(500)).mul_f32(2.0);
             }
             // Out of time, or a wait that itself failed. A config whose
             // `run-shell` blocks holds up `new-session -d` for as long as the
