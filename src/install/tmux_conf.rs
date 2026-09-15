@@ -220,9 +220,16 @@ pub fn with_source_block(text: &str, snippet: &Path) -> Option<String> {
 /// config file - so is an unterminated quote, which is what a bare path holding
 /// a `'` is. Either costs the user their entire configuration rather than just
 /// our glyph.
+///
+/// A newline is the same hazard and the easiest to forget, because it is the
+/// one that does not look like a character: bare, it ends the `source-file`
+/// command and leaves the rest of the path as a line of its own, which tmux
+/// reads as an unknown command and answers by throwing the file away. Verified
+/// on 3.6a, both halves: bare, a config that set `status-left` lost it; inside
+/// single quotes, the same path sourced its fragment and `status-left` stood.
 fn quote(path: &Path) -> Option<String> {
     let text = path.to_string_lossy();
-    if !text.contains([' ', '\t', ';', '#', '\'', '"', '\\', '$', '`']) {
+    if !text.contains([' ', '\t', '\n', '\r', ';', '#', '\'', '"', '\\', '$', '`']) {
         return Some(text.into_owned());
     }
     if !text.contains('\'') {
@@ -542,8 +549,23 @@ mod tests {
             Some("\"/it's/tmux-agent-status.conf\"".to_owned())
         );
 
+        // A newline is the same hazard and the easiest to forget: bare, it
+        // ends the `source-file` command and the rest of the path becomes a
+        // line tmux reads as an unknown command, which costs the whole file.
+        // Verified on 3.6a that single quotes carry one.
+        assert_eq!(
+            quote(Path::new("/we\nird/tmux-agent-status.conf")),
+            Some("'/we\nird/tmux-agent-status.conf'".to_owned())
+        );
+
         // So do the rest of what tmux gives a meaning to.
-        for odd in ["/a;b/x.conf", "/a#b/x.conf", "/a\\b/x.conf", "/a$b/x.conf"] {
+        for odd in [
+            "/a;b/x.conf",
+            "/a#b/x.conf",
+            "/a\\b/x.conf",
+            "/a$b/x.conf",
+            "/a\rb/x.conf",
+        ] {
             let spelled = quote(Path::new(odd)).expect("single quotes");
             assert_eq!(spelled, format!("'{odd}'"), "{odd}");
         }
