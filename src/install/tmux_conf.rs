@@ -247,7 +247,8 @@ fn quote(path: &Path) -> Option<String> {
 ///
 /// A logical line may span several physical ones through trailing backslashes,
 /// and the rewrite collapses the run - a formatting change the confirmation
-/// discloses, and the only one an edit makes outside the value itself.
+/// discloses, and the only one an edit makes outside the value itself. The
+/// presence or absence of a trailing newline is preserved.
 pub fn replace_lines(text: &str, first: usize, last: usize, with: &str) -> String {
     let mut out = String::with_capacity(text.len() + with.len());
     for (index, line) in text.lines().enumerate() {
@@ -258,6 +259,9 @@ pub fn replace_lines(text: &str, first: usize, last: usize, with: &str) -> Strin
             out.push_str(with);
             out.push('\n');
         }
+    }
+    if !text.ends_with('\n') && !out.is_empty() {
+        out.pop();
     }
     out
 }
@@ -652,9 +656,8 @@ mod tests {
         // A continuation run collapses into the single line that replaces it.
         assert_eq!(replace_lines(text, 0, 1, "ONE"), "ONE\nthree\n");
         assert_eq!(replace_lines(text, 2, 2, "THREE"), "one\ntwo\nTHREE\n");
-        // A file with no trailing newline gains one, which is what every other
-        // writer here does too.
-        assert_eq!(replace_lines("one\ntwo", 1, 1, "TWO"), "one\nTWO\n");
+        // A file with no trailing newline keeps none.
+        assert_eq!(replace_lines("one\ntwo", 1, 1, "TWO"), "one\nTWO");
     }
 
     #[test]
