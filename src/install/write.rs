@@ -441,11 +441,16 @@ fn unwritable(directory: &Path) -> bool {
 fn in_home(path: &Path) -> bool {
     // `$HOME` from the environment, never `getpwuid`: the tests point a child
     // process at a temp home, and a tool that cannot be redirected cannot be
-    // tested.
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .and_then(|home| home.canonicalize().ok())
-        .is_some_and(|home| path.starts_with(home))
+    // tested. Canonicalising once avoids repeated syscalls; the value is fixed
+    // for the lifetime of this process.
+    static HOME: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .and_then(|home| home.canonicalize().ok())
+    })
+    .as_ref()
+    .is_some_and(|home| path.starts_with(home))
 }
 
 /// Whether a resolved path sits in a package store, which decides the wording
