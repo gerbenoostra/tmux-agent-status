@@ -355,17 +355,14 @@ fn is_relative(argument: &str) -> bool {
 /// the walk and the check that marks its homework read the same files. The
 /// guess is reported either way; see `Walked::relative_sources`.
 fn expand(argument: &str) -> Vec<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let path = match (argument.strip_prefix("~/"), &home) {
-        (Some(tail), Some(home)) => home.join(tail),
-        _ => PathBuf::from(argument),
-    };
-    let path = match (path.is_absolute(), &home) {
-        (true, _) => path,
-        (false, Some(home)) => home.join(&path),
+    let path = match std::env::var_os("HOME") {
+        // `join` with an absolute path discards the base, so an absolute
+        // argument needs no arm of its own: `~/x`, `x` and `/x` are all this
+        // one line.
+        Some(home) => PathBuf::from(home).join(argument.strip_prefix("~/").unwrap_or(argument)),
         // A process with no `$HOME` has nothing to resolve against, so the
         // path stands as the config wrote it.
-        (false, None) => path,
+        None => PathBuf::from(argument),
     };
     let Some(pattern) = glob_pattern(&path) else {
         return vec![path];

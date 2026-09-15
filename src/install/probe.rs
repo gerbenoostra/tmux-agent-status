@@ -311,13 +311,12 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // The else arm wants a process with no `HOME`. That is reachable - a test
-    // binary of its own could remove the variable, the way
-    // `tests/install_probe_no_tmux.rs` sets one - and is exempted rather than
-    // impossible: a third single-test binary buys less than it costs.
+    // A process with no `HOME` - a daemon, a `systemd` unit, a `su -c` - runs
+    // the probe from wherever it already is rather than refusing to start.
+    // `tests/install_no_home.rs` is the binary that reaches this.
     if let Some(home) = std::env::var_os("HOME") {
         command.current_dir(home);
-    } // coverage: off
+    }
     let mut child = command.spawn().ok()?;
 
     let deadline = Instant::now() + timeout;
