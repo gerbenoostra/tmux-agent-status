@@ -63,11 +63,11 @@ pub fn discover_config(explicit: Option<&Path>, home: &Home) -> Choice {
         };
     }
     let xdg = home.config("tmux/tmux.conf");
-    let candidates = [
-        xdg.clone(),
-        home.join(".config/tmux/tmux.conf"),
-        home.join(".tmux.conf"),
-    ];
+    let fallback = home.join(".config/tmux/tmux.conf");
+    let mut candidates = vec![xdg.clone(), home.join(".tmux.conf")];
+    if fallback != candidates[0] {
+        candidates.insert(1, fallback);
+    }
     for candidate in candidates {
         if candidate.is_file() {
             return Choice::Existing(candidate);
