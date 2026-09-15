@@ -27,6 +27,9 @@ struct Script {
     edited: Option<String>,
     /// Which rows `choose` picks. `None` takes the preselected ones.
     chosen: Option<Vec<usize>>,
+    /// A question holding this gets `false` whatever `answer` says, for the
+    /// runs where somebody accepts one write and declines another.
+    declining: Option<String>,
     said: Mutex<Vec<String>>,
     asked: Mutex<Vec<String>>,
 }
@@ -37,8 +40,17 @@ impl Script {
             answer: Some(true),
             edited: None,
             chosen: None,
+            declining: None,
             said: Mutex::new(Vec::new()),
             asked: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Yes to everything but the one question naming `what`.
+    fn saying_yes_but_not_to(what: &str) -> Script {
+        Script {
+            declining: Some(what.to_owned()),
+            ..Script::saying_yes()
         }
     }
 
@@ -71,7 +83,10 @@ impl Interaction for Script {
             .lock()
             .expect("not poisoned")
             .push(question.to_owned());
-        self.answer.unwrap_or(recommended)
+        match &self.declining {
+            Some(what) if question.contains(what.as_str()) => false,
+            _ => self.answer.unwrap_or(recommended),
+        }
     }
 
     fn choose(&self, question: &str, rows: &[(String, bool)]) -> Vec<usize> {
@@ -773,4 +788,43 @@ fn leftovers(dir: &Path) -> Vec<String> {
         }
     }
     found
+}
+
+// Declining the snippet and accepting the source-file line leaves a line
+// pointing at a file that is not there. tmux will not read a config that
+// sources a missing file, so the refusal comes from tmux and names the path -
+// which is a better answer than anything the hook check could say, and the
+// reason that check never has to describe an absent snippet.
+#[test]
+fn a_source_line_pointing_at_a_snippet_nobody_wrote_is_refused_by_tmux() {
+    let dir = TempDir::new("run-snippet-declined");
+    let config = dir.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let before = fs::read_to_string(&config).expect("the config");
+    let snippet = dir.join(".config/tmux/tmux-agent-status.conf");
+    let options = Options {
+        snippet: Some(snippet.clone()),
+        ..options(
+            &dir,
+            install::select(&[Step::TmuxHook], &[]).expect("a valid selection"),
+        )
+    };
+    // Yes to the source-file line, no to writing the snippet it points at.
+    let script = Script::saying_yes_but_not_to(&snippet.display().to_string());
+
+    let report = install::run(&options, &script);
+
+    let output = script.output();
+    assert!(!snippet.exists(), "the snippet was written anyway");
+    assert_eq!(report.outcome(Step::TmuxHook), Some(Outcome::Failed));
+    assert!(
+        output.contains("tmux will not read the edited config"),
+        "{output}"
+    );
+    assert!(
+        output.contains(&snippet.display().to_string()),
+        "the refusal does not name the file tmux could not find:\n{output}"
+    );
+    // And the config is back the way it was, because a line that does nothing
+    // is not worth leaving in somebody's dotfiles.
+    assert_eq!(fs::read_to_string(&config).expect("the config"), before);
 }

@@ -462,6 +462,11 @@ fn ours_to_change() -> Vec<String> {
 pub enum Landed {
     /// The hook step: both hooks are registered afterwards, which is what says
     /// the sourced snippet actually ran.
+    ///
+    /// Only a snippet that exists and sets no hooks reaches this. One that is
+    /// missing is refused earlier and better: tmux will not read a config that
+    /// sources a file that is not there, so `probe::check` fails first and
+    /// names the path it could not find.
     Hooks,
     /// The format step: these options carry the term afterwards. Per option,
     /// because the two are written one at a time and the second has not been
@@ -483,15 +488,20 @@ impl Landed {
                      {missing} hook: the file it points at does not set it."
                 )),
             },
+            // What is reported is what was observed. A later assignment is the
+            // likeliest reason tmux does not read the term back, and it is not
+            // the only one - a window-local `setw` at config-load time, a
+            // `%if` the walk parsed as a plain line - so the message names the
+            // symptom and leaves the cause to the config in front of the user.
             Landed::Term(options) => match options
                 .iter()
                 .find(|option| !dumped.any_value(option, format::references_agent_status))
             {
                 None => Ok(()),
                 Some(option) => Err(format!(
-                    "the edit landed, but tmux still reads {option} without the term: \
-                     something further down the config assigns it again and wins.\n  \
-                     Add {} to that assignment by hand.",
+                    "the edit landed, but tmux still reads {option} without the term, so the \
+                     assignment we edited is not the one it honours.\n  \
+                     Add {} to the assignment that does, by hand.",
                     format::TERM
                 )),
             },
