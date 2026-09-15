@@ -23,11 +23,19 @@ pub const BIN: &str = env!("CARGO_BIN_EXE_tmux-agent-status");
 /// profile path cannot be written prints exactly that prefix and nothing else
 /// changes about it.
 pub fn stderr_of(out: &std::process::Output) -> String {
-    String::from_utf8_lossy(&out.stderr)
-        .lines()
-        .filter(|line| !line.starts_with("LLVM Profile"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    let text = String::from_utf8_lossy(&out.stderr);
+    // Only reshaped when the profiler actually interfered. Splitting into
+    // lines and joining them back loses a trailing newline, which would let a
+    // binary that wrote nothing but a blank line pass an `is_empty` check - so
+    // the usual case keeps the bytes exactly as they came.
+    match text.contains("LLVM Profile") {
+        false => text.into_owned(),
+        true => text
+            .lines()
+            .filter(|line| !line.starts_with("LLVM Profile"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
 }
 
 /// Whether there is a tmux to test against.

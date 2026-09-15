@@ -614,4 +614,9 @@ fn the_profilers_own_complaints_are_not_the_binarys_stderr() {
         support::stderr_of(&mixed),
         "tmux-agent-status: set requires a state"
     );
+
+    // A blank line is still something the binary wrote, so a run the profiler
+    // kept quiet through is passed through byte for byte rather than rebuilt
+    // out of its lines.
+    assert!(!support::stderr_of(&ours("\n")).is_empty());
 }
