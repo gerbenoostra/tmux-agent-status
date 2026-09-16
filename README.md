@@ -20,7 +20,7 @@ The following agent states are distinguished:
 | `working` | 🤖 | a turn is in flight | the next event on that pane |
 | `done` | ✅ | the turn ended cleanly | you look at the window |
 | `error` | ❗ | the turn aborted: API error, context overflow, unparseable tool call | you look at the window |
-| `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, the idle nag | you look at the window |
+| `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, an idle nag while it is still blocked | you look at the window |
 
 If one window contains multiple agents, the most demanding status is shown:  `waiting` > `error` > `done` > `working`.
 
