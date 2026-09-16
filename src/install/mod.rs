@@ -1159,7 +1159,7 @@ impl TmuxPlan {
         // own, so that there is no line to print when there is nothing to say.
         prompt.say(&format!(
             "{}This is what install would do:",
-            system_wide_note(probe::config_files().as_deref(), |path| path.exists())
+            system_wide_note(probe::config_files().as_deref(), |path| path.exists()) // coverage: off: needs a real tmux with a present /etc/tmux.conf to reach
         ));
 
         // The baseline is what makes the probe honest, and it is taken before
