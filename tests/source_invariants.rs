@@ -18,7 +18,11 @@ fn no_set_option_argument_names_a_window_format() {
     let mut checked = 0;
     for path in rust_sources(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")) {
         let text = fs::read_to_string(&path).expect("a source file this crate owns");
-        for statement in set_option_statements(&text) {
+        // Unit tests below `#[cfg(test)]` exercise the parser against command
+        // strings that name these options as test fixtures, not real calls;
+        // only the production code above that marker can freeze a format.
+        let production = text.split("#[cfg(test)]").next().unwrap_or(&text);
+        for statement in set_option_statements(production) {
             for format in WINDOW_FORMATS {
                 assert!(
                     !statement.contains(format),

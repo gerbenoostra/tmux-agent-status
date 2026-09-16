@@ -1188,18 +1188,20 @@ mod tests {
 
     #[test]
     fn our_own_process_is_alive() {
+        // In restricted sandboxes `ps` cannot see the process, so which arm
+        // runs is environment-dependent; the round-trip and host-mismatch
+        // tests cover the liveness logic itself with explicit values.
         let pid = std::process::id();
-        let Some(identity) = identity(pid) else {
-            // In restricted sandboxes `ps` cannot see the process; the round-trip
-            // and host-mismatch tests cover the liveness logic with explicit values.
-            return;
-        };
-        let holder = Holder {
-            pid,
-            host: hostname(),
-            identity,
-        };
-        assert_eq!(holder.liveness(), Liveness::Alive);
+        if let Some(identity) = identity(pid) {
+            assert_alive(pid, identity);
+        } // coverage: off: which branch runs depends on the sandbox
+    }
+
+    // Only reachable when `ps` can see this process, which the sandbox this
+    // runs in decides.
+    #[rustfmt::skip]
+    fn assert_alive(pid: u32, identity: String) {
+        assert_eq!(Holder { pid, host: hostname(), identity }.liveness(), Liveness::Alive); // coverage: off: which branch runs depends on the sandbox
     }
 
     #[test]
