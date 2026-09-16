@@ -2,7 +2,6 @@
 //!
 //! Pure: this module knows nothing about tmux.
 
-use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
@@ -23,15 +22,32 @@ impl State {
     /// Every state, in rank order.
     pub const ALL: [State; 4] = [State::Working, State::Done, State::Error, State::Waiting];
 
-    /// The rollup rank. `Working` ranks *lowest* on purpose: the glyph answers
-    /// "does this window want me", and a pane that finished wants a look while
-    /// one still grinding does not.
+    /// The rollup rank, across the panes of one window. `Working` ranks *lowest*
+    /// on purpose: the glyph answers "does this window want me", and a pane that
+    /// finished wants a look while one still grinding does not.
     pub fn rank(self) -> u8 {
         match self {
             State::Working => 1,
             State::Done => 2,
             State::Error => 3,
             State::Waiting => 4,
+        }
+    }
+
+    /// The precedence within one pane: a state reported on a pane replaces the
+    /// one it holds only if it does not rank lower here.
+    ///
+    /// Not the rollup rank, because it answers a different question - which of
+    /// two events on the same pane you still need to see. `working` ranks lowest,
+    /// so a sibling tool call finishing cannot hide a prompt that is still open.
+    /// `waiting` ranks below `done`, so a nag after a finished turn cannot turn
+    /// ✅ into a 💬 with nothing behind it. `error` beats everything.
+    pub fn precedence(self) -> u8 {
+        match self {
+            State::Working => 1,
+            State::Waiting => 2,
+            State::Done => 3,
+            State::Error => 4,
         }
     }
 
@@ -74,18 +90,6 @@ impl State {
     /// still running.
     pub fn is_sticky(self) -> bool {
         self == State::Working
-    }
-}
-
-impl Ord for State {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.rank().cmp(&other.rank())
-    }
-}
-
-impl PartialOrd for State {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
     }
 }
 
@@ -151,9 +155,16 @@ mod tests {
 
     #[test]
     fn rank_orders_working_lowest_and_waiting_highest() {
-        assert!(State::Working < State::Done);
-        assert!(State::Done < State::Error);
-        assert!(State::Error < State::Waiting);
+        assert!(State::Working.rank() < State::Done.rank());
+        assert!(State::Done.rank() < State::Error.rank());
+        assert!(State::Error.rank() < State::Waiting.rank());
+    }
+
+    #[test]
+    fn precedence_orders_working_lowest_and_error_highest() {
+        assert!(State::Working.precedence() < State::Waiting.precedence());
+        assert!(State::Waiting.precedence() < State::Done.precedence());
+        assert!(State::Done.precedence() < State::Error.precedence());
     }
 
     #[test]
@@ -183,7 +194,7 @@ mod tests {
         assert_eq!(
             deduped.len(),
             ranks.len(),
-            "each state must have a unique rank for Ord to agree with Eq"
+            "each state must have a unique rank, or the rollup has no single answer"
         );
         assert!(
             ranks.windows(2).all(|w| w[0] < w[1]),

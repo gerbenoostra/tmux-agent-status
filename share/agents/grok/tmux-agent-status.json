@@ -10,7 +10,7 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "tmux-agent-status set working" }
+          { "type": "command", "command": "tmux-agent-status start" }
         ]
       }
     ],

@@ -9,7 +9,8 @@ bidirectional JSON over stdio.
 | State | Cursor event | Command | Notes |
 | --- | --- | --- | --- |
 | reset | `sessionStart` | `tmux-agent-status reset` | |
-| working | `beforeSubmitPrompt`, `postToolUseFailure` | `tmux-agent-status set working` | also fires on tool execution |
+| start | `beforeSubmitPrompt` | `tmux-agent-status start` | a turn begins; replaces whatever the last turn left |
+| working | `postToolUseFailure`, `subagentStart`, `subagentStop` | `tmux-agent-status set working` | a failed tool call is still a running turn |
 | done | `stop` | `tmux-agent-status set done` | |
 | waiting | — | — | no confirmed dedicated waiting event |
 | error | — | — | `postToolUseFailure` is a tool result, not a turn abort |

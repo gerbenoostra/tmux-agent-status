@@ -99,6 +99,36 @@ impl Server {
             .expect("the binary runs")
     }
 
+    /// Run the binary as a hook would, without waiting for it to finish.
+    fn spawn_agent_status(&self, pane: &str, args: &[&str]) -> std::process::Child {
+        Command::new(support::BIN)
+            .args(args)
+            .env("TMUX", format!("{},0,0", self.socket_path()))
+            .env("TMUX_PANE", pane)
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("the binary runs")
+    }
+
+    /// Put a value in a pane's status behind the tool's back, so a test can
+    /// arrange what a pane already holds without going through the policy.
+    fn put_status(&self, pane: &str, value: &str) {
+        match value {
+            "" => self.tmux(&["set-option", "-p", "-u", "-t", pane, "@agent_pane_status"]),
+            value => self.tmux(&["set-option", "-p", "-t", pane, "@agent_pane_status", value]),
+        };
+    }
+
+    /// Every option set on the pane, to tell an unset one from an empty one.
+    fn pane_options(&self, pane: &str) -> String {
+        self.tmux(&["show-options", "-p", "-t", pane])
+    }
+
+    /// Every option set on the pane's window.
+    fn window_options(&self, target: &str) -> String {
+        self.tmux(&["show-options", "-w", "-t", target])
+    }
+
     /// Run the binary with no $TMUX_PANE, using $TMUX_AGENT_STATUS_PANE instead.
     fn agent_status_pane_env(&self, pane: &str, args: &[&str]) -> Output {
         Command::new(support::BIN)
@@ -391,6 +421,9 @@ fn every_state_reaches_the_window_as_its_own_glyph() {
         ("error", "❗"),
         ("waiting", "💬"),
     ] {
+        // Reported onto an empty pane: a pane that already holds a state can
+        // refuse a lower one, which `a_state_is_refused_if_it_ranks_lower` covers.
+        assert_ok(&server.agent_status(&pane, &["reset"]));
         assert_ok(&server.agent_status(&pane, &["set", state]));
         assert_eq!(server.window_status(&pane), glyph, "state {state}");
     }
@@ -678,8 +711,8 @@ fn working_does_not_ring() {
 
     let window = server.new_window_running_command("quiet", "set working");
 
-    // The state landing is proof the setter ran, and proof enough that no bell
-    // is coming: the setter rings before it touches tmux at all.
+    // The state landing is proof the setter ran, and `working` rings for no
+    // pane state at all, so nothing is racing a later bell.
     wait_for(|| server.window_status(&window), |status| status == "🤖");
     let flag = server.tmux(&[
         "display-message",
@@ -756,6 +789,220 @@ fn an_unknown_state_is_loud() {
 
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("unknown state 'busy'"));
+}
+
+#[test]
+fn a_state_is_refused_if_it_ranks_lower_than_the_one_the_pane_holds() {
+    // The table 013 decides: within a pane `error` > `done` > `waiting` >
+    // `working`, and a value this tool does not recognise is replaced by any of
+    // them. The glyph follows the pane, since it is the only pane here.
+    let server = Server::start();
+    let pane = server.first_pane();
+
+    for (held, reported, expected) in [
+        ("", "working", "working"),
+        ("", "waiting", "waiting"),
+        ("", "done", "done"),
+        ("", "error", "error"),
+        ("working", "working", "working"),
+        ("working", "waiting", "waiting"),
+        ("working", "done", "done"),
+        ("working", "error", "error"),
+        ("waiting", "working", "waiting"),
+        ("waiting", "waiting", "waiting"),
+        ("waiting", "done", "done"),
+        ("waiting", "error", "error"),
+        ("done", "working", "done"),
+        ("done", "waiting", "done"),
+        ("done", "done", "done"),
+        ("done", "error", "error"),
+        ("error", "working", "error"),
+        ("error", "waiting", "error"),
+        ("error", "done", "error"),
+        ("error", "error", "error"),
+        ("busy", "working", "working"),
+        ("busy", "waiting", "waiting"),
+        ("busy", "done", "done"),
+        ("busy", "error", "error"),
+    ] {
+        server.put_status(&pane, held);
+
+        assert_ok(&server.agent_status(&pane, &["set", reported]));
+
+        let case = format!("{held:?} then set {reported}");
+        assert_eq!(server.pane_statuses(&pane), [expected], "{case}");
+        assert_eq!(server.window_status(&pane), glyph_of(expected), "{case}");
+    }
+}
+
+#[test]
+fn a_sibling_report_cannot_lower_a_state_that_outranks_it() {
+    // The defect 013 fixes, as a race: an agent runs the hooks of one turn
+    // concurrently, so the `working` of a tool that finished arrives while the
+    // prompt of the tool that is blocked is still open.
+    let server = Server::start();
+    let pane = server.first_pane();
+    assert_ok(&server.agent_status(&pane, &["reset"]));
+
+    let mut running: Vec<_> = (0..20)
+        .map(|_| server.spawn_agent_status(&pane, &["set", "working"]))
+        .collect();
+    running.push(server.spawn_agent_status(&pane, &["set", "waiting"]));
+    running.extend((0..20).map(|_| server.spawn_agent_status(&pane, &["set", "working"])));
+    for mut child in running {
+        assert!(child.wait().expect("the binary exits").success());
+    }
+
+    assert_eq!(server.pane_statuses(&pane), ["waiting"]);
+    assert_eq!(server.window_status(&pane), "💬");
+}
+
+#[test]
+fn the_window_shows_the_highest_ranked_state_of_its_panes() {
+    // The rollup rank is unchanged by 013 and is not the pane precedence:
+    // `waiting` > `error` > `done` > `working`, so a window holding one
+    // finished and one blocked pane asks you to come to the blocked one.
+    let server = Server::start();
+    let first = server.first_pane();
+    let second = server.split(&first);
+
+    for held in ["", "working", "done", "error", "waiting"] {
+        for reported in ["", "working", "done", "error", "waiting"] {
+            server.put_status(&first, held);
+            server.put_status(&second, "");
+            let case = format!("{held:?} beside {reported:?}");
+
+            // Reported through the tool, so the rollup is what the tool wrote.
+            match reported {
+                "" => assert_ok(&server.agent_status(&second, &["reset"])),
+                state => assert_ok(&server.agent_status(&second, &["set", state])),
+            }
+
+            let expected = if rollup_rank(held) >= rollup_rank(reported) {
+                held
+            } else {
+                reported
+            };
+            assert_eq!(server.window_status(&first), glyph_of(expected), "{case}");
+        }
+    }
+}
+
+#[test]
+fn a_refused_state_still_rings() {
+    // The glyph cannot say "blocked on you" while the pane holds a `done`
+    // nobody has looked at, so the bell is the only channel that can. It rings
+    // before tmux is touched at all.
+    let server = Server::start();
+    server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
+    server.tmux(&["set-option", "-g", "bell-action", "other"]);
+    let agent = server.first_pane();
+    assert_ok(&server.agent_status(&agent, &["set", "done"]));
+
+    // From another window, so the bell would land somewhere this can read, and
+    // saying so through tmux is how the test knows the command ran at all.
+    // `-t "$TMUX_PANE"` because a bare `set-option -w` writes to the session's
+    // active window, and this one is created detached.
+    let ringer = server.new_window_running_command(
+        "refused",
+        &format!(r#"set waiting --pane {agent}; tmux set-option -w -t "$TMUX_PANE" @probe_ran 1"#),
+    );
+    wait_for(
+        || server.tmux(&["display-message", "-p", "-t", &ringer, "#{@probe_ran}"]),
+        |ran| ran.trim() == "1",
+    );
+
+    assert_eq!(server.pane_statuses(&agent), ["done"]);
+    assert_eq!(server.window_status(&agent), "✅");
+    let flag = server.tmux(&[
+        "display-message",
+        "-p",
+        "-t",
+        &ringer,
+        "#{window_bell_flag}",
+    ]);
+    assert_eq!(flag.trim(), "1", "a refused state must still ring");
+}
+
+#[test]
+fn start_replaces_whatever_the_last_turn_left() {
+    // The hole precedence opens: a `done` written while you were away is only
+    // cleared by a window or pane change, so reattaching onto the window it is
+    // already on leaves it there, and it outranks every state of the next turn.
+    // Typing a prompt is seeing the pane, and `start` says so.
+    let server = Server::start();
+    let pane = server.first_pane();
+
+    for held in ["", "working", "waiting", "done", "error", "busy"] {
+        server.put_status(&pane, held);
+
+        assert_ok(&server.agent_status(&pane, &["start"]));
+
+        assert_eq!(server.pane_statuses(&pane), ["working"], "held {held:?}");
+        assert_eq!(server.window_status(&pane), "🤖", "held {held:?}");
+    }
+}
+
+#[test]
+fn a_cleared_option_is_unset_rather_than_empty() {
+    // Every write is a format, and a format can only produce a value, so a
+    // clear leaves an empty string behind unless it is normalised away. An
+    // empty option would read the same through a format but show up in
+    // `show-options`, and 001 promises a window with no agent carries none.
+    let server = Server::start();
+    let pane = server.first_pane();
+    let bare = server.new_window("no-agent-here");
+    assert_ok(&server.agent_status(&pane, &["set", "error"]));
+
+    assert_ok(&server.agent_status(&pane, &["clear-window"]));
+
+    assert!(
+        !server.pane_options(&pane).contains("@agent_pane_status"),
+        "pane options: {}",
+        server.pane_options(&pane)
+    );
+    assert!(
+        !server.window_options(&pane).contains("@agent_status"),
+        "window options: {}",
+        server.window_options(&pane)
+    );
+
+    // And a window this tool has never had anything to say about stays clean.
+    assert_ok(&server.agent_status(&bare, &["clear-window"]));
+    assert!(
+        !server.window_options(&bare).contains("@agent_status"),
+        "window options: {}",
+        server.window_options(&bare)
+    );
+    assert!(
+        !server.pane_options(&bare).contains("@agent_pane_status"),
+        "pane options: {}",
+        server.pane_options(&bare)
+    );
+}
+
+/// The glyph of a state name, empty for no state and for a value this tool does
+/// not recognise. Spelled out rather than read from the crate: these tests are
+/// the outside view.
+fn glyph_of(state: &str) -> &'static str {
+    match state {
+        "working" => "🤖",
+        "done" => "✅",
+        "error" => "❗",
+        "waiting" => "💬",
+        _ => "",
+    }
+}
+
+/// The rank the window rollup reduces by, 0 for no state.
+fn rollup_rank(state: &str) -> u8 {
+    match state {
+        "waiting" => 4,
+        "error" => 3,
+        "done" => 2,
+        "working" => 1,
+        _ => 0,
+    }
 }
 
 fn wait_for(read: impl Fn() -> String, done: impl Fn(&str) -> bool) -> String {

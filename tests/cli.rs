@@ -120,6 +120,7 @@ fn non_utf8_arguments_are_usage_errors() {
         [].as_slice(),
         ["surprise"].as_slice(),
         ["set", "done"].as_slice(),
+        ["start"].as_slice(),
         ["reset"].as_slice(),
         ["clear-window"].as_slice(),
         ["notify", "--agent", "mistral-vibe"].as_slice(),
@@ -152,7 +153,7 @@ fn set_rejects_extra_arguments() {
 
 #[test]
 fn boundary_commands_reject_arguments() {
-    for command in ["reset", "finish"] {
+    for command in ["start", "reset", "finish"] {
         let out = run(&[command, "extra"]);
         assert_eq!(out.status.code(), Some(2), "{command}");
         let err = stderr(&out);
@@ -167,6 +168,7 @@ fn boundary_commands_reject_arguments() {
 fn pane_flag_requires_a_value() {
     for args in [
         ["set", "done", "--pane"].as_slice(),
+        ["start", "--pane"].as_slice(),
         ["reset", "--pane"].as_slice(),
         ["finish", "--pane"].as_slice(),
         ["clear-window", "--pane"].as_slice(),
@@ -191,6 +193,7 @@ fn pane_flag_is_allowed_on_hook_commands() {
     // the missing tmux is silently ignored.
     for args in [
         ["set", "done", "--pane", "%0"].as_slice(),
+        ["start", "--pane", "%0"].as_slice(),
         ["reset", "--pane", "%0"].as_slice(),
         ["finish", "--pane", "%0"].as_slice(),
         ["clear-window", "--pane", "%0"].as_slice(),
@@ -231,6 +234,7 @@ fn disabled_does_not_hide_usage_errors() {
 fn json_flag_prints_empty_object_on_hook_commands() {
     for args in [
         ["set", "done", "--json"].as_slice(),
+        ["start", "--json"].as_slice(),
         ["reset", "--json"].as_slice(),
         ["finish", "--json"].as_slice(),
         ["clear-window", "--json"].as_slice(),

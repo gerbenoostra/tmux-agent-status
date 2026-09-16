@@ -7,7 +7,7 @@
       { "type": "command", "command": "tmux-agent-status finish --json" }
     ],
     "beforeSubmitPrompt": [
-      { "type": "command", "command": "tmux-agent-status set working --json" }
+      { "type": "command", "command": "tmux-agent-status start --json" }
     ],
     "subagentStart": [
       { "type": "command", "command": "tmux-agent-status set working --json" }

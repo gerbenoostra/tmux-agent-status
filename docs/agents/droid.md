@@ -9,7 +9,8 @@ path is still supported and auto-migrated.
 | State | Droid event | Command | Notes |
 | --- | --- | --- | --- |
 | reset | `SessionStart` | `tmux-agent-status reset` | |
-| working | `UserPromptSubmit`, `PostToolUse` | `tmux-agent-status set working` | |
+| start | `UserPromptSubmit` | `tmux-agent-status start` | a turn begins; replaces whatever the last turn left |
+| working | `PostToolUse` | `tmux-agent-status set working` |  |
 | done | `Stop` | `tmux-agent-status set done` | |
 | waiting | `Notification` (`permission_prompt\|idle_prompt`) | `tmux-agent-status set waiting` | the idle nag repeats while Droid is blocked |
 | error | — | — | no published error event; a cancelled turn emits `Notification` instead of `Stop` |

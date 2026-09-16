@@ -92,7 +92,9 @@ fn set_is_silent_when_tmux_cannot_be_spawned() {
 }
 
 #[test]
-fn set_is_silent_when_list_panes_fails() {
+fn set_is_silent_when_reading_the_window_fails() {
+    // Reading the window is the first thing every command does, and it is one
+    // invocation starting with `display-message`.
     let dir = fake_tmux_dir();
     write_fake_tmux(
         &dir,
@@ -103,64 +105,57 @@ fn set_is_silent_when_list_panes_fails() {
 }
 
 #[test]
-fn boundary_commands_are_silent_when_list_panes_fails() {
+fn boundary_commands_are_silent_when_reading_the_window_fails() {
     let dir = fake_tmux_dir();
     write_fake_tmux(&dir, "#!/bin/sh\nexit 1\n");
-    for command in ["reset", "finish"] {
-        let out = run(&[command], &format!("{}:", dir.display()));
+    for args in [
+        ["start"].as_slice(),
+        ["reset"].as_slice(),
+        ["finish"].as_slice(),
+        ["clear-window"].as_slice(),
+    ] {
+        let out = run(args, &format!("{}:", dir.display()));
         assert_ok_and_silent(&out);
     }
 }
 
 #[test]
-fn set_is_silent_when_tmux_lists_no_panes() {
-    // An empty list-panes output means the window has no panes; the rollup code
-    // must still handle the empty-slice branch.
+fn set_is_silent_when_tmux_names_no_pane() {
+    // A read that prints nothing names no pane, so there is nothing to write to.
     let dir = fake_tmux_dir();
-    write_fake_tmux(
-        &dir,
-        "#!/bin/sh\nif [ \"$1\" = \"list-panes\" ]; then exit 0; fi\nexit 0\n",
-    );
+    write_fake_tmux(&dir, "#!/bin/sh\nexit 0\n");
     let out = run(&["set", "done"], &format!("{}:", dir.display()));
     assert_ok_and_silent(&out);
 }
 
 #[test]
-fn set_is_silent_when_list_panes_ignores_the_format() {
-    // The tabs in the format are ours, so a line without them is a tmux that
-    // did not answer the question asked. Unreadable *values* degrade to "not
-    // watched"; an unreadable *line* is an error, and a hook still exits 0.
+fn set_is_silent_when_tmux_ignores_the_format() {
+    // A pane id and the tabs are ours to have asked for, so a line without them
+    // is a tmux that did not answer the question asked. A hook still exits 0.
     let dir = fake_tmux_dir();
-    write_fake_tmux(
-        &dir,
-        "#!/bin/sh\n\
-if [ \"$1\" = \"list-panes\" ]; then\n\
-    echo badline\n\
-    exit 0\n\
-fi\n\
-exit 0\n",
-    );
+    write_fake_tmux(&dir, "#!/bin/sh\necho badline\nexit 0\n");
     let out = run(&["set", "done"], &format!("{}:", dir.display()));
     assert_ok_and_silent(&out);
 }
 
 #[test]
-fn a_flag_that_cannot_be_read_still_sets_the_state() {
-    // The point of reading the flags leniently: a tmux whose `window_active` or
-    // `session_attached` this cannot parse loses the immediate clear, not the
-    // glyph. Nobody would ever see the error, so it must not cost the feature.
+fn a_report_is_one_invocation_that_sets_the_pane_and_the_window() {
+    // The writes of one event must reach the server together: it runs one
+    // command at a time, and that is what stops a concurrent hook interleaving
+    // a read and a write of the same option.
     let dir = fake_tmux_dir();
     let log = dir.join("calls");
     write_fake_tmux(
         &dir,
         &format!(
-            "#!/bin/sh\n\
-if [ \"$1\" = \"list-panes\" ]; then\n\
-    printf '%s\\t%s\\t%s\\t%s\\n' '{TMUX_PANE}' '' 'yes' 'many'\n\
-    exit 0\n\
-fi\n\
-echo \"$@\" >> '{log}'\n\
-exit 0\n",
+            r#"#!/bin/sh
+if [ "$1" = "display-message" ]; then
+    printf '%s\n%s\t\n' '{TMUX_PANE}' '{TMUX_PANE}'
+    exit 0
+fi
+echo "$@" >> '{log}'
+exit 0
+"#,
             log = log.display()
         ),
     );
@@ -169,61 +164,55 @@ exit 0\n",
 
     assert_ok_and_silent(&out);
     let calls = fs::read_to_string(&log).expect("the fake tmux logged its calls");
-    assert!(
-        calls.contains(&format!(
-            "set-option -p -t {TMUX_PANE} @agent_pane_status done"
-        )),
-        "calls: {calls}"
+    assert_eq!(
+        calls.lines().count(),
+        1,
+        "the writes of one event must be one invocation: {calls}"
     );
-    assert!(
-        calls.contains(&format!("set-option -w -t {TMUX_PANE} @agent_status ✅")),
-        "calls: {calls}"
-    );
+    for fragment in [
+        format!("set-option -p -F -t {TMUX_PANE} @agent_pane_status"),
+        format!("set-option -w -F -t {TMUX_PANE} @agent_status"),
+    ] {
+        assert!(
+            calls.contains(&fragment),
+            "{fragment} missing from: {calls}"
+        );
+    }
 }
 
 #[test]
-fn set_is_silent_when_setting_the_pane_fails() {
+fn set_is_silent_when_the_write_fails() {
     let dir = fake_tmux_dir();
     write_fake_tmux(
         &dir,
-        "#!/bin/sh\n\
-if [ \"$1\" = \"list-panes\" ]; then\n\
-    printf '%s\\t%s\\t%s\\t%s\\n' '%0' '' '0' '0'\n\
-    exit 0\n\
-fi\n\
-exit 1\n",
+        &format!(
+            r#"#!/bin/sh
+if [ "$1" = "display-message" ]; then
+    printf '%s\n%s\t\n' '{TMUX_PANE}' '{TMUX_PANE}'
+    exit 0
+fi
+exit 1
+"#
+        ),
     );
     let out = run(&["set", "working"], &format!("{}:", dir.display()));
     assert_ok_and_silent(&out);
 }
 
 #[test]
-fn set_is_silent_when_setting_the_window_status_fails() {
+fn clearing_commands_are_silent_when_the_write_fails() {
     let dir = fake_tmux_dir();
     write_fake_tmux(
         &dir,
-        "#!/bin/sh\n\
-if [ \"$1\" = \"set-option\" ] && [ \"$2\" = \"-w\" ]; then exit 1; fi\n\
-exit 0\n",
-    );
-    let out = run(&["set", "done"], &format!("{}:", dir.display()));
-    assert_ok_and_silent(&out);
-}
-
-#[test]
-fn clearing_commands_are_silent_when_clearing_a_pane_fails() {
-    let dir = fake_tmux_dir();
-    write_fake_tmux(
-        &dir,
-        "#!/bin/sh\n\
-if [ \"$1\" = \"list-panes\" ]; then\n\
-    printf '%s\t%s\t%s\t%s\n' '%0' 'done' '0' '0'\n\
-    exit 0\n\
-fi\n\
-if [ \"$1\" = \"set-option\" ] && [ \"$2\" = \"-p\" ] && [ \"$3\" = \"-u\" ]; then\n\
-    exit 1\n\
-fi\n\
-exit 0\n",
+        &format!(
+            r#"#!/bin/sh
+if [ "$1" = "display-message" ]; then
+    printf '%s\n%s\tdone\n' '{TMUX_PANE}' '{TMUX_PANE}'
+    exit 0
+fi
+exit 1
+"#
+        ),
     );
     for args in [["clear-window", TMUX_PANE].as_slice(), ["reset"].as_slice()] {
         let out = run(args, &format!("{}:", dir.display()));
@@ -263,11 +252,10 @@ fn hook_is_silent_when_tmux_is_not_on_path() {
 
 #[test]
 fn set_is_silent_when_tmux_prints_invalid_utf8() {
-    // `String::from_utf8` can fail; the error path still exits 0 from a hook.
     let dir = fake_tmux_dir();
     write_fake_tmux(
         &dir,
-        "#!/bin/sh\nif [ \"$1\" = \"list-panes\" ]; then python3 -c \"import sys; sys.stdout.buffer.write(b'\\xff\\n')\"; exit 0; fi\nexit 0\n",
+        "#!/bin/sh\npython3 -c \"import sys; sys.stdout.buffer.write(b'\\xff\\n')\"\nexit 0\n",
     );
     let out = run(&["set", "done"], &format!("{}:", dir.display()));
     assert_ok_and_silent(&out);
@@ -298,7 +286,7 @@ fn tmux_agent_status_pane_overrides_tmux_pane() {
     assert_ok_and_silent(&out);
     let calls = fs::read_to_string(&log).expect("fake tmux logged calls");
     assert!(
-        calls.contains("set-option -p -t %override @agent_pane_status done"),
+        calls.contains("display-message -p -t %override"),
         "calls: {calls}"
     );
 }
@@ -321,13 +309,11 @@ fn an_empty_pane_flag_falls_back_to_tmux_pane() {
     assert_ok_and_silent(&out);
     let calls = fs::read_to_string(&log).expect("fake tmux logged calls");
     assert!(
-        calls.contains(&format!(
-            "set-option -p -t {TMUX_PANE} @agent_pane_status done"
-        )),
+        calls.contains(&format!("display-message -p -t {TMUX_PANE}")),
         "calls: {calls}"
     );
     assert!(
-        !calls.contains("set-option -p -t @agent_pane_status"),
+        !calls.contains("-t #{pane_id}") && !calls.contains("-t  "),
         "an empty pane must never be passed to tmux: {calls}"
     );
 }
@@ -370,9 +356,7 @@ fn empty_tmux_agent_status_pane_falls_back_to_tmux_pane() {
     assert_ok_and_silent(&out);
     let calls = fs::read_to_string(&log).expect("fake tmux logged calls");
     assert!(
-        calls.contains(&format!(
-            "set-option -p -t {TMUX_PANE} @agent_pane_status done"
-        )),
+        calls.contains(&format!("display-message -p -t {TMUX_PANE}")),
         "calls: {calls}"
     );
 }

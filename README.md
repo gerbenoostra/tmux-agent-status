@@ -20,9 +20,15 @@ The following agent states are distinguished:
 | `working` | 🤖 | a turn is in flight | the next event on that pane |
 | `done` | ✅ | the turn ended cleanly | you look at the window |
 | `error` | ❗ | the turn aborted: API error, context overflow, unparseable tool call | you look at the window |
-| `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, the idle nag | you look at the window |
+| `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, an idle nag while it is still blocked | you look at the window |
 
-If one window contains multiple agents, the most demanding status is shown:  `waiting` > `error` > `done` > `working`.
+If one window contains multiple agents, the most demanding status is shown: `waiting` > `error` > `done` > `working`.
+
+An agent runs several things at once, so its events arrive interleaved. Within one pane the glyph
+keeps the most important state you have not seen yet, `error` > `done` > `waiting` > `working`, and
+ignores a lower one until you look at the window or type the next prompt. A tool call finishing in
+parallel cannot hide an open permission prompt. The flip side: if the agent asks for something after
+a turn you have not looked at, the entry keeps its ✅, but the bell still rings.
 
 For windows with no agent this tool is a no-op.
 
