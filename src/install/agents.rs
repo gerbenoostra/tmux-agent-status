@@ -327,11 +327,15 @@ impl Agent {
 
     /// Mark a file whose hooks are already present as seen by us.
     ///
-    /// The markers are a sentinel that stops a second append, not a container
-    /// that encloses specific lines; TOML entries are found by their `name`
-    /// keys when they need to be managed later.
+    /// For TOML this wraps the existing `[[hooks]]` tables that carry our names
+    /// inside the marker block, so the future `uninstall` can remove what is
+    /// ours without reparsing the whole file. TOML entries are still found by
+    /// their `name` keys when they need to be merged or removed.
     pub fn adopt(&self, current: &str) -> String {
-        append_marked(current, "")
+        match self.shape {
+            Shape::TomlBlock => adopt_toml(current),
+            _ => append_marked(current, ""),
+        }
     }
 
     /// The event keys we own, which are the only ones a merge touches.
@@ -582,6 +586,76 @@ fn ends_at_top_level(text: &str) -> bool {
         }
     }
     true
+}
+
+/// Wrap the existing `[[hooks]]` tables that carry our names in a marked block.
+///
+/// This is the "adopt" path: the hooks are already present but unmarked, and
+/// the only change is to wrap them in markers so later runs know which block
+/// is ours to manage. Any tables that are not ours are left outside the block.
+fn adopt_toml(current: &str) -> String {
+    let lines: Vec<&str> = current.lines().collect();
+    let headers: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.trim() == "[[hooks]]")
+        .map(|(index, _)| index)
+        .collect();
+
+    // Identify each [[hooks]] table that belongs to us by looking for a
+    // `name = "tmux-agent-status..."` line before the next table header.
+    let mut our_blocks: Vec<(usize, usize)> = Vec::new();
+    for (index, &start) in headers.iter().enumerate() {
+        let end = headers.get(index + 1).copied().unwrap_or(lines.len());
+        let ours = lines[start..end].iter().any(|line| {
+            line.trim()
+                .strip_prefix("name")
+                .and_then(|rest| rest.trim_start().strip_prefix('='))
+                .map(str::trim)
+                .and_then(|value| value.strip_prefix('"')?.strip_suffix('"'))
+                .is_some_and(|name| name.starts_with("tmux-agent-status"))
+        });
+        if ours {
+            our_blocks.push((start, end));
+        }
+    }
+
+    // Merge adjacent blocks so a single marked block wraps a contiguous set
+    // of our tables, even if a comment or blank line sits between them.
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in our_blocks {
+        if let Some(last) = merged.last_mut() {
+            if last.1 >= start {
+                last.1 = end;
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+
+    let mut out = String::new();
+    let mut position = 0;
+    for (start, end) in merged {
+        for line in &lines[position..start] {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str(super::MARKER_START);
+        out.push('\n');
+        for line in &lines[start..end] {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str(super::MARKER_END);
+        out.push('\n');
+        position = end;
+    }
+    for line in &lines[position..] {
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    out
 }
 
 /// Where a string that starts at `at` closes, or `None` if it never does.
@@ -1045,8 +1119,86 @@ mod tests {
         let vibe = agent("mistral-vibe");
         assert_eq!(vibe.merge(vibe.contents), Ok(Plan::AlreadyInstalled));
         assert!(vibe.present_unmarked(vibe.contents));
-        assert!(super::super::has_marked_block(&vibe.adopt(vibe.contents)));
+        let adopted = vibe.adopt(vibe.contents);
+        assert!(super::super::has_marked_block(&adopted));
+        // The hooks must sit between the markers, not after an empty marked
+        // block at the end of the file.
+        let start = adopted.find(super::super::MARKER_START).unwrap();
+        let end = adopted.find(super::super::MARKER_END).unwrap();
+        assert!(start < end);
+        let between = &adopted[start + super::super::MARKER_START.len()..end];
+        assert!(between.contains("tmux-agent-status-pre-tool"), "{adopted}");
+        assert!(between.contains("tmux-agent-status-post-tool"), "{adopted}");
+        assert!(
+            between.contains("tmux-agent-status-post-agent"),
+            "{adopted}"
+        );
         assert!(!vibe.present_unmarked("[[hooks]]\nname = \"theirs\"\n"));
+    }
+
+    #[test]
+    fn adopt_wraps_unmarked_hooks_in_place() {
+        let vibe = agent("mistral-vibe");
+        let ours = vibe.contents;
+        let before = format!(
+            "# user prefix\n[[hooks]]\nname = \"theirs-before\"\n\n{ours}[[hooks]]\nname = \"theirs-after\"\n"
+        );
+        let adopted = vibe.adopt(&before);
+        assert!(super::super::has_marked_block(&adopted));
+        assert!(adopted.starts_with("# user prefix\n"), "{adopted}");
+        assert!(adopted.contains("name = \"theirs-before\""), "{adopted}");
+        assert!(adopted.contains("name = \"theirs-after\""), "{adopted}");
+        let start = adopted.find(super::super::MARKER_START).unwrap();
+        let end = adopted.find(super::super::MARKER_END).unwrap();
+        let between = &adopted[start + super::super::MARKER_START.len()..end];
+        assert!(between.contains("tmux-agent-status-pre-tool"), "{adopted}");
+        assert!(between.contains("tmux-agent-status-post-tool"), "{adopted}");
+        assert!(
+            between.contains("tmux-agent-status-post-agent"),
+            "{adopted}"
+        );
+    }
+
+    #[test]
+    fn adopt_merges_adjacent_unmarked_blocks_into_one() {
+        let vibe = agent("mistral-vibe");
+        let ours = vibe.contents;
+        let before = format!("{ours}\n# a note\n{ours}");
+        let adopted = vibe.adopt(&before);
+        assert_eq!(
+            adopted.matches(super::super::MARKER_START).count(),
+            1,
+            "expected one marked block, got:\n{adopted}"
+        );
+        assert!(adopted.contains("# a note"), "{adopted}");
+        assert!(
+            adopted.matches("tmux-agent-status-pre-tool").count() == 2,
+            "the two copies of our hooks should survive:\n{adopted}"
+        );
+    }
+
+    #[test]
+    fn adopt_keeps_non_our_tables_outside_the_marked_block() {
+        let vibe = agent("mistral-vibe");
+        let ours = vibe.contents;
+        // Single-quoted names are not parsed as ours and must stay outside the
+        // marked block, which also exercises the early-exit branch in the name
+        // parser.
+        let before = format!("{ours}\n[[hooks]]\nname = 'theirs'\n{ours}");
+        let adopted = vibe.adopt(&before);
+        assert_eq!(
+            adopted.matches(super::super::MARKER_START).count(),
+            2,
+            "expected two marked blocks, got:\n{adopted}"
+        );
+        assert!(adopted.contains("name = 'theirs'"), "{adopted}");
+    }
+
+    #[test]
+    fn a_non_toml_adopt_appends_an_empty_marked_block() {
+        let codex = agent("codex");
+        let out = codex.adopt("{}");
+        assert!(super::super::has_marked_block(&out));
     }
 
     #[test]

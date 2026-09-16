@@ -338,6 +338,14 @@ fn hooks_already_there_without_markers_are_adopted_rather_than_repeated() {
         1,
         "a second copy of the hooks was appended:\n{after}"
     );
+    let start = after.find("# >>> tmux-agent-status >>>").unwrap();
+    let end = after.find("# <<< tmux-agent-status <<<").unwrap();
+    assert!(start < end);
+    let between = &after[start..end];
+    assert!(
+        between.contains("tmux-agent-status-pre-tool"),
+        "the markers wrapped an empty block instead of the hooks:\n{after}"
+    );
     // And a second run has nothing left to do.
     let again = Script::saying_yes();
     let report = install::run(&only_agents(&dir, &["mistral-vibe"]), &again);
