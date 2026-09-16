@@ -741,7 +741,10 @@ impl Lock {
     /// breaks a live lock held by a slow filesystem.
     fn break_or_report(path: &Path, faults: &Faults) -> Result<Lock, Error> {
         let held = fs::read_to_string(path).unwrap_or_default();
-        let holder = Holder::from_line(held.trim());
+        // Trim line endings only: an empty identity is a valid third field,
+        // and `trim()` would strip the trailing tab that marks it.
+        let line = held.trim_start().trim_end_matches(['\n', '\r']);
+        let holder = Holder::from_line(line);
         match holder.as_ref().map(Holder::liveness) {
             Some(Liveness::Gone) => {
                 faults
@@ -1156,7 +1159,23 @@ mod tests {
             host: "test-host".to_owned(),
             identity: "test identity".to_owned(),
         };
-        assert_eq!(Holder::from_line(holder.to_line().trim()), Some(holder));
+        assert_eq!(
+            Holder::from_line(holder.to_line().trim_end_matches(['\n', '\r'])),
+            Some(holder)
+        );
+    }
+
+    #[test]
+    fn a_holder_line_with_empty_identity_round_trips() {
+        let holder = Holder {
+            pid: 42,
+            host: "test-host".to_owned(),
+            identity: String::new(),
+        };
+        assert_eq!(
+            Holder::from_line(holder.to_line().trim_end_matches(['\n', '\r'])),
+            Some(holder)
+        );
     }
 
     #[test]
