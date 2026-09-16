@@ -13,7 +13,8 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::time::Duration;
 
 use serde_json::{Map, Value};
 
@@ -797,10 +798,7 @@ impl Claude {
     pub fn install_plugin(&self, marketplace: &str) -> Result<(), String> {
         for command in self.plugin_commands(marketplace) {
             let (program, args) = command.split_first().expect("every command has a program");
-            let out = Command::new(program)
-                .args(args)
-                .stdin(Stdio::null())
-                .output()
+            let out = output_retrying(Command::new(program).args(args).stdin(Stdio::null()))
                 .map_err(|error| format!("{}: {error}", command.join(" ")))?;
             if !out.status.success() {
                 return Err(format!(
@@ -815,15 +813,46 @@ impl Claude {
     }
 
     fn ask(&self, args: &[&str]) -> Option<String> {
-        let out = Command::new(&self.program)
-            .args(args)
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .ok()?;
+        let out = output_retrying(
+            Command::new(&self.program)
+                .args(args)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .ok()?;
         out.status
             .success()
             .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+}
+
+/// Run a freshly-written executable, retrying a transient `ETXTBSY`.
+///
+/// A script just written and chmod'd can still be reported busy for a moment
+/// on some filesystems - observed under the Linux Nix build sandbox, where a
+/// stub written by a test and exec'd immediately after occasionally raced the
+/// kernel's own close of the write handle. A real `claude` binary mid-upgrade
+/// (its own file being replaced) can hit the same error, so the retry belongs
+/// here rather than only in a test helper.
+fn output_retrying(command: &mut Command) -> std::io::Result<Output> {
+    retry_while_busy(|| command.output())
+}
+
+/// The backoff loop `output_retrying` runs, pulled out so it can be tested
+/// without a real child process: `attempt` stands in for `Command::output`.
+fn retry_while_busy<T>(mut attempt: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut delay = Duration::from_millis(5);
+    loop {
+        match attempt() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && delay < Duration::from_millis(200) =>
+            {
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            result => return result,
+        }
     }
 }
 
@@ -1401,5 +1430,47 @@ mod tests {
         assert!(toml_names("notname = \"tmux-agent-status-x\"\n").is_empty());
         assert!(toml_names("name: \"tmux-agent-status-x\"\n").is_empty());
         assert!(toml_names("name = tmux-agent-status-x\n").is_empty());
+    }
+
+    fn busy() -> std::io::Error {
+        std::io::Error::from(std::io::ErrorKind::ExecutableFileBusy)
+    }
+
+    #[test]
+    fn a_busy_attempt_is_retried_until_it_succeeds() {
+        let mut calls = 0;
+        let result = retry_while_busy(|| {
+            calls += 1;
+            if calls < 3 { Err(busy()) } else { Ok(calls) }
+        });
+        assert_eq!(result.expect("the third attempt succeeds"), 3);
+    }
+
+    #[test]
+    fn an_error_that_is_not_busy_is_not_retried() {
+        let mut calls = 0;
+        let result = retry_while_busy(|| {
+            calls += 1;
+            Err::<(), _>(std::io::Error::from(std::io::ErrorKind::NotFound))
+        });
+        assert_eq!(calls, 1);
+        assert_eq!(
+            result.expect_err("not-found is reported as-is").kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn a_busy_attempt_that_never_clears_still_gives_up() {
+        let mut calls = 0;
+        let result = retry_while_busy(|| {
+            calls += 1;
+            Err::<(), _>(busy())
+        });
+        assert!(calls > 1, "never retried at all");
+        assert_eq!(
+            result.expect_err("busy forever is still an error").kind(),
+            std::io::ErrorKind::ExecutableFileBusy
+        );
     }
 }
