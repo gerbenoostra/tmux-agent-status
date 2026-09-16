@@ -246,6 +246,7 @@ dependencies = [
  "libc",
  "pico-args",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

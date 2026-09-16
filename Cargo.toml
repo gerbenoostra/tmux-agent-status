@@ -33,3 +33,4 @@ strip = true
 
 [dev-dependencies]
 libc = "0.2"
+tempfile = "3.27.0"

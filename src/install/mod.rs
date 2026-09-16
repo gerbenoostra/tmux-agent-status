@@ -1640,6 +1640,7 @@ pub fn git_repo_of(path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn a_block_is_appended_with_its_own_newlines() {
@@ -1989,8 +1990,11 @@ mod tests {
 
     #[test]
     fn the_summary_says_which_of_some_and_all_it_actually_was() {
-        let here = env!("CARGO_MANIFEST_DIR");
-        let versioned = format!("Codex CLI: edited {here}/src/install/mod.rs");
+        let tmp = tempfile::tempdir().expect("a temp directory");
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        fs::create_dir(repo.join(".git")).unwrap();
+        let versioned = format!("Codex CLI: edited {}", repo.join("hooks.json").display());
         let unmanaged = "Cursor: edited /nowhere/at/all/hooks.json".to_owned();
         // A line naming no path: the plugin route installs commands, not a
         // file, and it is neither versioned nor unmanaged.
@@ -2022,11 +2026,14 @@ mod tests {
     }
 
     #[test]
-    fn this_checkout_is_a_git_repository_and_the_root_is_not() {
+    fn a_file_under_a_git_directory_is_versioned_and_the_root_is_not() {
         // Reporting, never policy: for a user whose other agent configs are
         // versioned, an unmanaged write is state that quietly does not exist
         // on their next machine.
-        let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let tmp = tempfile::tempdir().expect("a temp directory");
+        let here = tmp.path().join("checkout");
+        fs::create_dir_all(&here).unwrap();
+        fs::create_dir(here.join(".git")).unwrap();
         assert_eq!(git_repo_of(&here.join("src/install/mod.rs")), Some(here));
         assert_eq!(git_repo_of(Path::new("/")), None);
     }
