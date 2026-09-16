@@ -24,6 +24,11 @@ The following agent states are distinguished:
 
 If one window contains multiple agents, the most demanding status is shown:  `waiting` > `error` > `done` > `working`.
 
+Within one pane the order is a different one: a later event may not demote a state you have not
+seen yet, `error` > `done` > `waiting` > `working`. A tool call finishing cannot hide a prompt that
+is still open, and a nag arriving after a finished turn cannot turn ✅ into a 💬 with nothing
+behind it.
+
 For windows with no agent this tool is a no-op.
 
 The glyphs are emoji, so they survive a font change. They need a tmux client in UTF-8 mode; a client

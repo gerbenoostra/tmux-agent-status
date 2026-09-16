@@ -86,9 +86,14 @@ These apply to every agent page:
 - **A missing binary is silent.** If `tmux-agent-status` is not on the `PATH` the
   hook inherits, the command exits 0 and no error is raised anywhere; the only
   symptom is that no glyph ever appears.
-- **`waiting` must repeat to be useful.** Do not narrow the waiting event to
-  permission prompts. The idle nag that fires while the agent is still blocked
-  is what makes `waiting` visible at all.
+- **`waiting` outranks a later `working`.** A state that means blocked on you is
+  not replaced by the `working` of a sibling tool call that finishes while the
+  prompt is still open, so a waiting event does not have to repeat to stay
+  visible. Map the events that mean the agent is blocked on you, and leave out a
+  nag that only fires once the turn has already ended: it cannot replace the ✅
+  it arrives on, and it puts a 💬 up if you have already looked. The exception is
+  an agent whose nag is the only event a cancelled turn emits, which is why
+  Droid maps `idle_prompt` and Claude Code does not.
 
 ## Prove it fired
 

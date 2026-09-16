@@ -55,7 +55,9 @@ Two things it cannot do:
 | 1 | `working` | 🤖 | a turn is in flight | the next state event on that pane |
 
 The rank is only used to reduce several agent panes in one window to one glyph; see the rollup
-below. `error` is split out of `waiting` rather than folded into it, because "it stopped because it
+below. It is **not** the order in which two events on the *same* pane win: a later event may not
+demote a state nobody has seen yet, and that order is `error` > `done` > `waiting` > `working`. See
+013, which also supersedes the `Notification` row of the hook table below. `error` is split out of `waiting` rather than folded into it, because "it stopped because it
 broke" and "it stopped because it needs an answer" call for different reactions.
 
 `working` is deliberately **sticky** - it must not clear on focus, or an agent you glance at goes
@@ -264,7 +266,7 @@ than by separate `printf` entries, so each event is one hook entry; four standal
 | `SessionEnd` | all | - | `finish` |
 | `UserPromptSubmit` | all | - | `working` |
 | `PostToolUse` | all | - | `working` |
-| `Notification` | all (**not** narrowed) | yes | `waiting` |
+| `Notification` | `permission_prompt\|elicitation_dialog\|elicitation_url_dialog\|agent_needs_input` | yes | `waiting` |
 | `PreToolUse` | `AskUserQuestion\|ExitPlanMode` | yes | `waiting` |
 | `Stop` | all | yes | `done` |
 | `StopFailure` | all | yes | `error` |
@@ -272,9 +274,11 @@ than by separate `printf` entries, so each event is one hook entry; four standal
 The last two rows are the ones easiest to leave out, and each closes a way for the icon to lie.
 Without `StopFailure`, a turn that dies on an API error, context overflow or unparseable tool call
 stays 🤖 **working** forever. Without `PreToolUse` on `AskUserQuestion|ExitPlanMode`, a plan-mode
-dialog sitting there waiting for you also shows **working**. And `Notification` must **not** be
-narrowed to permission prompts and elicitation dialogs: the 60s idle nag is precisely the event
-meaning "still blocked, and has been for a while".
+dialog sitting there waiting for you also shows **working**. `Notification` was originally left un-narrowed here, on the reasoning that its idle nag is the
+event meaning "still blocked, and has been for a while". 013 reverses that, on two measurements:
+the nag does not fire while a permission prompt is open, and it fires long after a turn has ended,
+where the state it would replace is a `done` that now outranks it. The repeat it was kept for is
+also no longer needed, since a `working` can no longer hide a `waiting`.
 
 **Rejected as a substitute for any of the three**: a display-side filter that dims an agent idle for
 over an hour. It does not correct a wrong state, it only greys it out, and the window list has
@@ -292,7 +296,10 @@ bar: several `tmux` invocations plus a state-file write per event is heavy enoug
 busy turn, and a status indicator that is felt has already failed.
 
 Target: `set-option -p` on `$TMUX_PANE`, `list-panes -F` to read the window's panes, `set-option -w`
-for the rollup. Three calls, no fork beyond tmux itself, no file touched. Pane resolution comes from
+for the rollup. Three calls, no fork beyond tmux itself, no file touched. 013 lowers this to two
+tmux processes - one read, then every write of the event as a single command list - and moves each
+decision that depends on the current state into the formats those writes carry, because hooks of
+one turn can run concurrently and a decision taken on the read can be stale by the time it lands. Pane resolution comes from
 `$TMUX_PANE` (present in the hook's environment); the process-ancestry walk is the fallback, not the
 path. The rollup can collapse to two calls when the new state already outranks the current
 `@agent_status` and nothing needs re-reading, but that is an optimisation, not the contract.
