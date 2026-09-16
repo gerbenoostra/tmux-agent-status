@@ -1,6 +1,6 @@
 # 013 - A later event may not demote a state you have not seen
 
-Status: in progress.
+Status: implemented.
 
 Covers *which of two events on one pane wins*, and *how the write that decides it stays atomic*.
 What the states mean, the rollup across panes and the focus-clear rule are 001, which stays
@@ -207,8 +207,13 @@ itself.
 - `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, and the coverage
   gate in the justfile.
 - End to end, with the shipped hook files and the built binary on `PATH`, from a window that is not
-  the current one:
-  1. Devin, one turn issuing a read and a permission-gated `exec` in parallel: 💬 while the prompt
-     is open, 🤖 after approving and looking away, ✅ at `Stop`.
-  2. Claude Code, a permission prompt: 💬; a finished turn left unseen for over a minute stays ✅.
-  3. A two-pane window, one pane finished, one blocked: 💬.
+  the current one. Both run against a real session, with a disposable config and a scratch project:
+  1. Devin, one turn issuing a read and a permission-gated `exec` in parallel: `waiting` and 💬 with
+     the prompt on screen, `done` and ✅ once the turn ends. This is the reported defect, and it
+     fails on the previous build.
+  2. Claude Code with the narrowed matcher: the same two, `waiting`/💬 then `done`/✅.
+
+  Not covered end to end, and left to the tmux-server tier: the two-pane rollup, and the reattach
+  path that `start` closes - reaching it by hand needs a client attached to a session whose current
+  window is already the agent's. `start_replaces_whatever_the_last_turn_left` covers it against a
+  real server instead.
