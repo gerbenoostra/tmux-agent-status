@@ -71,6 +71,10 @@ impl Script {
 }
 
 impl Interaction for Script {
+    fn as_ask(&self) -> &dyn Ask {
+        self
+    }
+
     fn say(&self, line: &str) {
         self.said
             .lock()

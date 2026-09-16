@@ -21,6 +21,8 @@ use super::write::{Ask, Warning};
 /// behind "the user said no" would be unreachable from a test suite, which is
 /// the same thing as unread.
 pub trait Interaction: Ask {
+    /// Return this implementor as an [`Ask`] for callers that only need warnings.
+    fn as_ask(&self) -> &dyn Ask;
     fn say(&self, line: &str);
     /// `recommended` is what `-y` answers and what a bare return takes.
     fn confirm(&self, question: &str, recommended: bool) -> bool;
@@ -90,6 +92,10 @@ impl Prompt {
 }
 
 impl Interaction for Prompt {
+    fn as_ask(&self) -> &dyn Ask {
+        self
+    }
+
     fn is_dry_run(&self) -> bool {
         self.answers == Answers::DryRun
     }

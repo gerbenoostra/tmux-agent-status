@@ -851,7 +851,7 @@ fn write_one(
     let verify = change.verify.as_ref().map(|v| v as &dyn write::Verify);
     let writer = write::SafeWrite {
         path: &change.path,
-        ask: prompt,
+        ask: prompt.as_ask(),
         parses: change.parses,
         verify,
         faults: write::Faults::from_env(),
