@@ -8,7 +8,8 @@ Shape A agent with a drop-in JSON hook file. Codex reads `hooks.json` from
 | State | Codex event | Command | Notes |
 | --- | --- | --- | --- |
 | reset | `SessionStart` (`startup\|resume\|clear\|compact`) | `tmux-agent-status reset` | |
-| working | `UserPromptSubmit`, `PostToolUse` | `tmux-agent-status set working` | |
+| start | `UserPromptSubmit` | `tmux-agent-status start` | a turn begins; replaces whatever the last turn left |
+| working | `PostToolUse` | `tmux-agent-status set working` |  |
 | done | `Stop` | `tmux-agent-status set done` | |
 | waiting | `PermissionRequest` | `tmux-agent-status set waiting` | permission prompt |
 | error | — | — | no published error event; inferred from missing clean `Stop` |

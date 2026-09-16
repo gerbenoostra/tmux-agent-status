@@ -11,7 +11,8 @@ TOML alternative; an earlier version of this page claimed one existed and was wr
 | State | Grok event | Command | Notes |
 | --- | --- | --- | --- |
 | reset | `SessionStart` | `tmux-agent-status reset` | |
-| working | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop` | `tmux-agent-status set working` | a failed tool call is still a running turn |
+| start | `UserPromptSubmit` | `tmux-agent-status start` | a turn begins; replaces whatever the last turn left |
+| working | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop` | `tmux-agent-status set working` | a failed tool call is still a running turn |
 | done | `Stop` | `tmux-agent-status set done` | rings the bell; `finish` never does |
 | waiting | — | — | `Notification` is documented but not described as a blocked-on-user signal |
 | error | — | — | `StopFailure` is documented as a turn ending with an API error; left unmapped until verified |

@@ -204,21 +204,16 @@ pub fn unset_window_status_if_empty(pane: &PaneId) -> Cmd {
     ])
 }
 
-/// Print the pane's status.
-pub fn show_pane_status(pane: &PaneId) -> Cmd {
-    cmd(&[
-        "display-message",
-        "-p",
-        "-t",
-        pane.as_str(),
-        &format!("#{{{PANE_OPTION}}}"),
-    ])
-}
-
 /// Run `commands` as one tmux invocation and return what they printed.
 ///
 /// One invocation is one command queue on the server, and an error stops the
 /// rest of it.
+///
+/// Never called with an empty list, which `tmux` would read as `new-session`:
+/// every command ends by recomputing the window glyph, so every list has at
+/// least those two commands in it. A guard against it would be a branch no
+/// integration test can reach, and unreachable branches are what the coverage
+/// gate exists to keep out.
 pub fn run(commands: &[Cmd]) -> io::Result<String> {
     let mut args: Vec<&str> = Vec::new();
     for command in commands {
@@ -328,7 +323,6 @@ mod tests {
             unset_pane_status_if_empty(&pane),
             set_window_status(&pane, "#{x}"),
             unset_window_status_if_empty(&pane),
-            show_pane_status(&pane),
         ] {
             assert!(command.iter().all(|arg| !arg.ends_with(';')), "{command:?}");
         }

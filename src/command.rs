@@ -18,32 +18,41 @@ use crate::tmux::{self, Cmd, PaneId, Window};
 
 /// `tmux-agent-status set <state>`: report a state on the pane and recompute the window.
 ///
-/// The bell rings when a ringing state reached the pane, which includes one
-/// cleared at once because the window is watched, and stays silent when the pane
-/// kept a state that outranks it. With no tmux to write to, or a tmux call that
-/// fails, it rings regardless: the bell is a separate channel, which reaches the
-/// human through the terminal as a tmux option never can.
+/// The bell rings for every state that rings, whether or not the pane keeps it.
+/// A `waiting` refused by a `done` nobody has seen still means the agent is
+/// blocked on you, and the glyph cannot say so until the window is looked at;
+/// the bell is the one channel that still can. It is rung before tmux is
+/// touched, so no tmux, or a tmux that fails, costs the write and not the
+/// signal.
 pub fn set(state: State, pane: Option<&str>) -> io::Result<()> {
+    if state.rings_bell() {
+        bell::ring();
+    }
     let Some(target) = tmux::resolve_pane(pane) else {
-        ring_if(state.rings_bell());
         return Ok(());
     };
-    let reported = tmux::window(&target).and_then(|window| {
-        let mut commands = report(&window, state);
-        commands.push(tmux::show_pane_status(&window.pane));
-        tmux::run(&commands)
-    });
-    match reported {
-        Ok(printed) => {
-            let held = printed.trim_end();
-            ring_if(state.rings_bell() && (held.is_empty() || held == state.name()));
-            Ok(())
-        }
-        Err(error) => {
-            ring_if(state.rings_bell());
-            Err(error)
-        }
-    }
+    let window = tmux::window(&target)?;
+    tmux::run(&report(&window, state)).map(drop)
+}
+
+/// `tmux-agent-status start`: a turn begins on this pane.
+///
+/// The one write that does not defer to what the pane already holds. It is
+/// reported by the event that means the human typed a prompt, and typing into a
+/// pane is seeing it, so whatever the last turn left there - a `done` no window
+/// switch ever cleared, an `error` - is over. Without it, a state left by the
+/// last turn would outrank every state of this one, and the whole turn would
+/// render as the last one's ending.
+///
+/// No bell: it opens a turn rather than ending one.
+pub fn start(pane: Option<&str>) -> io::Result<()> {
+    let Some(target) = tmux::resolve_pane(pane) else {
+        return Ok(());
+    };
+    let window = tmux::window(&target)?;
+    let mut commands = write(&window.pane, State::Working.name()).to_vec();
+    commands.extend(recompute(&window.pane));
+    tmux::run(&commands).map(drop)
 }
 
 /// `tmux-agent-status finish`: silently resolve this pane's session to done.
@@ -126,10 +135,4 @@ fn recompute(pane: &PaneId) -> [Cmd; 2] {
         tmux::set_window_status(pane, &formats::glyph()),
         tmux::unset_window_status_if_empty(pane),
     ]
-}
-
-fn ring_if(rings: bool) {
-    if rings {
-        bell::ring();
-    }
 }

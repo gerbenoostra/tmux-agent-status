@@ -76,6 +76,7 @@ fn run() -> Result<ExitCode, MainError> {
 
     match subcommand.as_str() {
         "set" => run_set(pargs),
+        "start" => run_start(pargs),
         "reset" => run_reset(pargs),
         "finish" => run_finish(pargs),
         "clear-window" => run_clear_window(pargs),
@@ -102,6 +103,14 @@ fn run_set(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let state = free[0].parse::<State>()?;
     let pane = pane.as_deref();
     Ok(run_hook(|| command::set(state, pane), json))
+}
+
+fn run_start(mut pargs: Arguments) -> Result<ExitCode, MainError> {
+    let pane = pane_value(&mut pargs)?;
+    let json = pargs.contains("--json");
+    reject_extra_with_prefix(pargs, "start")?;
+    let pane = pane.as_deref();
+    Ok(run_hook(|| command::start(pane), json))
 }
 
 fn run_reset(mut pargs: Arguments) -> Result<ExitCode, MainError> {
@@ -294,6 +303,9 @@ tmux-agent-status - agent lifecycle events as one glyph on the tmux window entry
 usage:
   tmux-agent-status set <state> [--pane <id>] [--json]
                               write this pane's state and recompute the window
+  tmux-agent-status start [--pane <id>] [--json]
+                              begin a turn: replace whatever this pane holds
+                              with working
   tmux-agent-status reset [--pane <id>] [--json]
                               clear this pane's state and recompute the window
   tmux-agent-status finish [--pane <id>] [--json]

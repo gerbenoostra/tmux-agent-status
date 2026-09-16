@@ -6,7 +6,7 @@
     { "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }
   ],
   "UserPromptSubmit": [
-    { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }
+    { "hooks": [{ "type": "command", "command": "tmux-agent-status start" }] }
   ],
   "PostToolUse": [
     { "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }

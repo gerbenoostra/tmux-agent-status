@@ -8,7 +8,7 @@
       { "type": "command", "command": "tmux-agent-status finish --json" }
     ],
     "userPromptSubmitted": [
-      { "type": "command", "command": "tmux-agent-status set working --json" }
+      { "type": "command", "command": "tmux-agent-status start --json" }
     ],
     "notification": [
       { "type": "command", "command": "tmux-agent-status set waiting --json" }

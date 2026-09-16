@@ -65,9 +65,17 @@ last and show 🤖 over a `waiting` pane.
    `elicitation_complete`, `elicitation_response`, `quota_auto_resume_*`). The matcher becomes
    `permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input`, and
    `idle_prompt` is dropped. This reverses 001's "must not be narrowed". Findings below.
-5. **A refused write does not ring.** The bell reports a state that landed. A `waiting` refused
-   because the pane shows `done` rings nothing; a write cleared by the watched-window rule still
-   rings, as today.
+5. **A refused write still rings.** First decided the other way, and reversed after the review
+   found what decision 1 costs: while a pane holds a `done` nobody has looked at, the glyph cannot
+   say "blocked on you", so the bell is the only channel left that can. Every ringing state rings,
+   before tmux is touched, exactly as it did before this plan.
+6. **A prompt event opens the turn with `start`, not `set working`.** `start` is the one write that
+   does not defer to what the pane holds. Without it the hole is reachable: a `done` written while
+   you were away is only cleared by a window or pane change, so reattaching to a session whose
+   current window is already that one - or driving the pane with `send-keys` - leaves it there, and
+   it outranks every state of the next turn, which would render as the last one's ending. Typing a
+   prompt is seeing the pane, so the event that means the human typed is where the clearing
+   belongs.
 
 ## Findings
 
@@ -88,7 +96,9 @@ All probed on 2026-09-15.
   - `#{?session_attached,...}` treats `0` as false.
 - **Minimum tmux is unchanged.** From the tagged man pages: `#{P:}` loops, `#{m:}`, `#{==:}`,
   `if-shell -F` and `set-option -F` are all in 2.9a; pane options (`set-option -p`), which the tool
-  already needs, arrived in 3.0.
+  already needs, arrived in 3.0. It was written down nowhere, so `docs/install.md` now says 3.0.
+  Nothing tests it: CI runs whatever tmux the runner has, and on an older one the writes would fail
+  and the hooks would stay silent, which is what they do whenever tmux cannot be reached.
 - **Devin CLI 3000.10.27.**
   - `PreToolUse` fires *before* `PermissionRequest` for the same call.
   - The trust-this-directory prompt fires no hook at all, not even `SessionStart`.
@@ -184,7 +194,13 @@ itself.
 9. Docs: the README states table and the precedence sentence; `docs/agents/README.md`'s "`waiting`
    must repeat" bullet, whose reason - a later `working` hiding the prompt - this plan removes;
    001's states table, hook table and the un-narrowed `Notification` paragraph.
-10. Delete `tasks/todo/013-sibling-tool-clobbers-waiting.md`; this plan carries its content.
+10. The findings first landed in an untracked `tasks/todo/013-sibling-tool-clobbers-waiting.md`,
+    which was never committed; this plan carries its content.
+11. `start` in `command.rs` and `main.rs`, and the prompt event of all eight JSON drop-ins, their
+    docs tables, 001's hook table and the hook-command validator in `tests/support/command.rs`.
+12. The bell back to unconditional, and the readback it needed removed with it.
+13. The invariant CLAUDE.md already claims: a test asserting no `set-option` in `src/` names a
+    window format. It did not exist.
 
 ## Verification
 

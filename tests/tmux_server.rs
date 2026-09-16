@@ -889,9 +889,10 @@ fn the_window_shows_the_highest_ranked_state_of_its_panes() {
 }
 
 #[test]
-fn a_refused_state_does_not_ring() {
-    // The bell reports a state that landed. A nag that arrives on a pane
-    // already holding a higher state has nothing to announce.
+fn a_refused_state_still_rings() {
+    // The glyph cannot say "blocked on you" while the pane holds a `done`
+    // nobody has looked at, so the bell is the only channel that can. It rings
+    // before tmux is touched at all.
     let server = Server::start();
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "other"]);
@@ -920,7 +921,26 @@ fn a_refused_state_does_not_ring() {
         &ringer,
         "#{window_bell_flag}",
     ]);
-    assert_eq!(flag.trim(), "0", "a refused state rang the bell");
+    assert_eq!(flag.trim(), "1", "a refused state must still ring");
+}
+
+#[test]
+fn start_replaces_whatever_the_last_turn_left() {
+    // The hole precedence opens: a `done` written while you were away is only
+    // cleared by a window or pane change, so reattaching onto the window it is
+    // already on leaves it there, and it outranks every state of the next turn.
+    // Typing a prompt is seeing the pane, and `start` says so.
+    let server = Server::start();
+    let pane = server.first_pane();
+
+    for held in ["", "working", "waiting", "done", "error", "busy"] {
+        server.put_status(&pane, held);
+
+        assert_ok(&server.agent_status(&pane, &["start"]));
+
+        assert_eq!(server.pane_statuses(&pane), ["working"], "held {held:?}");
+        assert_eq!(server.window_status(&pane), "🤖", "held {held:?}");
+    }
 }
 
 #[test]

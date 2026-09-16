@@ -57,7 +57,8 @@ Two things it cannot do:
 The rank is only used to reduce several agent panes in one window to one glyph; see the rollup
 below. It is **not** the order in which two events on the *same* pane win: a later event may not
 demote a state nobody has seen yet, and that order is `error` > `done` > `waiting` > `working`. See
-013, which also supersedes the `Notification` row of the hook table below. `error` is split out of `waiting` rather than folded into it, because "it stopped because it
+013, which also supersedes the `Notification` and `UserPromptSubmit` rows of the hook table
+below: a turn now opens with `start`, which is the only write that clears what the last turn left. `error` is split out of `waiting` rather than folded into it, because "it stopped because it
 broke" and "it stopped because it needs an answer" call for different reactions.
 
 `working` is deliberately **sticky** - it must not clear on focus, or an agent you glance at goes
@@ -264,7 +265,7 @@ than by separate `printf` entries, so each event is one hook entry; four standal
 | --- | --- | --- | --- |
 | `SessionStart` | `startup\|resume\|clear\|fork` | - | `reset` |
 | `SessionEnd` | all | - | `finish` |
-| `UserPromptSubmit` | all | - | `working` |
+| `UserPromptSubmit` | all | - | `start` |
 | `PostToolUse` | all | - | `working` |
 | `Notification` | `permission_prompt\|elicitation_dialog\|elicitation_url_dialog\|agent_needs_input` | yes | `waiting` |
 | `PreToolUse` | `AskUserQuestion\|ExitPlanMode` | yes | `waiting` |

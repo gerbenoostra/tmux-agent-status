@@ -109,6 +109,7 @@ fn boundary_commands_are_silent_when_reading_the_window_fails() {
     let dir = fake_tmux_dir();
     write_fake_tmux(&dir, "#!/bin/sh\nexit 1\n");
     for args in [
+        ["start"].as_slice(),
         ["reset"].as_slice(),
         ["finish"].as_slice(),
         ["clear-window"].as_slice(),
@@ -171,7 +172,6 @@ exit 0
     for fragment in [
         format!("set-option -p -F -t {TMUX_PANE} @agent_pane_status"),
         format!("set-option -w -F -t {TMUX_PANE} @agent_status"),
-        format!("display-message -p -t {TMUX_PANE}"),
     ] {
         assert!(
             calls.contains(&fragment),

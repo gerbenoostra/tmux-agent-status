@@ -83,6 +83,11 @@ These apply to every agent page:
   `waiting`, `error`) print a terminal bell, so do not add a separate `printf '\a'`
   hook for the same event. Agents that parse stdout still use `--json` so the
   parser sees valid JSON.
+- **A prompt event starts a turn.** The event that means the human typed maps to
+  `tmux-agent-status start`, not `set working`. It is the one write that replaces
+  whatever the pane already holds, because typing into a pane is seeing it; a
+  `set` deliberately will not, so a state the last turn left would otherwise
+  outrank every state of this one.
 - **A missing binary is silent.** If `tmux-agent-status` is not on the `PATH` the
   hook inherits, the command exits 0 and no error is raised anywhere; the only
   symptom is that no glyph ever appears.
