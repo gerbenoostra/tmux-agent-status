@@ -11,7 +11,8 @@ local glyph.
 | State | Devin event | Command | Notes |
 | --- | --- | --- | --- |
 | reset | `SessionStart` | `tmux-agent-status reset` | |
-| working | `UserPromptSubmit`, `PostToolUse` | `tmux-agent-status set working` | |
+| start | `UserPromptSubmit` | `tmux-agent-status start` | a turn begins; replaces whatever the last turn left |
+| working | `PostToolUse` | `tmux-agent-status set working` |  |
 | waiting | `PermissionRequest`, `PreToolUse` matching `^(ask_user_question\|exit_plan_mode)$` | `tmux-agent-status set waiting` | permission prompt, question, plan approval |
 | done | `Stop` | `tmux-agent-status set done` | rings the bell; `finish` never does |
 | error | — | — | no published turn-abort event; a failed tool call is not one |
@@ -22,10 +23,14 @@ The `PreToolUse` matcher is a regex over Devin's **own** tool names, which are
 lower case and shorter than Claude's: `read`, `exec`, `grep`, `glob`,
 `exit_plan_mode`, `ask_user_question`.
 
-`PreToolUse` is matched, not blanket-mapped: an unmatched `PreToolUse` firing
-after `PermissionRequest` would overwrite `waiting` with `working` while the
-prompt is still on screen. `PostToolUse` is what returns the pane to `working`
-once the tool has run.
+`PreToolUse` is matched, not blanket-mapped: the two tools it names are the ones
+that block on you, and a blanket `working` on every tool call would say nothing
+the `PostToolUse` entry does not already say. It no longer guards against an
+overwrite - `working` is the lowest state within a pane and never replaces a
+`waiting`, whichever order the two hooks land in, which is what
+[013](../../tasks/plans/013-pane-state-precedence.md) fixed. The pane goes back
+to `working` on the first tool call after the window has been seen and the 💬
+cleared with it.
 
 ## Drop-in file
 

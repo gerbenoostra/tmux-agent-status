@@ -5,6 +5,7 @@ use tmux_agent_status::state::State;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HookCommand {
     Set(String),
+    Start,
     Reset,
     Finish,
     ClearWindow,
@@ -16,6 +17,7 @@ impl HookCommand {
     pub fn as_str(&self) -> String {
         match self {
             HookCommand::Set(state) => format!("tmux-agent-status set {state}"),
+            HookCommand::Start => "tmux-agent-status start".to_string(),
             HookCommand::Reset => "tmux-agent-status reset".to_string(),
             HookCommand::Finish => "tmux-agent-status finish".to_string(),
             HookCommand::ClearWindow => "tmux-agent-status clear-window".to_string(),
@@ -27,6 +29,7 @@ impl HookCommand {
     pub fn arguments(&self) -> String {
         match self {
             HookCommand::Set(state) => format!("set {state}"),
+            HookCommand::Start => "start".to_string(),
             HookCommand::Reset => "reset".to_string(),
             HookCommand::Finish => "finish".to_string(),
             HookCommand::ClearWindow => "clear-window".to_string(),
@@ -64,6 +67,7 @@ pub fn parse_command(source: &str, command: &str) -> HookCommand {
             );
             HookCommand::Set(state.to_string())
         }
+        ["start"] => HookCommand::Start,
         ["reset"] => HookCommand::Reset,
         ["finish"] => HookCommand::Finish,
         ["clear-window"] => HookCommand::ClearWindow,

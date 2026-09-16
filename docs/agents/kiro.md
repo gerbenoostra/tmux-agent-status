@@ -8,7 +8,8 @@ Shape A agent with a drop-in JSON hook file. Kiro reads hook files from
 | State | Kiro trigger | Command | Notes |
 | --- | --- | --- | --- |
 | reset | `agentSpawn` | `tmux-agent-status reset` | confirmed camelCase, from the shipped binary's own trigger set |
-| working | `userPromptSubmit`, `preToolUse` | `tmux-agent-status set working` | also `postToolUse` to refresh the glyph |
+| start | `userPromptSubmit` | `tmux-agent-status start` | a turn begins; replaces whatever the last turn left |
+| working | `preToolUse`, `postToolUse` | `tmux-agent-status set working` | every tool call refreshes the glyph |
 | done | `stop` | `tmux-agent-status set done` | rings the bell; the CLI has no session-end event, so there is no `finish` row |
 | waiting | — | — | no recurring blocked-on-user event confirmed |
 | error | — | — | no published error event; inferred only from hook exit code |

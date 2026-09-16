@@ -24,7 +24,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "tmux-agent-status set working --json"
+          "command": "tmux-agent-status start --json"
         }
       ]
     }

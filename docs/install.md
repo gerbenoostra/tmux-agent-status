@@ -5,6 +5,12 @@ After installing, you need to finish with the configuration setup steps in the [
 to capture agent events, trigger tmux events, and present the glyph.
 The binary on its own does nothing until tmux and your agent know about it.
 
+## Requirements
+
+tmux 3.0 or newer. The per-pane state is a pane option (`set-option -p`), which 3.0 added; every
+format the tool writes is older than that. Nothing checks the version: on an older tmux the writes
+fail and the hooks stay silent, the same as when tmux cannot be reached at all.
+
 ## Choose installation paths
 
 The examples below use `~/.local/bin` for the executable and `~/.tmux` for the tmux snippet. These

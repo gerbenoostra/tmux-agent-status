@@ -10,11 +10,11 @@
       }
     },
     {
-      "name": "tmux-agent-status-working-prompt",
+      "name": "tmux-agent-status-start",
       "trigger": "userPromptSubmit",
       "action": {
         "type": "command",
-        "command": "tmux-agent-status set working"
+        "command": "tmux-agent-status start"
       }
     },
     {

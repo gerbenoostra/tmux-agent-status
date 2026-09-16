@@ -1,84 +1,81 @@
-//! What each command does: the policy that joins the pure rollup to the tmux calls.
+//! What each command does: the policy that joins the formats to the tmux calls.
 //!
 //! Every command returns `io::Result<()>` so tmux I/O failures can be handled by
 //! the caller. The CLI's `hook()` wrapper turns those failures into a silent exit
 //! 0, because a hook must never break the agent that called it.
+//!
+//! Each command reads the window once, to learn which panes to write, and then
+//! sends all of its writes as one tmux invocation. What those writes set is
+//! decided by the server as it runs them - see `formats` - because hooks of one
+//! agent can race each other, and a decision taken on the read would be stale.
 
 use std::io;
 
 use crate::bell;
-use crate::rollup::rollup;
+use crate::formats;
 use crate::state::State;
-use crate::tmux;
+use crate::tmux::{self, Cmd, PaneId, Window};
 
-/// `tmux-agent-status set <state>`: write the pane's state and recompute the window.
+/// `tmux-agent-status set <state>`: report a state on the pane and recompute the window.
 ///
-/// The bell is rung whether or not there is a tmux to write to, because it is a
-/// separate channel: it reaches the human through the terminal, which a tmux
-/// option can never do.
+/// The bell rings for every state that rings, whether or not the pane keeps it.
+/// A `waiting` refused by a `done` nobody has seen still means the agent is
+/// blocked on you, and the glyph cannot say so until the window is looked at;
+/// the bell is the one channel that still can. It is rung before tmux is
+/// touched, so no tmux, or a tmux that fails, costs the write and not the
+/// signal.
 pub fn set(state: State, pane: Option<&str>) -> io::Result<()> {
     if state.rings_bell() {
         bell::ring();
     }
-    let Some(pane) = tmux::resolve_pane(pane) else {
+    let Some(target) = tmux::resolve_pane(pane) else {
         return Ok(());
     };
-    let window = tmux::window(&pane)?;
-    write_status(&pane, window, state)
+    let window = tmux::window(&target)?;
+    tmux::run(&report(&window, state)).map(drop)
+}
+
+/// `tmux-agent-status start`: a turn begins on this pane.
+///
+/// The one write that does not defer to what the pane already holds. It is
+/// reported by the event that means the human typed a prompt, and typing into a
+/// pane is seeing it, so whatever the last turn left there - a `done` no window
+/// switch ever cleared, an `error` - is over. Without it, a state left by the
+/// last turn would outrank every state of this one, and the whole turn would
+/// render as the last one's ending.
+///
+/// No bell: it opens a turn rather than ending one.
+pub fn start(pane: Option<&str>) -> io::Result<()> {
+    let Some(target) = tmux::resolve_pane(pane) else {
+        return Ok(());
+    };
+    let window = tmux::window(&target)?;
+    let mut commands = write(&window.pane, State::Working.name()).to_vec();
+    commands.extend(recompute(&window.pane));
+    tmux::run(&commands).map(drop)
 }
 
 /// `tmux-agent-status finish`: silently resolve this pane's session to done.
+///
+/// `set done` without the bell. A pane holding `error` keeps it, because `error`
+/// outranks `done`.
 pub fn finish(pane: Option<&str>) -> io::Result<()> {
-    let Some(pane) = tmux::resolve_pane(pane) else {
+    let Some(target) = tmux::resolve_pane(pane) else {
         return Ok(());
     };
-    let window = tmux::window(&pane)?;
-    let has_error = window
-        .panes
-        .iter()
-        .any(|listed| listed.pane == pane && listed.status == Some(State::Error));
-    if has_error {
-        return Ok(());
-    }
-    write_status(&pane, window, State::Done)
+    let window = tmux::window(&target)?;
+    tmux::run(&report(&window, State::Done)).map(drop)
 }
 
 /// `tmux-agent-status reset`: unconditionally drop this pane's session status.
 pub fn reset(pane: Option<&str>) -> io::Result<()> {
-    let Some(pane) = tmux::resolve_pane(pane) else {
+    let Some(target) = tmux::resolve_pane(pane) else {
         return Ok(());
     };
-    let mut window = tmux::window(&pane)?;
-    if window
-        .panes
-        .iter()
-        .any(|listed| listed.pane == pane && listed.status.is_some())
-    {
-        tmux::clear_pane_status(&pane)?;
-        for reporter in window.panes.iter_mut().filter(|listed| listed.pane == pane) {
-            reporter.status = None;
-        }
-    }
-    recompute(&pane, &window.panes)
-}
-
-/// Write a pane state under the ordinary watched-window policy, then recompute.
-fn write_status(pane: &str, mut window: tmux::Window, state: State) -> io::Result<()> {
-    if !state.is_sticky() && window.watched {
-        // The window is already on screen, so writing the glyph would only be
-        // read by the person who is looking at it anyway: clear instead, the
-        // way focusing the window would. This pane is passed as superseded
-        // because its own old state is over - a `done` that left `working` in
-        // place would strand a 🤖 no later focus event ever clears.
-        return clear_statuses(pane, &mut window.panes, Some(pane));
-    }
-    tmux::set_pane_status(pane, state.name())?;
-    // The panes were read before that write, so this pane still carries the
-    // state the write just replaced, and the rollup must not see the old one.
-    for reporter in window.panes.iter_mut().filter(|listed| listed.pane == pane) {
-        reporter.status = Some(state);
-    }
-    recompute(pane, &window.panes)
+    let window = tmux::window(&target)?;
+    let mut commands = write(&window.pane, "").to_vec();
+    commands.extend(recompute(&window.pane));
+    tmux::run(&commands).map(drop)
 }
 
 /// `tmux-agent-status clear-window [<pane>]`: drop the non-sticky states of every
@@ -92,48 +89,50 @@ fn write_status(pane: &str, mut window: tmux::Window, state: State) -> io::Resul
 /// shipped hook passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which
 /// is what a hand invocation from a pane has.
 pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
-    let Some(pane) = tmux::resolve_pane(pane) else {
+    let Some(target) = tmux::resolve_pane(pane) else {
         return Ok(());
     };
-    let mut window = tmux::window(&pane)?;
-    clear_statuses(&pane, &mut window.panes, None)
+    let window = tmux::window(&target)?;
+    let mut commands: Vec<Cmd> = window
+        .panes_with_status()
+        .flat_map(|pane| write(pane, &formats::seen()))
+        .collect();
+    commands.extend(recompute(&window.pane));
+    tmux::run(&commands).map(drop)
 }
 
-/// Drop the states that seeing the window drops, then recompute.
+/// The writes that report `state` on the window's addressed pane.
 ///
-/// `superseded` is the pane an event just arrived on, whose old state goes
-/// whatever it was. Every other pane keeps anything unset, sticky or
-/// unrecognised.
-fn clear_statuses(
-    target: &str,
-    panes: &mut [tmux::PaneStatus],
-    superseded: Option<&str>,
-) -> io::Result<()> {
-    for pane_status in panes.iter_mut() {
-        if clears(pane_status, superseded) {
-            tmux::clear_pane_status(&pane_status.pane)?;
-            pane_status.status = None;
-        }
+/// A state that clears on focus also applies the focus rule to the siblings of
+/// a watched window, since they are on screen together. A sibling with no
+/// status is left out: it has nothing to clear, and a status that arrives on it
+/// meanwhile is reported onto the watched window and clears itself.
+fn report(window: &Window, state: State) -> Vec<Cmd> {
+    let mut commands = write(&window.pane, &formats::report(state)).to_vec();
+    if !state.is_sticky() {
+        let sibling = formats::sibling();
+        commands.extend(
+            window
+                .siblings_with_status()
+                .flat_map(|pane| write(pane, &sibling)),
+        );
     }
-    recompute(target, panes)
+    commands.extend(recompute(&window.pane));
+    commands
 }
 
-/// Whether seeing the window drops this pane's state.
-fn clears(pane: &tmux::PaneStatus, superseded: Option<&str>) -> bool {
-    if pane.status.is_none() {
-        return false;
-    }
-    if superseded == Some(pane.pane.as_str()) {
-        return true;
-    }
-    pane.status.is_some_and(|state| !state.is_sticky())
+/// Set a pane's status to what `format` expands to, unset if that is nothing.
+fn write(pane: &PaneId, format: &str) -> [Cmd; 2] {
+    [
+        tmux::set_pane_status(pane, format),
+        tmux::unset_pane_status_if_empty(pane),
+    ]
 }
 
-/// Reduce the window's panes to one glyph, or to no option at all.
-fn recompute(target: &str, panes: &[tmux::PaneStatus]) -> io::Result<()> {
-    let states: Vec<Option<State>> = panes.iter().map(|pane| pane.status).collect();
-    match rollup(&states) {
-        Some(state) => tmux::set_window_status(target, state.icon()),
-        None => tmux::clear_window_status(target),
-    }
+/// Recompute the glyph of the pane's window, unset when no pane holds a state.
+fn recompute(pane: &PaneId) -> [Cmd; 2] {
+    [
+        tmux::set_window_status(pane, &formats::glyph()),
+        tmux::unset_window_status_if_empty(pane),
+    ]
 }

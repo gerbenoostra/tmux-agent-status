@@ -74,11 +74,12 @@ fn walk(value: &serde_json::Value, path: &Path) {
 
 /// The command a docs table row must carry for the state it names.
 ///
-/// `reset` and `finish` are their own commands; every other row is a state and
+/// `start`, `reset` and `finish` are their own commands; every other row is a state and
 /// so a `set`. This is the rule that catches a turn-end row wired to `finish`,
 /// which writes the glyph but never rings the bell.
 fn expected_command(state: &str) -> Option<String> {
     match state {
+        "start" => Some("tmux-agent-status start".to_string()),
         "reset" => Some("tmux-agent-status reset".to_string()),
         "finish" => Some("tmux-agent-status finish".to_string()),
         state if State::ALL.iter().any(|s| s.name() == state) => {
@@ -177,7 +178,7 @@ fn every_json_drop_in_matches_its_docs_table() {
         for (state, command) in docs_table(&page) {
             let expected = expected_command(&state).unwrap_or_else(|| {
                 panic!(
-                    "{}: row `{state}` is not one of the four states, `reset` or `finish`",
+                    "{}: row `{state}` is not one of the four states, `start`, `reset` or `finish`",
                     page.display()
                 )
             });

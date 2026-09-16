@@ -7,7 +7,7 @@
       }
     ],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status start" }] }],
     "PostToolUse": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }],
     "PreToolUse": [
       {
@@ -15,7 +15,12 @@
         "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }]
       }
     ],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }] }],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input",
+        "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }]
+      }
+    ],
     "Stop": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }] }],
     "StopFailure": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set error" }] }]
   }
