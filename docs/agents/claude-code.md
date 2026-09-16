@@ -9,7 +9,7 @@ Shape A agent: Claude Code reads hooks from a plugin's own directory or from `~/
 | reset | `SessionStart` (`startup\|resume\|clear\|fork`) | `tmux-agent-status reset` | |
 | working | `UserPromptSubmit`, `PostToolUse` | `tmux-agent-status set working` | |
 | done | `Stop` | `tmux-agent-status set done` | |
-| waiting | `Notification`, `PreToolUse` (`AskUserQuestion\|ExitPlanMode`) | `tmux-agent-status set waiting` | |
+| waiting | `Notification` (`permission_prompt\|elicitation_dialog\|elicitation_url_dialog\|agent_needs_input`), `PreToolUse` (`AskUserQuestion\|ExitPlanMode`) | `tmux-agent-status set waiting` | the types that mean blocked on you; see 013 |
 | error | `StopFailure` | `tmux-agent-status set error` | a real turn-abort event, which most agents lack |
 | finish | `SessionEnd` | `tmux-agent-status finish` | resolves a lingering `working`, no bell |
 
@@ -43,6 +43,12 @@ See [docs/install.md](../install.md) for where `share/agents/` lands for Nix, pr
 
 ## Quirks
 
+- **The `Notification` matcher is narrowed on purpose.** Claude Code sends twelve notification
+  types to this event, and several of them - `agent_completed`, `auth_success`,
+  `elicitation_complete`, `quota_auto_resume_*` - do not mean it is blocked on you. A `waiting` is
+  not replaced by a later `working`, so an unnarrowed matcher would leave 💬 up for the rest of the
+  turn. `idle_prompt` is left out too: probed on 2.1.273, it does not fire while a permission
+  prompt is open, and fires around eighteen minutes after a turn has already ended.
 - **`StopFailure` is a genuine error event.** Nearly every other surveyed agent leaves the `error`
   column empty and has to infer an abort, or cannot see one at all.
 - **The plugin hook runner accepts empty stdout.** The status commands write nothing to stdout, so
