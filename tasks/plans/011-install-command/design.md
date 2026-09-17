@@ -12,8 +12,11 @@ detect  ->  plan  ->  confirm  ->  apply  ->  verify
 
 - **detect** - read-only. What is installed, what is already configured, where the files are.
 - **plan** - build a `Change` per target: path, current bytes, intended bytes, why. Pure functions
-  over strings; this is where the merges and splices happen, and where the tests live.
-- **confirm** - one prompt per decision, in the order below. `-y` answers all of them.
+  over strings; this is where the merges and splices happen, and where the tests live. One
+  exception: the tmux-format splice also says its before/after and asks its own edit question here,
+  because that decision shapes the `Change` itself - see [decisions.md](./decisions.md).
+- **confirm** - one prompt per decision, in the order below. `-y` answers all of them. (The splice's
+  write question is still asked here, alongside every other change's.)
 - **apply** - the safe write, per target, in a fixed order: agents, then tmux hook, then
   tmux format.
 - **verify** - re-read, re-parse, compare. A failure here restores and fails the step.

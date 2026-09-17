@@ -27,8 +27,8 @@ intent.
 
 With no tmux on `PATH` or no running server, every tmux invocation is optional and its failure is not
 an error. Discovery falls to the file-existence order, the format default falls to its hard-coded
-value, the reload offer is not made, and the summary says plainly which checks could not be run
-against a live tmux.
+value, and the reload offer is not made. An earlier revision also had the summary say plainly which
+checks could not be run against a live tmux; dropped, see [decisions.md](../decisions.md).
 
 ### Idempotency for the source-file line
 
@@ -82,8 +82,8 @@ snippet sets hooks only, and a hook set late is a hook set.
 
 CLI:
 
-- **No tmux on `PATH`**: discovery, format default and reload all degrade as described, the run still
-  installs what it can, and the summary says what could not be checked.
+- **No tmux on `PATH`**: discovery, format default and reload all degrade as described, and the run
+  still installs what it can.
 
 Real tmux, extending `tests/tmux_server.rs`:
 

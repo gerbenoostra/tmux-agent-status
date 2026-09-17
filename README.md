@@ -51,7 +51,8 @@ tmux-agent-status install
 ```
 
 The installer detects your agents, previews and confirms every change, backs up every file it edits,
-and checks your tmux configuration against a throwaway server. If it cannot edit a generated or
+and checks your tmux configuration against a throwaway server - which loads your config, so whatever
+it runs (`run-shell`, `if-shell`, a plugin manager) runs there too. If it cannot edit a generated or
 read-only file safely, it prints the change for you to apply instead.
 
 Start with `tmux-agent-status install --dry-run` to inspect the plan without changing anything.

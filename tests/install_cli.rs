@@ -369,8 +369,8 @@ fn forcing_the_plugin_route_without_claude_fails_rather_than_merging() {
     assert!(!home.join(".claude/settings.json").exists());
 }
 
-// 22. No tmux on `PATH`: everything degrades, the run still installs what it
-// can, and the summary says what could not be checked.
+// 22. No tmux on `PATH`: everything degrades, and the run still installs what
+// it can.
 #[test]
 fn with_no_tmux_at_all_the_run_still_installs_what_it_can() {
     let home = TempDir::new("cli-no-tmux");
@@ -387,15 +387,11 @@ fn with_no_tmux_at_all_the_run_still_installs_what_it_can() {
     let text = stdout(&out);
     assert!(home.join(".codex/hooks.json").is_file(), "{text}");
     // Installing the config before installing tmux is a legitimate order to do
-    // things in, so the config is still written - and the run says plainly
-    // that nothing could be checked against a live tmux.
+    // things in, so the config is still written even though nothing could be
+    // checked against a live tmux.
     assert!(
         home.join(".config/tmux/tmux.conf").is_file(),
         "the tmux config was not created: {text}"
-    );
-    assert!(
-        text.contains("not be checked against a live tmux"),
-        "the run did not say what it could not check: {text}"
     );
     let written = fs::read_to_string(home.join(".config/tmux/tmux.conf")).expect("the config");
     assert!(written.contains("@agent_status"), "{written}");
@@ -512,18 +508,35 @@ fn a_negative_step_flag_skips_exactly_that_step() {
 }
 
 #[test]
-fn the_probe_can_be_turned_off_and_the_run_says_so() {
+fn the_probe_can_be_turned_off_and_the_edit_still_lands() {
     let home = TempDir::new("cli-no-probe");
     fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
     fs::write(home.join(".config/tmux/tmux.conf"), "set -g status on\n").expect("the config");
+    // Every throwaway probe server runs on a socket named with this prefix
+    // (see `Server::start_on`); a stub that logs its own invocations lets the
+    // test tell "no probe ran" from "no tmux is installed to probe with".
+    let log = home.join("tmux-invocations.log");
+    stub(&home, "tmux", &format!("echo \"$@\" >> {}", log.display()));
 
-    let out = install(&home, &["-y", "--no-agents", "--no-tmux-probe"]);
+    let out = command(&home, &["-y", "--no-agents", "--no-tmux-probe"])
+        .env("PATH", only(&home.join("bin")))
+        .output()
+        .expect("the binary runs");
 
     assert_eq!(code(&out), 0, "{}", stdout(&out));
-    let text = stdout(&out);
+    let invocations = fs::read_to_string(&log).unwrap_or_else(|_| {
+        panic!("the stub was never invoked at all, so this proves nothing about the probe")
+    });
+    // A positive control: the stub really did run (for the ambient
+    // `display-message` lookup), so its absence below is not just a PATH
+    // that never reached tmux in the first place.
     assert!(
-        text.contains("not be checked against a live tmux"),
-        "the run did not say what it skipped: {text}"
+        invocations.contains("display-message"),
+        "the stub was not exercised, so the assertion below would pass vacuously:\n{invocations}"
+    );
+    assert!(
+        !invocations.contains("tmux-agent-status-probe-"),
+        "--no-tmux-probe did not stop a throwaway server from starting:\n{invocations}"
     );
     // The edit still lands, from the documented default rather than a probed
     // one.
@@ -901,11 +914,6 @@ fn with_no_tmux_an_existing_config_is_still_edited_unchecked() {
     assert_eq!(code(&out), 0, "{}", stdout(&out));
     let written = fs::read_to_string(&config).expect("the config");
     assert!(written.contains("@agent_status"), "{written}");
-    assert!(
-        stdout(&out).contains("not be checked against a live tmux"),
-        "{}",
-        stdout(&out)
-    );
 }
 
 #[test]

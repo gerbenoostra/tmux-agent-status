@@ -211,6 +211,13 @@ pub struct Change {
     pub notes: Vec<String>,
     /// The semantic check, for the steps that have one.
     pub verify: Option<TmuxVerify>,
+    /// Whether planning already said what this change is and showed its
+    /// before/after, so `confirm` skips repeating that recap - true only for
+    /// the tmux-format splice, which asks its own edit question during
+    /// planning and would otherwise say the same thing twice. The write
+    /// question itself still names the change either way (see `confirm`),
+    /// since several changes can share one target file.
+    pub announced: bool,
 }
 
 /// How a target's new contents are built from whatever is on disk.
@@ -542,8 +549,7 @@ impl write::Verify for TmuxVerify {
             false => probe::dump(&self.entry),
         };
         let Some(candidate) = dumped else {
-            // No tmux to ask. The edit stands and the summary says it could
-            // not be checked.
+            // No tmux to ask. The edit stands unchecked.
             return Ok(());
         };
         let moved = match faulty("bad-value") {
@@ -786,18 +792,30 @@ fn confirm(
                 }
             }
             Action::Write(change) => {
-                prompt.say(&format!(
-                    "  {what} - {} {}",
-                    match change.creating {
-                        true => "create",
-                        false => "edit",
-                    },
-                    change.path.display()
-                ));
-                for note in &change.notes {
-                    prompt.say(&format!("    {note}"));
+                if !change.announced {
+                    prompt.say(&format!(
+                        "  {what} - {} {}",
+                        match change.creating {
+                            true => "create",
+                            false => "edit",
+                        },
+                        change.path.display()
+                    ));
+                    for note in &change.notes {
+                        prompt.say(&format!("    {note}"));
+                    }
+                } else {
+                    debug_assert!(
+                        change.notes.is_empty(),
+                        "an announced change's notes are never printed"
+                    );
                 }
-                match prompt.confirm(&format!("Write {}?", change.path.display()), true) {
+                // Named every time, announced or not: when several changes
+                // touch the same file, a bare "Write <path>?" repeats
+                // verbatim and cannot be told apart, and an announced
+                // change's header scrolled away during planning, above every
+                // other step's own block.
+                match prompt.confirm(&format!("Write {what} - {}?", change.path.display()), true) {
                     true => approved.push(Work::Write { step, what, change }),
                     false => report.record(step, Outcome::NotInstalled),
                 }
@@ -1079,6 +1097,7 @@ fn plan_merge(agent: &'static agents::Agent, options: &Options) -> Action {
                 notes: agent_notes(agent, &seen),
                 verify: None,
                 path: seen.resolved,
+                announced: false,
             }))
         }
         Ok(write::Plan::AlreadyInstalled) => Action::AlreadyInstalled,
@@ -1091,6 +1110,7 @@ fn plan_merge(agent: &'static agents::Agent, options: &Options) -> Action {
             notes: agent_notes(agent, &seen),
             verify: None,
             path: seen.resolved,
+            announced: false,
         })),
         // The step does not fail and nothing is written: the user is left
         // exactly where they were, holding the block they need.
@@ -1240,6 +1260,7 @@ impl TmuxPlan {
                         notes: vec!["no shipped copy was found, so one is written here".to_owned()],
                         verify: None,
                         path: seen.resolved,
+                        announced: false,
                     })),
                 },
             });
@@ -1285,9 +1306,10 @@ impl TmuxPlan {
             rebuild: Rebuild::SourceBlock(snippet.to_path_buf()),
             parses: not_empty,
             creating: !seen.exists,
-            notes: self.probe_notes(),
+            notes: Vec::new(),
             verify: self.verification(Landed::Hooks),
             path: seen.resolved,
+            announced: false,
         }))
     }
 
@@ -1388,11 +1410,11 @@ impl TmuxPlan {
                 let mut notes = vec![format!("nothing assigns {option}, so a line is added")];
                 notes.push(format!("  {}", line.trim_end()));
                 notes.extend(ordering.iter().cloned());
-                notes.extend(self.probe_notes());
                 notes
             },
             verify: self.verification(TmuxPlan::term_in(option)),
             path: seen.resolved,
+            announced: false,
         }))
     }
 
@@ -1432,15 +1454,34 @@ impl TmuxPlan {
                 last.line.first + 1
             ));
         };
-        let rewritten = self.offer_edit(rewritten, prompt);
-
+        // Checked before anything is announced or asked: a file we cannot
+        // write makes both the announcement and the edit question moot, and
+        // the winning line lives in a file we may not write. Editing an
+        // earlier one would produce a line tmux discards, so the step
+        // reports rather than editing a loser.
         let seen = match write::inspect(&last.file, &write::Faults::from_env()) {
             Ok(seen) => seen,
-            // The winning line lives in a file we may not write. Editing an
-            // earlier one would produce a line tmux discards, so the step
-            // reports rather than editing a loser.
             Err(error) => return self.manual_term(&format!("    {error}")),
         };
+
+        // The full before/after, shown once, right where the edit question is
+        // asked, naming the same path `confirm` and the writer use. `confirm`
+        // only asks the bare write question for this change - see
+        // `announced` below - so this is the only place any of it is said.
+        prompt.say(&format!(
+            "  the term in {option} - edit {}",
+            seen.resolved.display()
+        ));
+        prompt.say(&format!("      before: {}", last.line.text));
+        prompt.say(&format!("      after:  {rewritten}"));
+        for note in ordering {
+            prompt.say(&format!("    {note}"));
+        }
+        let proposed = rewritten;
+        let rewritten = self.offer_edit(proposed.clone(), prompt);
+        if rewritten != proposed {
+            prompt.say(&format!("      after your edit: {rewritten}"));
+        }
         Action::Write(Box::new(Change {
             what: format!("the term in {option}"),
             preview: tmux_conf::replace_lines(
@@ -1463,15 +1504,12 @@ impl TmuxPlan {
             },
             parses: not_empty,
             creating: false,
-            notes: {
-                let mut notes = vec![format!("  before: {}", last.line.text)];
-                notes.push(format!("  after:  {rewritten}"));
-                notes.extend(ordering.iter().cloned());
-                notes.extend(self.probe_notes());
-                notes
-            },
+            // Nothing left for `confirm` to say: the header, before/after and
+            // ordering hint were all said above, next to the edit question.
+            notes: Vec::new(),
             verify: self.verification(TmuxPlan::term_in(option)),
             path: seen.resolved,
+            announced: true,
         }))
     }
 
@@ -1503,19 +1541,22 @@ impl TmuxPlan {
                 ];
                 notes.extend(block.lines().map(|line| format!("  {line}")));
                 notes.extend(ordering.iter().cloned());
-                notes.extend(self.probe_notes());
                 notes
             },
             verify: self.verification(Landed::Term(
                 format::OPTIONS.iter().map(|o| (*o).to_owned()).collect(),
             )),
             path: seen.resolved,
+            announced: false,
         }))
     }
 
     /// Offer to edit the proposed line, and re-check whatever comes back.
     fn offer_edit(&self, proposed: String, prompt: &dyn prompt::Interaction) -> String {
-        if prompt.confirm("Edit the proposed line before writing it?", false) {
+        if !prompt.confirm(
+            "Accept the proposed line? Choose 'no' for manual edit",
+            true,
+        ) {
             if let Some(edited) = prompt.edit(&proposed) {
                 let edited = edited.trim_end().to_owned();
                 if format::references_agent_status(&edited) {
@@ -1539,20 +1580,6 @@ impl TmuxPlan {
     /// The landing check for one option's edit.
     fn term_in(option: &str) -> Landed {
         Landed::Term(vec![option.to_owned()])
-    }
-
-    fn probe_notes(&self) -> Vec<String> {
-        match self.baseline.is_some() {
-            // It loads the user's real config in a throwaway server, so their
-            // `run-shell`, `if-shell` and any plugin-manager bootstrap actually
-            // execute. Disclosed, bounded by a timeout, skippable.
-            true => vec![
-                "afterwards tmux is asked to read the edited config back, in a throwaway \
-                 server; that runs whatever your config runs"
-                    .to_owned(),
-            ],
-            false => vec!["the edit will not be checked against a live tmux".to_owned()],
-        }
     }
 
     /// The manual path: print the term and what we found, and report the step

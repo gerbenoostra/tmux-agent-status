@@ -63,5 +63,5 @@ CLI:
 - **`--dry-run` golden output**, and an assertion that the filesystem is unchanged afterwards.
 - **Non-TTY without `-y` exits 2** with a message naming `-y`.
 - **Exit codes for a mixed run**: one step already installed, one applied, one failed.
-- **No tmux on `PATH`**: discovery, format default and reload all degrade as described, the run still
-  installs what it can, and the summary says what could not be checked.
+- **No tmux on `PATH`**: discovery, format default and reload all degrade as described, and the run
+  still installs what it can.

@@ -17,7 +17,9 @@ detect  ->  plan  ->  confirm  ->  apply  ->  verify
 
 - **detect** - read-only. What is installed, what is already configured, where the files are.
 - **plan** - build a `Change` per target: path, current bytes, intended bytes, why. Pure functions
-  over strings; this is where the merges and splices happen, and where the tests live.
+  over strings; this is where the merges and splices happen, and where the tests live. One
+  exception: the tmux-format splice also says its before/after and asks its own edit question here -
+  see [decisions.md](../decisions.md).
 - **confirm** - one prompt per decision, in the order below. `-y` answers all of them.
 - **apply** - the safe write, per target, in a fixed order: agents, then tmux hook, then tmux format.
 - **verify** - re-read, re-parse, compare. A failure here restores and fails the step.
@@ -82,8 +84,9 @@ Exit codes:
 - The `apply` phase is the only writer; it calls `install::write::safely` ([Step 3](./03-install-write-rs.md)).
 - Order of apply: agents, then tmux hook, then tmux format.
 - A step failure is recorded but does not abort subsequent steps.
-- Build the summary: per-step status, backup paths, managed/unmanaged destination grouping, what
-could not be checked against a live tmux.
+- Build the summary: per-step status, backup paths, managed/unmanaged destination grouping. (An
+earlier revision also said what could not be checked against a live tmux; dropped, see
+[decisions.md](../decisions.md).)
 - Non-interactive without `-y` exits 2 before any prompt.
 - `--dry-run` builds the plan and prints it; it performs no write, no rename, no directory creation,
 and no state-changing external command (see [decisions.md](../decisions.md)).

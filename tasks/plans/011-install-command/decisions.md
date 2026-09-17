@@ -182,8 +182,17 @@ intent.
 
 With no tmux on `PATH` or no running server, every tmux invocation is optional and its failure is
 not an error. Discovery falls to the file-existence order, the format default falls to its
-hard-coded value, the reload offer is not made, and the summary says plainly which checks could not
-be run against a live tmux.
+hard-coded value, and the reload offer is not made. An earlier revision had the summary say plainly
+which checks could not be run against a live tmux; that disclosure was dropped because it printed
+even when nothing ended up being written (an already-installed step, or a pre-broken config
+refusal), which read as a false claim that a check was pending.
+
+For the tmux-format splice specifically, the full before/after and the edit question are said during
+planning rather than at confirm time, so a user deciding whether to hand-edit the line sees it right
+there rather than after an unrelated announcement. `Change.announced` marks this: `confirm` skips the
+header and notes it would otherwise print for that change, but still needs to ask a *distinguishable*
+write question - when several changes share a target file, a bare `Write <path>?` repeated per change
+cannot be told apart, so an announced change is asked `Write {what} - {path}?` instead.
 
 ## Implementation decisions
 

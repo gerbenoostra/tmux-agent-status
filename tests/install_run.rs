@@ -30,8 +30,27 @@ struct Script {
     /// A question holding this gets `false` whatever `answer` says, for the
     /// runs where somebody accepts one write and declines another.
     declining: Option<String>,
-    said: Mutex<Vec<String>>,
-    asked: Mutex<Vec<String>>,
+    /// Everything said and asked (via `confirm` or `choose`), in the order it
+    /// happened. `output()`, `questions()` and `log()` are views over this,
+    /// so there is one place events get recorded.
+    events: Mutex<Vec<Event>>,
+}
+
+/// One thing the run said or asked, tagged by which it was rather than by a
+/// string prefix - a said line that happened to start with "ASK: " cannot be
+/// misfiled as a question.
+enum Event {
+    Said(String),
+    Asked(String),
+}
+
+impl Event {
+    fn line(&self) -> String {
+        match self {
+            Event::Said(line) => format!("SAY: {line}"),
+            Event::Asked(question) => format!("ASK: {question}"),
+        }
+    }
 }
 
 impl Script {
@@ -41,8 +60,7 @@ impl Script {
             edited: None,
             chosen: None,
             declining: None,
-            said: Mutex::new(Vec::new()),
-            asked: Mutex::new(Vec::new()),
+            events: Mutex::new(Vec::new()),
         }
     }
 
@@ -62,11 +80,41 @@ impl Script {
     }
 
     fn output(&self) -> String {
-        self.said.lock().expect("not poisoned").join("\n")
+        self.events
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .filter_map(|event| match event {
+                Event::Said(line) => Some(line.clone()),
+                Event::Asked(_) => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn questions(&self) -> String {
-        self.asked.lock().expect("not poisoned").join("\n")
+        self.events
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .filter_map(|event| match event {
+                Event::Asked(question) => Some(question.clone()),
+                Event::Said(_) => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Everything said and asked, in order, as `SAY: `/`ASK: ` lines - for
+    /// tests that care which came first rather than just what was said.
+    fn log(&self) -> String {
+        self.events
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .map(Event::line)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -76,17 +124,17 @@ impl Interaction for Script {
     }
 
     fn say(&self, line: &str) {
-        self.said
+        self.events
             .lock()
             .expect("not poisoned")
-            .push(line.to_owned());
+            .push(Event::Said(line.to_owned()));
     }
 
     fn confirm(&self, question: &str, recommended: bool) -> bool {
-        self.asked
+        self.events
             .lock()
             .expect("not poisoned")
-            .push(question.to_owned());
+            .push(Event::Asked(question.to_owned()));
         match &self.declining {
             Some(what) if question.contains(what.as_str()) => false,
             _ => self.answer.unwrap_or(recommended),
@@ -94,10 +142,10 @@ impl Interaction for Script {
     }
 
     fn choose(&self, question: &str, rows: &[(String, bool)]) -> Vec<usize> {
-        self.asked
+        self.events
             .lock()
             .expect("not poisoned")
-            .push(question.to_owned());
+            .push(Event::Asked(question.to_owned()));
         for (label, _) in rows {
             self.say(label);
         }
@@ -637,6 +685,121 @@ fn an_edited_line_is_taken_when_it_still_carries_the_term() {
     assert!(
         written.contains("EDITED"),
         "the edit was discarded:\n{written}"
+    );
+}
+
+#[test]
+fn an_accepted_edit_is_shown_before_the_write_question() {
+    let dir = TempDir::new("run-edit-shown");
+    dir.write(
+        ".config/tmux/tmux.conf",
+        "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
+    );
+    let script = Script {
+        edited: Some(
+            "set -g window-status-format 'EDITED#{?@agent_status, #{@agent_status},}'".to_owned(),
+        ),
+        ..Script::saying_yes()
+    };
+
+    install::run(
+        &options(
+            &dir,
+            install::select(&[Step::TmuxFormat], &[]).expect("valid"),
+        ),
+        &script,
+    );
+
+    let log = script.log();
+    let question = log
+        .find("ASK: Edit the proposed line before writing it?")
+        .expect("the edit question was asked");
+    let shown = log
+        .find("SAY:       after your edit: set -g window-status-format 'EDITED")
+        .unwrap_or_else(|| panic!("the edited value was not shown back:\n{log}"));
+    let write = log
+        .find("ASK: Write")
+        .expect("the write question was asked");
+    assert!(
+        question < shown && shown < write,
+        "the edited value should appear between the edit question and the write question:\n{log}"
+    );
+}
+
+#[test]
+fn write_questions_stay_distinguishable_when_several_target_the_same_file() {
+    // The hook's source-file line and both format splices all land in the
+    // same tmux.conf, so if their write questions were not distinguishable
+    // (e.g. every one asking a bare "Write <path>?") a user declining one
+    // could not tell which they had just answered.
+    let dir = TempDir::new("run-same-file-questions");
+    dir.write(
+        ".config/tmux/tmux.conf",
+        "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
+    );
+    let script = Script::saying_yes();
+
+    install::run(&options(&dir, tmux_steps()), &script);
+
+    let questions = script.questions();
+    // The snippet, the source-file line and both format splices all ask
+    // "Write ...?"; the source-file line and the two splices share the same
+    // tmux.conf.
+    let asked: Vec<&str> = questions
+        .lines()
+        .filter(|line| line.starts_with("Write "))
+        .collect();
+    assert!(
+        asked.len() >= 3,
+        "expected at least the source-file line and both format splices to ask:\n{asked:?}"
+    );
+    let distinct: std::collections::HashSet<&&str> = asked.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        asked.len(),
+        "two write questions were identical, so they cannot be told apart: {asked:?}"
+    );
+}
+
+#[test]
+fn the_edit_question_names_the_file_it_concerns_before_asking() {
+    let dir = TempDir::new("run-edit-context");
+    let config = dir.write(
+        ".config/tmux/tmux.conf",
+        "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
+    );
+    let script = Script::saying_yes();
+
+    install::run(
+        &options(
+            &dir,
+            install::select(&[Step::TmuxFormat], &[]).expect("valid"),
+        ),
+        &script,
+    );
+
+    let log = script.log();
+    // The full header/before/after/blank-line/question block, contiguous and
+    // in order, for each option in turn - not just the first one found.
+    for option in install::format::OPTIONS {
+        let block = format!(
+            "SAY:   the term in {option} - edit {}\n\
+             SAY:       before: set -g {option} '#I:#W'\n\
+             SAY:       after:  set -g {option} '#I:#W#{{?@agent_status, #{{@agent_status}},}}'\n\
+             SAY: \n\
+             ASK: Edit the proposed line before writing it?",
+            config.display()
+        );
+        assert!(
+            log.contains(&block),
+            "the block for {option} was not said as a contiguous unit right before its edit \
+             question:\n{log}"
+        );
+    }
+    assert!(
+        !log.contains("afterwards tmux is asked to read the edited config back")
+            && !log.contains("the edit will not be checked against a live tmux"),
+        "the probe disclosure should no longer be said at all:\n{log}"
     );
 }
 
