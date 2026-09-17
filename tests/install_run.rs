@@ -28,7 +28,8 @@ struct Script {
     /// Which rows `choose` picks. `None` takes the preselected ones.
     chosen: Option<Vec<usize>>,
     /// A question holding this gets `false` whatever `answer` says, for the
-    /// runs where somebody accepts one write and declines another.
+    /// runs where somebody accepts one write and declines another, or turns
+    /// the proposed line down to get at the manual edit.
     declining: Option<String>,
     /// Everything said and asked (via `confirm` or `choose`), in the order it
     /// happened. `output()`, `questions()` and `log()` are views over this,
@@ -666,11 +667,13 @@ fn an_edited_line_is_taken_when_it_still_carries_the_term() {
         ".config/tmux/tmux.conf",
         "set -g window-status-format '#I:#W'\nset -g window-status-current-format '#I:#W'\n",
     );
+    // 'No' to the accept question is how the manual edit is asked for; the
+    // write questions after it still get yes.
     let script = Script {
         edited: Some(
             "set -g window-status-format 'EDITED#{?@agent_status, #{@agent_status},}'".to_owned(),
         ),
-        ..Script::saying_yes()
+        ..Script::saying_yes_but_not_to("Accept the proposed line")
     };
 
     install::run(
@@ -699,7 +702,7 @@ fn an_accepted_edit_is_shown_before_the_write_question() {
         edited: Some(
             "set -g window-status-format 'EDITED#{?@agent_status, #{@agent_status},}'".to_owned(),
         ),
-        ..Script::saying_yes()
+        ..Script::saying_yes_but_not_to("Accept the proposed line")
     };
 
     install::run(
@@ -712,7 +715,7 @@ fn an_accepted_edit_is_shown_before_the_write_question() {
 
     let log = script.log();
     let question = log
-        .find("ASK: Edit the proposed line before writing it?")
+        .find("ASK: Accept the proposed line? Choose 'no' for manual edit")
         .expect("the edit question was asked");
     let shown = log
         .find("SAY:       after your edit: set -g window-status-format 'EDITED")
@@ -779,15 +782,14 @@ fn the_edit_question_names_the_file_it_concerns_before_asking() {
     );
 
     let log = script.log();
-    // The full header/before/after/blank-line/question block, contiguous and
-    // in order, for each option in turn - not just the first one found.
+    // The full header/before/after/question block, contiguous and in order,
+    // for each option in turn - not just the first one found.
     for option in install::format::OPTIONS {
         let block = format!(
             "SAY:   the term in {option} - edit {}\n\
              SAY:       before: set -g {option} '#I:#W'\n\
              SAY:       after:  set -g {option} '#I:#W#{{?@agent_status, #{{@agent_status}},}}'\n\
-             SAY: \n\
-             ASK: Edit the proposed line before writing it?",
+             ASK: Accept the proposed line? Choose 'no' for manual edit",
             config.display()
         );
         assert!(
@@ -812,7 +814,7 @@ fn an_edit_that_drops_the_term_is_refused_and_the_proposal_stands() {
     );
     let script = Script {
         edited: Some("set -g window-status-format 'NO TERM HERE'".to_owned()),
-        ..Script::saying_yes()
+        ..Script::saying_yes_but_not_to("Accept the proposed line")
     };
 
     install::run(
