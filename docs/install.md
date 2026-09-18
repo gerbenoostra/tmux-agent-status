@@ -55,8 +55,20 @@ source-file ~/.tmux/tmux-agent-status.conf
 The installer can still configure writable agent files and report the window-format change for your
 Home Manager configuration.
 
+## One-line installer
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
+```
+
+Detects your platform, downloads the matching release tarball, verifies its checksum, and installs
+the binary to `~/.local/bin` (override with `TMUX_AGENT_STATUS_INSTALL_DIR`). Pin a version with
+`TMUX_AGENT_STATUS_VERSION=v0.0.1`. See `install.sh` in the repository root for the full set of
+environment variables.
+
 ## Prebuilt binary
 
+The one-line installer above wraps this; use these steps directly if you want to inspect each one.
 Every tagged release publishes a tarball per platform with a `.sha256` checksum beside it:
 
 ```sh

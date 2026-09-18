@@ -43,7 +43,8 @@ The [docs/agents](docs/agents/README.md) gives an overview of all agents that ha
 
 Installation has two steps:
 
-1. [Install the CLI](docs/install.md) with Nix, a prebuilt binary, Cargo, or from source.
+1. [Install the CLI](docs/install.md) with the one-line installer, Nix, a prebuilt binary, Cargo, or
+   from source.
 2. Configure tmux and your installed agents:
 
 ```sh

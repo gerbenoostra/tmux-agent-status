@@ -1,0 +1,192 @@
+#!/bin/sh
+# tmux-agent-status installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
+#
+# Environment variables:
+#   TMUX_AGENT_STATUS_VERSION       - pin a specific release (e.g. v0.0.1)
+#   TMUX_AGENT_STATUS_INSTALL_DIR   - override install directory (default: $HOME/.local/bin)
+#   TMUX_AGENT_STATUS_SKIP_CHECKSUM - set to 1 to skip checksum verification (not recommended)
+#
+# This script must be executed, not sourced:
+#   sh install.sh          (correct)
+#   curl -fsSL ... | sh    (correct)
+#   source install.sh      (wrong: exits your shell on error)
+
+set -e
+
+REPO="gerbenoostra/tmux-agent-status"
+BIN="tmux-agent-status"
+INSTALL_DIR="${TMUX_AGENT_STATUS_INSTALL_DIR:-$HOME/.local/bin}"
+BUILD_FROM_SOURCE_URL="https://github.com/${REPO}/blob/main/docs/install.md#build-from-source"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+info() { printf "${BLUE}==>${NC} %s\n" "$1"; }
+ok() { printf "${GREEN}==>${NC} %s\n" "$1"; }
+warn() { printf "${YELLOW}==>${NC} %s\n" "$1"; }
+error() {
+    printf "${RED}Error:${NC} %s\n" "$1" >&2
+    exit 1
+}
+
+fetch() {
+    # fetch <url> <output-file>
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 --max-time 120 -o "$2" "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget --tries=3 --timeout=120 -q -O "$2" "$1"
+    else
+        error "Neither curl nor wget found. Please install one of them."
+    fi
+}
+
+detect_platform() {
+    case "$(uname -s)" in
+        Darwin) OS=darwin ;;
+        Linux) OS=linux ;;
+        *) error "Unsupported operating system: $(uname -s). Build from source: ${BUILD_FROM_SOURCE_URL}" ;;
+    esac
+
+    case "$(uname -m)" in
+        x86_64 | amd64) ARCH=x86_64 ;;
+        arm64 | aarch64) ARCH=aarch64 ;;
+        *) error "Unsupported architecture: $(uname -m). Build from source: ${BUILD_FROM_SOURCE_URL}" ;;
+    esac
+
+    # Matches the target triples built by .github/workflows/release.yml.
+    case "$OS" in
+        darwin) TARGET="${ARCH}-apple-darwin" ;;
+        linux) TARGET="${ARCH}-unknown-linux-gnu" ;;
+    esac
+}
+
+latest_version() {
+    VERSION=""
+
+    # Try the /releases/latest redirect first: it costs one request and does
+    # not count against the GitHub API's anonymous rate limit.
+    if command -v curl >/dev/null 2>&1; then
+        VERSION=$(curl -fsSI "https://github.com/${REPO}/releases/latest" 2>/dev/null \
+            | grep -i '^location:' \
+            | sed -n -E 's#.*/tag/([^[:space:]]+).*#\1#p' \
+            | tr -d '\r')
+    fi
+
+    if [ -z "$VERSION" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            warn "Redirect lookup failed, falling back to the GitHub API..."
+        fi
+        api_json=$(mktemp)
+        trap 'rm -f "$api_json"' EXIT
+        fetch "https://api.github.com/repos/${REPO}/releases/latest" "$api_json" \
+            || error "Failed to determine the latest version (GitHub API may be rate-limited; set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to pin)"
+        VERSION=$(grep '"tag_name"' "$api_json" | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+        rm -f "$api_json"
+        trap - EXIT
+    fi
+
+    [ -n "$VERSION" ] || error "Failed to determine the latest version (GitHub API may be rate-limited; set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to pin)"
+}
+
+install_from_release() {
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT
+
+    name="${BIN}-${VERSION}-${TARGET}"
+    archive="${name}.tar.gz"
+    checksum="${archive}.sha256"
+    base_url="https://github.com/${REPO}/releases/download/${VERSION}"
+
+    info "Downloading ${archive}..."
+    fetch "${base_url}/${archive}" "${tmp_dir}/${archive}" \
+        || error "Download failed. The release may not have a prebuilt binary for your platform (${TARGET})."
+
+    if [ "${TMUX_AGENT_STATUS_SKIP_CHECKSUM:-0}" = "1" ]; then
+        warn "TMUX_AGENT_STATUS_SKIP_CHECKSUM=1 set - skipping checksum verification (not recommended)"
+    else
+        info "Verifying checksum..."
+        fetch "${base_url}/${checksum}" "${tmp_dir}/${checksum}" \
+            || error "Failed to download ${checksum} - refusing to install an unverified binary (set TMUX_AGENT_STATUS_SKIP_CHECKSUM=1 to bypass at your own risk)"
+
+        if command -v sha256sum >/dev/null 2>&1; then
+            (cd "$tmp_dir" && sha256sum -c "$checksum") >/dev/null \
+                || error "Checksum verification failed - the download may be corrupted or tampered with"
+        elif command -v shasum >/dev/null 2>&1; then
+            (cd "$tmp_dir" && shasum -a 256 -c "$checksum") >/dev/null \
+                || error "Checksum verification failed - the download may be corrupted or tampered with"
+        else
+            error "Neither sha256sum nor shasum found - refusing to install an unverified binary (set TMUX_AGENT_STATUS_SKIP_CHECKSUM=1 to bypass at your own risk)"
+        fi
+    fi
+
+    # Reject archive entries with an absolute path or a ".." component
+    # before extracting (CWE-22 path traversal).
+    info "Verifying archive contents..."
+    if tar -tzf "${tmp_dir}/${archive}" | grep -qE '^/|(^|/)\.\.(/|$)'; then
+        error "Archive contains unsafe paths (absolute or directory traversal) - refusing to extract"
+    fi
+
+    info "Extracting..."
+    tar -xzf "${tmp_dir}/${archive}" -C "$tmp_dir"
+
+    mkdir -p "$INSTALL_DIR"
+    tmp_binary="${INSTALL_DIR}/${BIN}.tmp.$$"
+    cp "${tmp_dir}/${name}/${BIN}" "$tmp_binary"
+    chmod 755 "$tmp_binary"
+    mv -f "$tmp_binary" "${INSTALL_DIR}/${BIN}"
+
+    # Remove the macOS quarantine attribute so Gatekeeper does not block a
+    # freshly downloaded, unsigned binary on first run.
+    if [ "$OS" = darwin ] && command -v xattr >/dev/null 2>&1; then
+        xattr -d com.apple.quarantine "${INSTALL_DIR}/${BIN}" 2>/dev/null || true
+    fi
+
+    ok "${BIN} ${VERSION} installed to ${INSTALL_DIR}/${BIN}"
+}
+
+verify_installation() {
+    [ -x "${INSTALL_DIR}/${BIN}" ] || error "${BIN} binary not found or not executable at ${INSTALL_DIR}/${BIN}"
+
+    if ! command -v "$BIN" >/dev/null 2>&1; then
+        warn "${INSTALL_DIR} does not appear to be on your PATH"
+        echo ""
+        echo "Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+        echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+        echo ""
+    fi
+
+    ok "${BIN} is installed and ready!"
+    echo ""
+    echo "Finish setup with:"
+    echo "  ${BIN} install"
+    echo ""
+    echo "Documentation: https://github.com/${REPO}"
+    echo ""
+}
+
+main() {
+    echo ""
+    echo "${BIN} installer"
+    echo ""
+
+    detect_platform
+    info "Platform: ${OS}/${ARCH} (${TARGET})"
+
+    if [ -n "${TMUX_AGENT_STATUS_VERSION:-}" ]; then
+        VERSION="$TMUX_AGENT_STATUS_VERSION"
+        info "Using pinned version: ${VERSION}"
+    else
+        info "Fetching the latest release..."
+        latest_version
+    fi
+    info "Installing version: ${VERSION}"
+
+    install_from_release
+    verify_installation
+}
+
+main "$@"

@@ -16,6 +16,10 @@ fmt-check:
 lint:
     cargo clippy --all-targets -- -D warnings
 
+# Lint the shell installer.
+lint-sh:
+    shellcheck -s sh install.sh
+
 # Run the test suite.
 test:
     cargo test
@@ -96,7 +100,7 @@ coverage:
     echo "Every region of src/ was reached, across $files files."
 
 # What CI runs.
-check: fmt-check lint test
+check: fmt-check lint lint-sh test
 
 # Validate the plugin and marketplace manifests (needs the `claude` CLI).
 check-plugin:
