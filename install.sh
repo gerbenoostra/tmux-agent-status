@@ -33,6 +33,19 @@ error() {
     exit 1
 }
 
+usage() {
+    cat <<'EOF'
+tmux-agent-status installer
+
+Usage: curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
+
+Environment variables:
+  TMUX_AGENT_STATUS_VERSION       pin a release (e.g. v0.0.1)
+  TMUX_AGENT_STATUS_INSTALL_DIR   install directory (default: $HOME/.local/bin)
+  TMUX_AGENT_STATUS_SKIP_CHECKSUM set to 1 to skip checksum verification
+EOF
+}
+
 fetch() {
     # fetch <url> <output-file>
     if command -v curl >/dev/null 2>&1; then
@@ -60,18 +73,30 @@ detect_platform() {
     # Matches the target triples built by .github/workflows/release.yml.
     case "$OS" in
         darwin) TARGET="${ARCH}-apple-darwin" ;;
-        linux) TARGET="${ARCH}-unknown-linux-gnu" ;;
+        linux)
+            # The gnu-libc builds hard-code the glibc dynamic loader, which
+            # musl (Alpine, Void, Chimera) and NixOS systems lack.
+            case "$ARCH" in
+                x86_64) loader=/lib64/ld-linux-x86-64.so.2 ;;
+                aarch64) loader=/lib/ld-linux-aarch64.so.1 ;;
+            esac
+            [ -e "$loader" ] \
+                || error "No glibc dynamic loader at ${loader} (musl or NixOS system?) - the prebuilt binary would not run. Build from source: ${BUILD_FROM_SOURCE_URL}"
+            TARGET="${ARCH}-unknown-linux-gnu"
+            ;;
     esac
 }
 
 latest_version() {
     VERSION=""
+    version_error="Failed to determine the latest version (there may be no releases yet, or the GitHub API is rate-limited; set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to pin)"
 
     # Try the /releases/latest redirect first: it costs one request and does
     # not count against the GitHub API's anonymous rate limit.
     if command -v curl >/dev/null 2>&1; then
         VERSION=$(curl -fsSI "https://github.com/${REPO}/releases/latest" 2>/dev/null \
             | grep -i '^location:' \
+            | head -n 1 \
             | sed -n -E 's#.*/tag/([^[:space:]]+).*#\1#p' \
             | tr -d '\r')
     fi
@@ -83,13 +108,14 @@ latest_version() {
         api_json=$(mktemp)
         trap 'rm -f "$api_json"' EXIT
         fetch "https://api.github.com/repos/${REPO}/releases/latest" "$api_json" \
-            || error "Failed to determine the latest version (GitHub API may be rate-limited; set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to pin)"
-        VERSION=$(grep '"tag_name"' "$api_json" | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+            || error "$version_error"
+        VERSION=$(grep '"tag_name"' "$api_json" | head -n 1 \
+            | sed -n -E 's/.*"tag_name": *"([^"]+)".*/\1/p')
         rm -f "$api_json"
         trap - EXIT
     fi
 
-    [ -n "$VERSION" ] || error "Failed to determine the latest version (GitHub API may be rate-limited; set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to pin)"
+    [ -n "$VERSION" ] || error "$version_error"
 }
 
 install_from_release() {
@@ -126,7 +152,9 @@ install_from_release() {
     # Reject archive entries with an absolute path or a ".." component
     # before extracting (CWE-22 path traversal).
     info "Verifying archive contents..."
-    if tar -tzf "${tmp_dir}/${archive}" | grep -qE '^/|(^|/)\.\.(/|$)'; then
+    tar -tzf "${tmp_dir}/${archive}" > "${tmp_dir}/listing" \
+        || error "Could not list the archive contents - the download may be corrupt"
+    if grep -qE '^/|(^|/)\.\.(/|$)' "${tmp_dir}/listing"; then
         error "Archive contains unsafe paths (absolute or directory traversal) - refusing to extract"
     fi
 
@@ -151,11 +179,15 @@ install_from_release() {
 verify_installation() {
     [ -x "${INSTALL_DIR}/${BIN}" ] || error "${BIN} binary not found or not executable at ${INSTALL_DIR}/${BIN}"
 
-    if ! command -v "$BIN" >/dev/null 2>&1; then
+    resolved=$(command -v "$BIN" 2>/dev/null || true)
+    if [ -z "$resolved" ]; then
         warn "${INSTALL_DIR} does not appear to be on your PATH"
         echo ""
         echo "Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
         echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+        echo ""
+    elif [ "$resolved" != "${INSTALL_DIR}/${BIN}" ]; then
+        warn "${resolved} is ahead on your PATH and will run instead of ${INSTALL_DIR}/${BIN}"
         echo ""
     fi
 
@@ -169,6 +201,16 @@ verify_installation() {
 }
 
 main() {
+    case "${1:-}" in
+        "") ;;
+        -h | --help) usage; exit 0 ;;
+        *) error "Unknown argument: $1 (run with --help for usage)" ;;
+    esac
+
+    if [ -z "${HOME:-}" ] && [ -z "${TMUX_AGENT_STATUS_INSTALL_DIR:-}" ]; then
+        error "HOME is not set - set TMUX_AGENT_STATUS_INSTALL_DIR to choose an install directory"
+    fi
+
     echo ""
     echo "${BIN} installer"
     echo ""
@@ -178,6 +220,13 @@ main() {
 
     if [ -n "${TMUX_AGENT_STATUS_VERSION:-}" ]; then
         VERSION="$TMUX_AGENT_STATUS_VERSION"
+        case "$VERSION" in
+            v*) ;;
+            *)
+                VERSION="v${VERSION}"
+                info "Releases are tagged vX.Y.Z - using ${VERSION}"
+                ;;
+        esac
         info "Using pinned version: ${VERSION}"
     else
         info "Fetching the latest release..."
