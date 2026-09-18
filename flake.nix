@@ -34,6 +34,8 @@
             pkgs.rust-analyzer
             pkgs.cargo-llvm-cov
             pkgs.llvmPackages.llvm
+            # The coverage gate reads llvm-cov's exported segments.
+            pkgs.jq
             pkgs.tmux
             pkgs.just
           ];

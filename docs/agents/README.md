@@ -1,6 +1,51 @@
 # Supported agents
 
-The tool works for any agent that allows hooks on lifecycle events. These should be mapped to the following commands:
+## Install agent hooks
+
+The main installer detects your agents and configures their hooks together with tmux:
+
+```sh
+tmux-agent-status install
+```
+
+To configure only agent hooks, leaving tmux alone:
+
+```sh
+tmux-agent-status install --agents
+```
+
+Detected agents are preselected in a checklist. To select agents explicitly, use a comma-separated
+list (the `=` is required):
+
+```sh
+tmux-agent-status install --agents=codex,cursor
+```
+
+The installer asks before every change and backs up every file it edits. If a generated or read-only
+file cannot be edited safely, it reports the manual change instead.
+
+## Manual installation
+
+Each supported agent has a guide for installing its hooks manually:
+
+- [Claude Code](claude-code.md)
+- [Codex CLI](codex.md)
+- [GitHub Copilot CLI](copilot.md)
+- [Cursor](cursor.md)
+- [Devin CLI](devin.md)
+- [Droid](droid.md)
+- [Gemini CLI](gemini.md)
+- [Grok CLI](grok.md)
+- [Kiro](kiro.md)
+- [Mistral Vibe](mistral-vibe.md)
+
+Depending on the agent, manual delivery means installing a plugin, copying a drop-in file, or merging settings.
+The per-agent page also covers required trust or enablement steps and agent-specific quirks.
+
+## Hook reference
+
+Any agent that exposes lifecycle hooks can use the tool by mapping its events to these commands:
+
 ```
 tmux-agent-status reset
 tmux-agent-status set working
@@ -12,11 +57,11 @@ tmux-agent-status finish
 
 The `set` commands go on the agent's turn events. `reset` goes on session start and drops whatever
 the previous agent left in the pane; `finish` goes on session end and resolves the session to done,
-leaving an `error` alone. Neither of those two rings the bell. The cli allows `--json` if the agent
-expects a json response.
+leaving an `error` alone. Neither of those two rings the bell. The CLI accepts `--json` when the
+agent expects a JSON response.
 
-The following table shows how this maps to common agents.
-Blank cells link to the upstream doc or issue that says the event does not exist.
+The following table shows how lifecycle events map for common agents. Blank cells link to the
+upstream documentation or issue that says the event does not exist.
 
 | Agent | Shape | Drop-in file | Needs enabling | Subagent events | Multi-session per pane | `error` event | `waiting` repeats | Stdout parsed | Payload on stdin | `TMUX_PANE` inherited | Session start | Session end | Verified |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -32,7 +77,6 @@ Blank cells link to the upstream doc or issue that says the event does not exist
 | [Gemini CLI](gemini.md) | B | manual settings.json merge | manual merge | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | 2026-09-09 |
 | OpenCode | C | N/A | N/A | unknown | yes | `session.error` | `permission.asked` | N/A | N/A | N/A | yes | inferred | deferred |
 | Antigravity | C | N/A | N/A | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unknown | unsupported |
-
 
 ## Shapes
 
@@ -74,6 +118,25 @@ across the surveyed agents means `--pane` / `TMUX_AGENT_STATUS_PANE` should be u
 defensively.
 - **Session start / end**: whether events map onto `reset` and `finish`. Agents
 without both keep the known limit that a crashed agent can strand `working`.
+
+## Installer delivery details
+
+The installer prefers plugin > drop-in file > file edit:
+
+- **The Claude Code plugin**, which ships its hook config in its own directory, so
+  `~/.claude/settings.json` is not written at all. That is the default whenever `claude` is on
+  `PATH`; without it the run falls back to merging into `settings.json`. `--claude-route=plugin`
+  refuses to fall back, `--claude-route=settings` asks for the merge. See
+  [claude-code.md](claude-code.md).
+- **A drop-in file of its own**, for agents that read a hooks directory. Copilot, Grok and Kiro each get a
+  `tmux-agent-status.json`, and nothing else in the directory is touched.
+- **A merge**, for agents with a single settings file. Codex, Cursor, Devin, Droid, Gemini and
+  Mistral Vibe keep everything the file already held; only our event keys are added, and key order
+  is preserved so the diff is ours alone.
+
+OpenCode and Antigravity are not covered because shape C is not implemented. The manual agent guides
+remain supported when a config is generated or read-only, or when you prefer to place the hooks
+yourself.
 
 ## Shared hook behaviour
 
@@ -122,12 +185,9 @@ Every agent page repeats:
 
 1. Where to place the drop-in file (or what to merge into the agent's config).
 2. How to enable the hook system if it needs enabling.
-3. How to prove a hook fired.
-4. `TMUX_AGENT_STATUS_DISABLED=1` and `TMUX_AGENT_STATUS_DEBUG=1`.
-5. Quirks specific to that agent, including stdout parsing and subagent rules.
+3. Quirks specific to that agent, including stdout parsing and subagent rules.
 
 ## Opt-out and debug
 
-Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that
-exits 0. Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr
-(shape B agents only).
+Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that exits 0.
+Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr (shape B agents only).

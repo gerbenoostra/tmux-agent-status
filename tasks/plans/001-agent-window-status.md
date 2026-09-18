@@ -238,6 +238,14 @@ set -g window-status-format '#I:#{=/25/…:<name segment, unchanged>}#{?@agent_s
 
 The name segment stays whatever the user already has. This tool never edits it.
 
+> **Scoped, not superseded, by `tasks/plans/011-install-command.md`.** The hazard above is a
+> property of the tmux *option*: it is `set-option` on a window-local `window-status-format` that
+> freezes a window's format forever. That prohibition stands at every scope, for good, and a test
+> pins it. Editing the **text of the user's config file** is a different act with none of that
+> behaviour, and it is what `install --tmux-format` does - the same one-line edit this section asks
+> the user to make by hand, with the term above unchanged. Reading the option stays fine;
+> `set-option` stays forbidden.
+
 Verified rendering:
 
 ```
@@ -321,6 +329,16 @@ business writing it.
 Consequence: **this tool never edits `~/.claude/settings.json`.** It documents the hook entries and
 the user pastes them in, reviewed in a diff like any other change. If a plugin route is ever used it
 must be the `enabledPlugins` mechanism, which never touches the file.
+
+> **Superseded by `tasks/plans/011-install-command.md`.** The verdict above is reversed for the
+> `install` subcommand only, and each of the four objections is answered there rather than ignored:
+> the symlink chain is resolved and the target edited, the unpredictable writer is caught by a
+> fingerprint re-checked immediately before the rename and a post-write verify, key order is
+> preserved by `serde_json`'s `preserve_order`, and nothing is ever truncated - the write is a
+> sibling temp file and `rename(2)`. The bar this section sets, *a tool that can do that to a config
+> it did not write has no business writing it*, is the bar 011 has to clear, and the contract is its
+> deliverable. The hook commands still edit no file. The `enabledPlugins` route is still preferred,
+> and on a machine with `claude` on `PATH` this file is still never touched by us.
 
 ### Other agents
 

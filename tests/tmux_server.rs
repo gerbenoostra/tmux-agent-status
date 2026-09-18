@@ -60,7 +60,7 @@ impl Server {
         assert!(
             out.status.success(),
             "tmux {args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
+            support::stderr_of(&out)
         );
         String::from_utf8(out.stdout).expect("tmux printed valid utf-8")
     }
@@ -294,7 +294,7 @@ fn assert_ok(out: &Output) {
         out.status.success(),
         "tmux-agent-status exited with {}: {}",
         out.status,
-        String::from_utf8_lossy(&out.stderr)
+        support::stderr_of(out)
     );
     assert!(
         out.stdout.is_empty(),
@@ -761,7 +761,10 @@ fn a_hook_outside_tmux_exits_zero_and_says_nothing() {
             .output()
             .expect("the binary runs");
         assert_ok(&out);
-        assert!(out.stderr.is_empty(), "{args:?} wrote to stderr");
+        assert!(
+            support::stderr_of(&out).is_empty(),
+            "{args:?} wrote to stderr"
+        );
     }
 }
 
@@ -776,7 +779,7 @@ fn a_hook_with_only_tmux_pane_exits_zero_and_says_nothing() {
         .expect("the binary runs");
 
     assert_ok(&out);
-    assert!(out.stderr.is_empty());
+    assert!(support::stderr_of(&out).is_empty());
 }
 
 #[test]
@@ -788,7 +791,7 @@ fn an_unknown_state_is_loud() {
         .expect("the binary runs");
 
     assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown state 'busy'"));
+    assert!(support::stderr_of(&out).contains("unknown state 'busy'"));
 }
 
 #[test]

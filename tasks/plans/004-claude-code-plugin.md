@@ -62,6 +62,14 @@ writes nothing but two tmux options and a bell. The rule in AGENTS.md ("agent ho
 documented, never written") is about **our** code writing **their** file; it stands, and gains one
 clarifying clause (see "Work items").
 
+> **The rule quoted above has since been rewritten** by `tasks/plans/011-install-command.md`: hook
+> entries are documented **and** written, by the `install` subcommand only and under its safe-write
+> contract. Nothing in this plan changes. The promise this section lands on - **no hook entries of
+> ours in your settings file** - is exactly what 011 preserves by making the plugin the first choice
+> of three, so on a machine with `claude` on `PATH` the merge into `~/.claude/settings.json` is
+> never reached. 011 also refuses to fall back to that merge when the plugin route *fails*,
+> precisely so a network blip cannot quietly cost a user this promise.
+
 ## Scope boundary
 
 | In | Out |
