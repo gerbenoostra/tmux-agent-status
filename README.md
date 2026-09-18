@@ -46,14 +46,16 @@ Setup has two steps:
 1. [Install the CLI](docs/install.md) with the one-line installer, Nix, a prebuilt binary, Cargo, or
    from source.
    Simplest approach:
+
    ```sh
-    curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
-    ```
+   curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
+   ```
+
 2. Register the hooks, which configures tmux and your detected agents:
 
-```sh
-tmux-agent-status register
-```
+   ```sh
+   tmux-agent-status register
+   ```
 
 `register` previews and confirms every change and backs up every file it edits; `--dry-run` inspects
 the plan without changing anything. What it changes, the manual configuration route, the optional

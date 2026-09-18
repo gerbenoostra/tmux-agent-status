@@ -76,8 +76,11 @@ setw -g window-status-bell-style 'fg=magenta,bold,nodim'
 
 `bell-action any` is useful when the tmux window running the agent is current inside a terminal tab
 that is itself hidden. The trade-off is that other bells from that window also reach your terminal.
-What the terminal does with the bell is up to the terminal. The bell tells you *which terminal tab*;
-the glyph tells you *which tmux window*.
+
+What the terminal does with the bell is up to the terminal. Ghostty, for example, prefixes the tab
+title with 🔔 and asks for your attention while it is unfocused, and stays silent unless you enable
+a sound in `bell-features`. The bell tells you *which terminal tab*; the glyph tells you
+*which tmux window*.
 
 ## The bell, and colour
 

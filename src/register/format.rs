@@ -1,6 +1,6 @@
 //! Reading and rewriting a `window-status-format` line in a tmux config file.
 //!
-//! Narrow on purpose. The parser recognises the shape the README asks for and
+//! Narrow on purpose. The parser recognises the shape `docs/register.md` asks for and
 //! refuses everything else, because the fallback - printing the line for the
 //! user to edit - is the state they are in today and costs them nothing. A
 //! general tmux parser is a project; a parser that knows when to stop is a
@@ -12,7 +12,7 @@
 
 use std::ops::Range;
 
-/// The term 001 and the README specify, and the only thing this module inserts.
+/// The term 001 and `docs/register.md` specify, and the only thing this module inserts.
 pub const TERM: &str = "#{?@agent_status, #{@agent_status},}";
 
 /// The two options that must carry the term.

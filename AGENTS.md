@@ -26,8 +26,8 @@ a state file, never edit any config file, and never spawn a daemon. The one exce
   present: `show-options` yes, `set-option` never. A test asserts the option name never appears as a
   `set-option` argument anywhere in `src/`.
   The hazard is a property of the tmux *option*, not of the format string, so editing the **text of
-  the user's config file** is allowed, and is what `register --tmux-format` does - the same edit the
-  README asks the user to make by hand. See `tasks/plans/011-install-command.md`.
+  the user's config file** is allowed, and is what `register --tmux-format` does - the same edit
+  `docs/register.md` asks the user to make by hand. See `tasks/plans/011-install-command.md`.
 - `@agent_pane_status` (per pane) and `@agent_status` (per window rollup) are two names on purpose.
   tmux option inheritance makes a pane with no status read back as the window's value, so they can
   never be merged into one.

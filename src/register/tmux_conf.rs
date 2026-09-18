@@ -209,8 +209,8 @@ pub fn with_source_block(text: &str, snippet: &Path) -> Option<String> {
 
 /// A path as a tmux config line should spell it.
 ///
-/// Bare when nothing in it needs quoting, which is the spelling the README
-/// asks the user to paste. Otherwise the choice `format::requote` makes for the
+/// Bare when nothing in it needs quoting, which is the spelling
+/// `docs/register.md` asks the user to paste. Otherwise the choice `format::requote` makes for the
 /// same reasons: single quotes first, because nothing is an escape inside them
 /// and a path is full of things that would otherwise be one; double quotes for
 /// a path that holds a single quote; and `None` for one that defeats both.
@@ -531,7 +531,7 @@ mod tests {
             Path::new("/home/u/.config/tmux/tmux-agent-status.conf"),
         )
         .expect("an ordinary path can be spelled");
-        // Bare, which is the spelling the README asks the user to paste.
+        // Bare, which is the spelling `docs/register.md` asks the user to paste.
         assert!(out.contains("source-file /home/u/.config/tmux/tmux-agent-status.conf"));
         assert!(sources_snippet(&out));
         assert!(super::super::has_marked_block(&out));

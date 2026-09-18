@@ -1,4 +1,4 @@
-//! `tmux-agent-status register`: write the hooks and configs the README documents.
+//! `tmux-agent-status register`: write the hooks and configs `docs/register.md` documents.
 //!
 //! Everything under here is the one subcommand that touches a user's files, and
 //! only when a human types it. The hook commands are unchanged and still write

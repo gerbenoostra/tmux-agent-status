@@ -433,8 +433,8 @@ usage:
   tmux-agent-status notify --agent <name> --stdin [--json]
                               read the JSON payload from stdin
   tmux-agent-status register [flags]
-                              write the agent hooks and tmux configuration the
-                              README documents, asking before each change
+                              write the agent hooks and tmux configuration
+                              docs/register.md documents, asking before each change
   tmux-agent-status --version      version, and the executable that is actually running
   tmux-agent-status --help         this text
 
