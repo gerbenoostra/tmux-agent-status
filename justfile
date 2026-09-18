@@ -107,10 +107,10 @@ check-plugin:
     #!/usr/bin/env bash
     set -euo pipefail
     # Not a CI job, because it needs the `claude` CLI. The check that actually
-    # rots - manifest against README - is a test, so it runs everywhere.
+    # rots - manifest against the agent doc - is a test, so it runs everywhere.
     if ! command -v claude >/dev/null 2>&1; then
         echo "claude CLI not found; skipping manifest validation." >&2
-        echo "The README/manifest drift check runs in 'just test'." >&2
+        echo "The agent-doc/manifest drift check runs in 'just test'." >&2
         exit 0
     fi
     claude plugin validate --strict .

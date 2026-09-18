@@ -36,8 +36,8 @@ The glyphs are emoji, so they survive a font change. They need a tmux client in 
 without it renders them as underscores.
 
 ## Compatible agents
-Basically any agent that allows to hook on to lifecycle events work.
-The [docs/agents](docs/agents/README.md) gives an overview of all agents that have been included in auto configuration.
+Basically any agent that can hook into lifecycle events works.
+[docs/agents](docs/agents/README.md) gives an overview of the agents `register` can configure.
 
 ## Setup
 

@@ -14,8 +14,8 @@ mod support;
 
 /// One watched event, in the form both sources can be reduced to.
 ///
-/// `matcher` is `None` for "all", which the manifest expresses by omitting the key and the README
-/// by writing "all".
+/// `matcher` is `None` for "all", which the manifest expresses by omitting the key and the agent
+/// doc by writing "all".
 type HookEntry = (String, Option<String>, String);
 
 /// Sort, and reject a repeated entry rather than collapsing it.
@@ -95,7 +95,7 @@ fn manifest_entries() -> Vec<HookEntry> {
     normalise(entries, "hooks.json")
 }
 
-/// A README cell holding a value: backticks stripped, an escaped pipe restored.
+/// A cell in the agent doc's table holding a value: backticks stripped, an escaped pipe restored.
 fn unformat(cell: &str) -> String {
     cell.trim().trim_matches('`').replace("\\|", "|")
 }

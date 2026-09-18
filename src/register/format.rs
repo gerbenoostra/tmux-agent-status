@@ -524,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn the_term_is_the_one_the_readme_documents() {
+    fn the_term_is_the_one_register_md_documents() {
         assert_eq!(TERM, "#{?@agent_status, #{@agent_status},}");
     }
 
