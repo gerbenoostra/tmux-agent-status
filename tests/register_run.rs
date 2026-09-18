@@ -1,6 +1,6 @@
 //! The run itself, driven by a scripted person.
 //!
-//! `install` asks questions, and most of what it does next turns on the
+//! `register` asks questions, and most of what it does next turns on the
 //! answers. Driving it through a real terminal would test `dialoguer`; driving
 //! it with `-y` only ever answers yes. So these supply an `Interaction` of
 //! their own and assert what the run does when somebody says no, edits the
@@ -11,9 +11,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use tmux_agent_status::install::prompt::Interaction;
-use tmux_agent_status::install::write::{Ask, Warning};
-use tmux_agent_status::install::{self, Home, Options, Outcome, Step, agents};
+use tmux_agent_status::register::prompt::Interaction;
+use tmux_agent_status::register::write::{Ask, Warning};
+use tmux_agent_status::register::{self, Home, Options, Outcome, Step, agents};
 
 mod support;
 
@@ -175,7 +175,7 @@ impl Ask for Script {
     }
 }
 
-fn options(home: &TempDir, steps: install::Steps) -> Options {
+fn options(home: &TempDir, steps: register::Steps) -> Options {
     Options {
         steps,
         agents: None,
@@ -199,7 +199,7 @@ fn only_agents(home: &TempDir, names: &[&str]) -> Options {
         agents: Some(names.iter().map(|name| agent(name)).collect()),
         ..options(
             home,
-            install::select(&[Step::Agents], &[]).expect("a valid selection"),
+            register::select(&[Step::Agents], &[]).expect("a valid selection"),
         )
     }
 }
@@ -209,8 +209,8 @@ fn agent(name: &str) -> &'static agents::Agent {
 }
 
 /// Both tmux steps, and nothing else.
-fn tmux_steps() -> install::Steps {
-    install::select(&[Step::TmuxHook, Step::TmuxFormat], &[]).expect("a valid selection")
+fn tmux_steps() -> register::Steps {
+    register::select(&[Step::TmuxHook, Step::TmuxFormat], &[]).expect("a valid selection")
 }
 
 #[test]
@@ -220,9 +220,9 @@ fn saying_no_to_a_write_leaves_the_file_alone_and_is_not_a_failure() {
     let target = dir.write(".codex/hooks.json", "{\"theirs\": 1}\n");
     let script = Script::saying_no();
 
-    let report = install::run(&only_agents(&dir, &["codex"]), &script);
+    let report = register::run(&only_agents(&dir, &["codex"]), &script);
 
-    assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotInstalled));
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotRegistered));
     // A refusal the user chose is not an error.
     assert_eq!(report.exit_code(), 0);
     assert_eq!(
@@ -237,23 +237,23 @@ fn saying_no_to_a_write_leaves_the_file_alone_and_is_not_a_failure() {
 }
 
 #[test]
-fn saying_yes_installs_and_says_where_it_landed() {
+fn saying_yes_registers_and_says_where_it_landed() {
     let dir = TempDir::new("run-accepted");
     let script = Script::saying_yes();
 
-    let report = install::run(&only_agents(&dir, &["kiro"]), &script);
+    let report = register::run(&only_agents(&dir, &["kiro"]), &script);
 
-    assert_eq!(report.outcome(Step::Agents), Some(Outcome::Installed));
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::Registered));
     assert_eq!(report.exit_code(), 0);
     assert!(dir.join(".kiro/hooks/tmux-agent-status.json").is_file());
     assert!(script.output().contains("created"), "{}", script.output());
 }
 
 #[test]
-fn the_agent_list_shows_every_agent_and_installs_what_was_ticked() {
+fn the_agent_list_shows_every_agent_and_registers_what_was_ticked() {
     let dir = TempDir::new("run-choose");
     // Nothing is detected in this home, so nothing is preselected - and the
-    // list still shows all of them, because an agent is never installed
+    // list still shows all of them, because an agent is never registered
     // without appearing in it.
     let script = Script {
         chosen: Some(vec![
@@ -265,8 +265,8 @@ fn the_agent_list_shows_every_agent_and_installs_what_was_ticked() {
         ..Script::saying_yes()
     };
 
-    let report = install::run(
-        &options(&dir, install::select(&[Step::Agents], &[]).expect("valid")),
+    let report = register::run(
+        &options(&dir, register::select(&[Step::Agents], &[]).expect("valid")),
         &script,
     );
 
@@ -286,15 +286,15 @@ fn the_agent_list_shows_every_agent_and_installs_what_was_ticked() {
 }
 
 #[test]
-fn choosing_nothing_installs_nothing() {
+fn choosing_nothing_registers_nothing() {
     let dir = TempDir::new("run-choose-none");
     let script = Script {
         chosen: Some(Vec::new()),
         ..Script::saying_yes()
     };
 
-    let report = install::run(
-        &options(&dir, install::select(&[Step::Agents], &[]).expect("valid")),
+    let report = register::run(
+        &options(&dir, register::select(&[Step::Agents], &[]).expect("valid")),
         &script,
     );
 
@@ -313,7 +313,7 @@ fn a_target_that_resolves_elsewhere_says_so_before_it_is_written() {
     std::os::unix::fs::symlink(&checkout, dir.join(".codex/hooks.json")).expect("the link");
     let script = Script::saying_yes();
 
-    install::run(&only_agents(&dir, &["codex"]), &script);
+    register::run(&only_agents(&dir, &["codex"]), &script);
 
     let output = script.output();
     assert!(output.contains("resolves to"), "{output}");
@@ -340,7 +340,7 @@ fn a_target_inside_a_git_repository_is_pointed_out() {
     fs::create_dir_all(dir.join(".codex/.git")).expect("the directory");
     let script = Script::saying_yes();
 
-    install::run(&only_agents(&dir, &["codex"]), &script);
+    register::run(&only_agents(&dir, &["codex"]), &script);
 
     assert!(
         script.output().contains("git repository"),
@@ -354,7 +354,7 @@ fn devins_project_file_is_mentioned_and_never_written() {
     let dir = TempDir::new("run-devin");
     let script = Script::saying_yes();
 
-    install::run(&only_agents(&dir, &["devin"]), &script);
+    register::run(&only_agents(&dir, &["devin"]), &script);
 
     assert!(
         script.output().contains("project scope"),
@@ -375,7 +375,7 @@ fn hooks_already_there_without_markers_are_adopted_rather_than_repeated() {
     let target = dir.write(".vibe/hooks.toml", vibe.contents);
     let script = Script::saying_yes();
 
-    let report = install::run(&only_agents(&dir, &["mistral-vibe"]), &script);
+    let report = register::run(&only_agents(&dir, &["mistral-vibe"]), &script);
 
     assert_eq!(report.exit_code(), 0);
     let after = fs::read_to_string(&target).expect("the file");
@@ -401,10 +401,10 @@ fn hooks_already_there_without_markers_are_adopted_rather_than_repeated() {
     );
     // And a second run has nothing left to do.
     let again = Script::saying_yes();
-    let report = install::run(&only_agents(&dir, &["mistral-vibe"]), &again);
+    let report = register::run(&only_agents(&dir, &["mistral-vibe"]), &again);
     assert_eq!(
         report.outcome(Step::Agents),
-        Some(Outcome::AlreadyInstalled)
+        Some(Outcome::AlreadyRegistered)
     );
     assert_eq!(fs::read_to_string(&target).expect("the file"), after);
 }
@@ -416,13 +416,13 @@ fn declining_an_adoption_leaves_the_file_alone_and_still_reports_success() {
     let target = dir.write(".vibe/hooks.toml", vibe.contents);
     let script = Script::saying_no();
 
-    let report = install::run(&only_agents(&dir, &["mistral-vibe"]), &script);
+    let report = register::run(&only_agents(&dir, &["mistral-vibe"]), &script);
 
-    // The hooks *are* installed, so declining to rewrap them is not a failure
+    // The hooks *are* registered, so declining to rewrap them is not a failure
     // and not an omission.
     assert_eq!(
         report.outcome(Step::Agents),
-        Some(Outcome::AlreadyInstalled)
+        Some(Outcome::AlreadyRegistered)
     );
     assert_eq!(report.exit_code(), 0);
     assert_eq!(
@@ -457,12 +457,12 @@ fn the_plugin_route_installs_and_leaves_settings_json_alone() {
     let dir = TempDir::new("run-plugin");
     let script = Script::saying_yes();
 
-    let report = install::run(
+    let report = register::run(
         &with_claude(&dir, Some(claude_stub(&dir, "[]", 0))),
         &script,
     );
 
-    assert_eq!(report.outcome(Step::Agents), Some(Outcome::Installed));
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::Registered));
     assert_eq!(report.exit_code(), 0);
     assert!(
         script.output().contains("plugin installed"),
@@ -479,12 +479,12 @@ fn declining_the_plugin_installs_nothing_and_is_not_a_failure() {
     let dir = TempDir::new("run-plugin-declined");
     let script = Script::saying_no();
 
-    let report = install::run(
+    let report = register::run(
         &with_claude(&dir, Some(claude_stub(&dir, "[]", 0))),
         &script,
     );
 
-    assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotInstalled));
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotRegistered));
     assert_eq!(report.exit_code(), 0);
     assert!(!dir.join(".claude/settings.json").exists());
     // The confirmation says what it is about to clone, and from where.
@@ -506,7 +506,7 @@ fn a_claude_that_cannot_answer_fails_the_step_rather_than_merging() {
     let mute = claude_stub(&dir, "", 3);
     fs::write(dir.join("claude"), "#!/bin/sh\nexit 3\n").expect("the stub");
 
-    let report = install::run(&with_claude(&dir, Some(mute)), &script);
+    let report = register::run(&with_claude(&dir, Some(mute)), &script);
 
     assert_eq!(report.outcome(Step::Agents), Some(Outcome::Failed));
     assert_eq!(report.exit_code(), 1);
@@ -523,7 +523,7 @@ fn no_claude_at_all_is_the_one_thing_that_falls_through_to_the_merge() {
     let dir = TempDir::new("run-plugin-absent");
     let script = Script::saying_yes();
 
-    let report = install::run(&with_claude(&dir, None), &script);
+    let report = register::run(&with_claude(&dir, None), &script);
 
     assert_eq!(report.exit_code(), 0);
     assert!(dir.join(".claude/settings.json").is_file());
@@ -534,7 +534,7 @@ fn forcing_the_plugin_route_with_no_claude_fails_rather_than_merging() {
     let dir = TempDir::new("run-plugin-forced");
     let script = Script::saying_yes();
 
-    let report = install::run(
+    let report = register::run(
         &Options {
             claude_route: agents::ClaudeRoute::Plugin,
             ..with_claude(&dir, None)
@@ -552,9 +552,9 @@ fn a_file_that_cannot_be_merged_into_hands_the_block_back() {
     let target = dir.write(".codex/hooks.json", "not json at all\n");
     let script = Script::saying_yes();
 
-    let report = install::run(&only_agents(&dir, &["codex"]), &script);
+    let report = register::run(&only_agents(&dir, &["codex"]), &script);
 
-    assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotInstalled));
+    assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotRegistered));
     assert_eq!(report.exit_code(), 0);
     let output = script.output();
     assert!(output.contains("by hand"), "{output}");
@@ -575,13 +575,13 @@ fn a_config_tmux_will_not_read_is_refused_before_anything_is_written() {
     let before = fs::read_to_string(&config).expect("the config");
     let script = Script::saying_yes();
 
-    let report = install::run(&options(&dir, tmux_steps()), &script);
+    let report = register::run(&options(&dir, tmux_steps()), &script);
 
     let output = script.output();
-    assert_eq!(report.outcome(Step::TmuxHook), Some(Outcome::NotInstalled));
+    assert_eq!(report.outcome(Step::TmuxHook), Some(Outcome::NotRegistered));
     assert_eq!(
         report.outcome(Step::TmuxFormat),
-        Some(Outcome::NotInstalled)
+        Some(Outcome::NotRegistered)
     );
     assert_eq!(report.exit_code(), 0);
     assert!(output.contains("tmux will not read"), "{output}");
@@ -601,10 +601,10 @@ fn a_line_the_parser_will_not_touch_is_handed_back_with_the_term() {
     let before = fs::read_to_string(&config).expect("the config");
     let script = Script::saying_no();
 
-    let report = install::run(
+    let report = register::run(
         &options(
             &dir,
-            install::select(&[Step::TmuxFormat], &[]).expect("valid"),
+            register::select(&[Step::TmuxFormat], &[]).expect("valid"),
         ),
         &script,
     );
@@ -612,7 +612,7 @@ fn a_line_the_parser_will_not_touch_is_handed_back_with_the_term() {
     let output = script.output();
     assert_eq!(
         report.outcome(Step::TmuxFormat),
-        Some(Outcome::NotInstalled)
+        Some(Outcome::NotRegistered)
     );
     assert!(output.contains("second command"), "{output}");
     // The term is printed, ready to paste, which is the whole point of having
@@ -635,10 +635,10 @@ fn an_option_nothing_assigns_gets_a_line_of_its_own() {
     );
     let script = Script::saying_yes();
 
-    let report = install::run(
+    let report = register::run(
         &options(
             &dir,
-            install::select(&[Step::TmuxFormat], &[]).expect("valid"),
+            register::select(&[Step::TmuxFormat], &[]).expect("valid"),
         ),
         &script,
     );
@@ -676,10 +676,10 @@ fn an_edited_line_is_taken_when_it_still_carries_the_term() {
         ..Script::saying_yes_but_not_to("Accept the proposed line")
     };
 
-    install::run(
+    register::run(
         &options(
             &dir,
-            install::select(&[Step::TmuxFormat], &[]).expect("valid"),
+            register::select(&[Step::TmuxFormat], &[]).expect("valid"),
         ),
         &script,
     );
@@ -705,10 +705,10 @@ fn an_accepted_edit_is_shown_before_the_write_question() {
         ..Script::saying_yes_but_not_to("Accept the proposed line")
     };
 
-    install::run(
+    register::run(
         &options(
             &dir,
-            install::select(&[Step::TmuxFormat], &[]).expect("valid"),
+            register::select(&[Step::TmuxFormat], &[]).expect("valid"),
         ),
         &script,
     );
@@ -742,7 +742,7 @@ fn write_questions_stay_distinguishable_when_several_target_the_same_file() {
     );
     let script = Script::saying_yes();
 
-    install::run(&options(&dir, tmux_steps()), &script);
+    register::run(&options(&dir, tmux_steps()), &script);
 
     let questions = script.questions();
     // The snippet, the source-file line and both format splices all ask
@@ -773,10 +773,10 @@ fn the_edit_question_names_the_file_it_concerns_before_asking() {
     );
     let script = Script::saying_yes();
 
-    install::run(
+    register::run(
         &options(
             &dir,
-            install::select(&[Step::TmuxFormat], &[]).expect("valid"),
+            register::select(&[Step::TmuxFormat], &[]).expect("valid"),
         ),
         &script,
     );
@@ -784,7 +784,7 @@ fn the_edit_question_names_the_file_it_concerns_before_asking() {
     let log = script.log();
     // The full header/before/after/question block, contiguous and in order,
     // for each option in turn - not just the first one found.
-    for option in install::format::OPTIONS {
+    for option in register::format::OPTIONS {
         let block = format!(
             "SAY:   the term in {option} - edit {}\n\
              SAY:       before: set -g {option} '#I:#W'\n\
@@ -817,10 +817,10 @@ fn an_edit_that_drops_the_term_is_refused_and_the_proposal_stands() {
         ..Script::saying_yes_but_not_to("Accept the proposed line")
     };
 
-    install::run(
+    register::run(
         &options(
             &dir,
-            install::select(&[Step::TmuxFormat], &[]).expect("valid"),
+            register::select(&[Step::TmuxFormat], &[]).expect("valid"),
         ),
         &script,
     );
@@ -843,7 +843,7 @@ fn declining_the_reload_says_how_to_do_it_later() {
 
     // The config is one the running server loads, so the offer is made - and
     // declined, which must leave the user knowing what to type.
-    install::offer_reload(&config, Some(&config.display().to_string()), &script);
+    register::offer_reload(&config, Some(&config.display().to_string()), &script);
 
     let output = script.output();
     assert!(output.contains("Not reloaded"), "{output}");
@@ -858,7 +858,7 @@ fn a_config_the_running_tmux_does_not_load_is_never_sourced_into_it() {
     let config = dir.write(".config/tmux/tmux.conf", "set -g status on\n");
     let script = Script::saying_yes();
 
-    install::offer_reload(&config, Some("/etc/tmux.conf,~/.tmux.conf"), &script);
+    register::offer_reload(&config, Some("/etc/tmux.conf,~/.tmux.conf"), &script);
 
     let output = script.output();
     assert!(output.contains("Not offering a reload"), "{output}");
@@ -871,7 +871,7 @@ fn with_no_running_tmux_there_is_nothing_to_reload_into() {
     let config = dir.write(".config/tmux/tmux.conf", "set -g status on\n");
     let script = Script::saying_yes();
 
-    install::offer_reload(&config, None, &script);
+    register::offer_reload(&config, None, &script);
 
     assert!(script.output().is_empty(), "{}", script.output());
 }
@@ -881,10 +881,10 @@ fn a_run_with_no_steps_does_nothing_at_all() {
     let dir = TempDir::new("run-nothing");
     let script = Script::saying_yes();
 
-    let report = install::run(
+    let report = register::run(
         &options(
             &dir,
-            install::Steps {
+            register::Steps {
                 agents: false,
                 tmux_hook: false,
                 tmux_format: false,
@@ -898,17 +898,17 @@ fn a_run_with_no_steps_does_nothing_at_all() {
 }
 
 #[test]
-fn the_snippet_is_written_when_none_is_installed_and_then_sourced() {
+fn the_snippet_is_written_when_none_is_present_and_then_sourced() {
     let dir = TempDir::new("run-snippet");
     dir.write(".config/tmux/tmux.conf", "set -g status on\n");
     let script = Script::saying_yes();
 
-    let report = install::run(
+    let report = register::run(
         &Options {
             snippet: Some(dir.join(".config/tmux/tmux-agent-status.conf")),
             ..options(
                 &dir,
-                install::select(&[Step::TmuxHook], &[]).expect("valid"),
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
             )
         },
         &script,
@@ -934,7 +934,7 @@ fn a_config_that_does_not_exist_yet_is_created_where_tmux_documents() {
     let dir = TempDir::new("run-create-config");
     let script = Script::saying_yes();
 
-    let report = install::run(&options(&dir, tmux_steps()), &script);
+    let report = register::run(&options(&dir, tmux_steps()), &script);
 
     assert_eq!(report.exit_code(), 0);
     let config = dir.join(".config/tmux/tmux.conf");
@@ -982,13 +982,13 @@ fn a_source_line_pointing_at_a_snippet_nobody_wrote_is_refused_by_tmux() {
         snippet: Some(snippet.clone()),
         ..options(
             &dir,
-            install::select(&[Step::TmuxHook], &[]).expect("a valid selection"),
+            register::select(&[Step::TmuxHook], &[]).expect("a valid selection"),
         )
     };
     // Yes to the source-file line, no to writing the snippet it points at.
     let script = Script::saying_yes_but_not_to(&snippet.display().to_string());
 
-    let report = install::run(&options, &script);
+    let report = register::run(&options, &script);
 
     let output = script.output();
     assert!(!snippet.exists(), "the snippet was written anyway");

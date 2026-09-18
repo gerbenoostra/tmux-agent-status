@@ -9,9 +9,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tmux_agent_status::install::format::Candidate;
-use tmux_agent_status::install::tmux_conf::{self, Choice};
-use tmux_agent_status::install::{Home, has_marked_block};
+use tmux_agent_status::register::format::Candidate;
+use tmux_agent_status::register::tmux_conf::{self, Choice};
+use tmux_agent_status::register::{Home, has_marked_block};
 
 mod support;
 

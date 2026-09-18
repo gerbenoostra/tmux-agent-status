@@ -39,30 +39,30 @@ without it renders them as underscores.
 Basically any agent that allows to hook on to lifecycle events work.
 The [docs/agents](docs/agents/README.md) gives an overview of all agents that have been included in auto configuration.
 
-## Install
+## Setup
 
-Installation has two steps:
+Setup has two steps:
 
 1. [Install the CLI](docs/install.md) with the one-line installer, Nix, a prebuilt binary, Cargo, or
    from source.
 2. Configure tmux and your installed agents:
 
 ```sh
-tmux-agent-status install
+tmux-agent-status register
 ```
 
-The installer detects your agents, previews and confirms every change, backs up every file it edits,
+`register` detects your agents, previews and confirms every change, backs up every file it edits,
 and checks your tmux configuration against a throwaway server - which loads your config, so whatever
 it runs (`run-shell`, `if-shell`, a plugin manager) runs there too. If it cannot edit a generated or
 read-only file safely, it prints the change for you to apply instead.
 
-Start with `tmux-agent-status install --dry-run` to inspect the plan without changing anything.
-Use `tmux-agent-status install --help` for step selection, non-interactive operation, and target
+Start with `tmux-agent-status register --dry-run` to inspect the plan without changing anything.
+Use `tmux-agent-status register --help` for step selection, non-interactive operation, and target
 overrides.
 
 ## Manual configuration
 
-The installer is the recommended route. If you prefer to manage every file yourself, configure the
+`register` is the recommended route. If you prefer to manage every file yourself, configure the
 same three parts manually.
 
 ### Tmux hooks
@@ -152,7 +152,7 @@ It is also documented in the [shipped snippet](./share/tmux/tmux-agent-status.co
 Now you should be ready to go.
 If you want to verify the parts, that can be done as follows.
 
-`tmux-agent-status install --dry-run` reports the configuration state without changing anything, which is the quickest check.
+`tmux-agent-status register --dry-run` reports the configuration state without changing anything, which is the quickest check.
 
 To verify the tool is installed and on your path:
 ```sh

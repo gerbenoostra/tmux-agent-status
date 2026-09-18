@@ -194,7 +194,7 @@ verify_installation() {
     ok "${BIN} is installed and ready!"
     echo ""
     echo "Finish setup with:"
-    echo "  ${BIN} install"
+    echo "  ${BIN} register"
     echo ""
     echo "Documentation: https://github.com/${REPO}"
     echo ""

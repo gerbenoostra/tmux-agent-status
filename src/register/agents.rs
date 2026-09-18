@@ -8,7 +8,7 @@
 //! Every drop-in is embedded with `include_str!` rather than read from
 //! `share/agents/` at runtime: `cargo install` ships the binary and nothing
 //! else, so a runtime path lookup would leave the largest install route unable
-//! to install anything. It also means the embedded bytes *are* the shipped
+//! to register anything. It also means the embedded bytes *are* the shipped
 //! files, which is what keeps the drift test meaningful.
 
 use std::fmt;
@@ -23,7 +23,7 @@ use super::{Home, append_marked};
 
 /// What a command of ours looks like, wherever it appears in a document.
 ///
-/// This prefix is the merge key, and it is what a future `uninstall` will use
+/// This prefix is the merge key, and it is what a future `unregister` will use
 /// to find the same entries again.
 pub const COMMAND_PREFIX: &str = "tmux-agent-status ";
 
@@ -70,7 +70,7 @@ impl Place {
     }
 }
 
-/// One agent, and everything the installer needs to know about it.
+/// One agent, and everything `register` needs to know about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Agent {
     /// The name `--agents=` takes, and the directory name under `share/agents/`
@@ -92,7 +92,7 @@ pub struct Agent {
     pub contents: &'static str,
 }
 
-/// User scope for every agent, because a per-project install is a per-project
+/// User scope for every agent, because a per-project registration is a per-project
 /// surprise. Devin has no user-scope drop-in, so it gets the `config.json`
 /// merge and its project file is mentioned rather than written.
 pub const AGENTS: [Agent; 10] = [
@@ -227,7 +227,7 @@ const GEMINI: &str = r#"{
 /// The agent that name refers to.
 ///
 /// A name that is not here is a usage error rather than a silent skip: a
-/// typo'd `--agents=cursur` must never be read as "install nothing,
+/// typo'd `--agents=cursur` must never be read as "register nothing,
 /// successfully".
 pub fn by_name(name: &str) -> Option<&'static Agent> {
     AGENTS.iter().find(|agent| agent.name == name)
@@ -241,9 +241,9 @@ pub fn names() -> Vec<&'static str> {
 /// Why an agent is, or is not, preselected.
 ///
 /// Both signals are reported rather than collapsed, so the user can see why
-/// something is ticked. An agent is never installed without appearing in the
-/// list, and an agent named explicitly installs even when undetected:
-/// installing hooks before the agent is a legitimate order to do things in.
+/// something is ticked. An agent is never registered without appearing in the
+/// list, and an agent named explicitly registers even when undetected:
+/// registering hooks before the agent is a legitimate order to do things in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Detected {
     pub directory: bool,
@@ -304,7 +304,7 @@ impl Agent {
     pub fn merge(&self, current: &str) -> Result<Plan, Refused> {
         match self.shape {
             Shape::Whole => Ok(match current == self.contents {
-                true => Plan::AlreadyInstalled,
+                true => Plan::AlreadyRegistered,
                 false => Plan::Write(self.contents.to_owned()),
             }),
             Shape::JsonUnderHooks | Shape::JsonTopLevel => self.merge_json(current),
@@ -329,7 +329,7 @@ impl Agent {
     /// Mark a file whose hooks are already present as seen by us.
     ///
     /// For TOML this wraps the existing `[[hooks]]` tables that carry our names
-    /// inside the marker block, so the future `uninstall` can remove what is
+    /// inside the marker block, so the future `unregister` can remove what is
     /// ours without reparsing the whole file. TOML entries are still found by
     /// their `name` keys when they need to be merged or removed.
     pub fn adopt(&self, current: &str) -> String {
@@ -421,7 +421,7 @@ impl Agent {
         // must not be rewritten just because our serialiser spells it
         // differently.
         if document == before {
-            return Ok(Plan::AlreadyInstalled);
+            return Ok(Plan::AlreadyRegistered);
         }
         // Serialising a `Value` cannot fail: there is no type in it that has
         // no JSON spelling.
@@ -439,7 +439,7 @@ impl Agent {
         let ours = toml_names(self.contents);
         let present = toml_names(current);
         if !ours.is_empty() && ours.iter().all(|name| present.contains(name)) {
-            return Ok(Plan::AlreadyInstalled);
+            return Ok(Plan::AlreadyRegistered);
         }
         // "The original bytes are still a prefix" is not the check this needs:
         // it proves the old content survived, not that the new content is
@@ -503,7 +503,7 @@ pub const DEVIN_EVENTS: [&str; 8] = [
 /// Every key in the result, not only the ones we contributed.
 ///
 /// A key the user already had is still fatal: one unknown name disables the
-/// lot, ours included, so writing would produce a successful-looking install
+/// lot, ours included, so writing would produce a successful-looking registration
 /// where no hook ever fires. Refusing and saying which key it is leaves them
 /// something to act on.
 fn devin_keys_are_known(holder: &Map<String, Value>) -> Result<(), Refused> {
@@ -681,7 +681,7 @@ fn close(bytes: &[char], at: usize, quote: char, multi: bool) -> Option<usize> {
     }
 }
 
-/// Whether a command is on the `PATH` the installer inherited.
+/// Whether a command is on the `PATH` `register` inherited.
 fn on_path(command: &str) -> bool {
     std::env::var_os("PATH")
         .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(command).is_file()))
@@ -755,7 +755,7 @@ impl Claude {
     /// marketplace is a `directory` source pointing at their own checkout,
     /// which is how they test the plugin they are developing; re-adding it
     /// from GitHub would silently swap their working copy for a released one,
-    /// and the symptom is maddening to trace back to an installer they ran
+    /// and the symptom is maddening to trace back to a `register` run they ran
     /// once.
     pub fn plugin_installed(&self) -> Option<bool> {
         let listed = self.ask(&["plugin", "list", "--json"])?;
@@ -994,7 +994,7 @@ mod tests {
     fn an_own_file_is_written_whole_and_then_left_alone() {
         let kiro = agent("kiro");
         assert_eq!(kiro.merge(""), Ok(Plan::Write(kiro.contents.to_owned())));
-        assert_eq!(kiro.merge(kiro.contents), Ok(Plan::AlreadyInstalled));
+        assert_eq!(kiro.merge(kiro.contents), Ok(Plan::AlreadyRegistered));
     }
 
     #[test]
@@ -1050,7 +1050,7 @@ mod tests {
         let codex = agent("codex");
         let once = written(codex.merge("").unwrap());
         // The semantic no-op: run the merge again over its own output.
-        assert_eq!(codex.merge(&once), Ok(Plan::AlreadyInstalled));
+        assert_eq!(codex.merge(&once), Ok(Plan::AlreadyRegistered));
     }
 
     #[test]
@@ -1063,7 +1063,7 @@ mod tests {
         let compact = serde_json::to_string(&serde_json::from_str::<Value>(&merged).unwrap())
             .expect("it reserialises");
         assert_ne!(compact, merged, "the fixture must differ textually");
-        assert_eq!(codex.merge(&compact), Ok(Plan::AlreadyInstalled));
+        assert_eq!(codex.merge(&compact), Ok(Plan::AlreadyRegistered));
     }
 
     #[test]
@@ -1137,7 +1137,7 @@ mod tests {
         assert!(out.contains("theirs"), "the user's hook was lost: {out}");
         assert!(super::super::has_marked_block(&out));
         assert!(out.ends_with('\n'));
-        assert_eq!(vibe.merge(&out), Ok(Plan::AlreadyInstalled));
+        assert_eq!(vibe.merge(&out), Ok(Plan::AlreadyRegistered));
     }
 
     #[test]
@@ -1146,7 +1146,7 @@ mod tests {
         // carrying no markers. Appending would give them a second copy of
         // every hook.
         let vibe = agent("mistral-vibe");
-        assert_eq!(vibe.merge(vibe.contents), Ok(Plan::AlreadyInstalled));
+        assert_eq!(vibe.merge(vibe.contents), Ok(Plan::AlreadyRegistered));
         assert!(vibe.present_unmarked(vibe.contents));
         let adopted = vibe.adopt(vibe.contents);
         assert!(super::super::has_marked_block(&adopted));

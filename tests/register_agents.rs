@@ -12,8 +12,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-use tmux_agent_status::install::Home;
-use tmux_agent_status::install::agents::{self, Claude, Delivery};
+use tmux_agent_status::register::Home;
+use tmux_agent_status::register::agents::{self, Claude, Delivery};
 
 mod support;
 
@@ -171,7 +171,7 @@ fn detection_finds_an_agent_by_its_config_directory() {
     assert!(devin.detect(&home).directory);
 
     // An agent with neither signal is listed, never preselected, and never
-    // installed without appearing in the list.
+    // registered without appearing in the list.
     let kiro = agents::by_name("kiro").expect("a row");
     let found = kiro.detect(&home);
     assert!(!found.directory);

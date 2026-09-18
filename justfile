@@ -43,7 +43,7 @@ test:
 # the one that is uncovered today: keep it to lines that carry nothing else, or
 # say in the comment what else it covers.
 #
-# `src/install/prompt.rs` is the one file excluded, and the exception is kept to
+# `src/register/prompt.rs` is the one file excluded, and the exception is kept to
 # one named file so it stays reviewable: it is the only module that knows there
 # is a terminal, and exercising it means driving a pty, which would prove that
 # `dialoguer` works rather than that we do. Everything worth asserting about a
@@ -52,7 +52,7 @@ coverage:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v jq >/dev/null || { echo "the coverage gate needs jq." >&2; exit 1; }
-    ignore='src/install/prompt\.rs$'
+    ignore='src/register/prompt\.rs$'
     if [[ "{{os()}}" == "macos" ]]; then
         script -q /dev/null cargo llvm-cov --no-report
     else

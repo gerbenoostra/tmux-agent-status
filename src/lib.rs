@@ -3,8 +3,8 @@
 pub mod bell;
 pub mod command;
 pub mod formats;
-pub mod install;
 pub mod notify;
+pub mod register;
 pub mod state;
 pub mod tmux;
 pub mod version;

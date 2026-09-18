@@ -1,4 +1,4 @@
-//! `tmux-agent-status install`: write the hooks and configs the README documents.
+//! `tmux-agent-status register`: write the hooks and configs the README documents.
 //!
 //! Everything under here is the one subcommand that touches a user's files, and
 //! only when a human types it. The hook commands are unchanged and still write
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 /// The comment that opens a block this tool manages.
 ///
-/// Markers are what make the future `uninstall` a deletion rather than a second
+/// Markers are what make the future `unregister` a deletion rather than a second
 /// parse, and they are the same two lines in tmux config and in TOML, because
 /// both take `#` comments.
 pub const MARKER_START: &str = "# >>> tmux-agent-status >>>";
@@ -85,7 +85,7 @@ impl Home {
     }
 }
 
-/// One of the three things `install` does.
+/// One of the three things `register` does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
     Agents,
@@ -164,9 +164,9 @@ pub struct Options {
     pub steps: Steps,
     /// The agents named on the command line. `None` leaves it to detection.
     ///
-    /// A name that is valid but undetected installs anyway: naming an agent
+    /// A name that is valid but undetected registers anyway: naming an agent
     /// explicitly is a stronger signal than the absence of its config
-    /// directory, and installing hooks before the agent is a legitimate order
+    /// directory, and registering hooks before the agent is a legitimate order
     /// to do things in.
     pub agents: Option<Vec<&'static agents::Agent>>,
     pub claude_route: agents::ClaudeRoute,
@@ -264,12 +264,12 @@ impl Rebuild {
     pub fn apply(&self, current: &str) -> Result<write::Plan, String> {
         match self {
             Rebuild::Whole(contents) => Ok(match current == contents {
-                true => write::Plan::AlreadyInstalled,
+                true => write::Plan::AlreadyRegistered,
                 false => write::Plan::Write(contents.clone()),
             }),
             Rebuild::Agent(agent) => agent.merge(current).map_err(|why| why.to_string()),
             Rebuild::SourceBlock(snippet) => match tmux_conf::sources_snippet(current) {
-                true => Ok(write::Plan::AlreadyInstalled),
+                true => Ok(write::Plan::AlreadyRegistered),
                 false => tmux_conf::with_source_block(current, snippet)
                     .map(write::Plan::Write)
                     .ok_or_else(|| unspellable(snippet)),
@@ -297,11 +297,11 @@ impl Rebuild {
                 )))
             }
             Rebuild::Adopt(agent) => Ok(match has_marked_block(current) {
-                true => write::Plan::AlreadyInstalled,
+                true => write::Plan::AlreadyRegistered,
                 false => write::Plan::Write(agent.adopt(current)),
             }),
             Rebuild::FormatPair(block) => Ok(match format::references_agent_status(current) {
-                true => write::Plan::AlreadyInstalled,
+                true => write::Plan::AlreadyRegistered,
                 false => write::Plan::Write(append_marked(current, block)),
             }),
             // Per option, not per file: by the time this runs, the *other*
@@ -310,7 +310,7 @@ impl Rebuild {
             // option being done too.
             Rebuild::FormatOne { option, line } => {
                 Ok(match already_carries_the_term(current, option) {
-                    true => write::Plan::AlreadyInstalled,
+                    true => write::Plan::AlreadyRegistered,
                     false => write::Plan::Write(append_marked(current, line)),
                 })
             }
@@ -323,7 +323,7 @@ fn already_carries_the_term(text: &str, option: &str) -> bool {
     format::logical_lines(text)
         .iter()
         .filter_map(|line| format::parse(&line.text).line())
-        .any(|line| line.option == option && line.already_installed())
+        .any(|line| line.option == option && line.already_registered())
 }
 
 /// One planned piece of work.
@@ -339,7 +339,7 @@ pub enum Action {
         marketplace: String,
     },
     /// Already done. Nothing is written and no backup is taken.
-    AlreadyInstalled,
+    AlreadyRegistered,
     /// Cannot be done here; this is what to do by hand. Not a failure: a
     /// refusal the user can act on leaves them no worse off than before they
     /// ran anything.
@@ -376,11 +376,11 @@ enum Work {
 /// How a step came out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    Installed,
-    AlreadyInstalled,
+    Registered,
+    AlreadyRegistered,
     /// Nothing was written and the user knows what to do. Exit code 0: a
     /// refusal the user chose is not an error.
-    NotInstalled,
+    NotRegistered,
     Failed,
 }
 
@@ -406,7 +406,7 @@ impl Report {
             .reduce(worst)
     }
 
-    /// 0 when every requested step is installed or was already; 1 when at
+    /// 0 when every requested step is registered or was already; 1 when at
     /// least one failed, with every file it touched back the way it was.
     ///
     /// A dry run is always 0. Nothing ran, so nothing failed: what it printed
@@ -430,9 +430,9 @@ impl Report {
 fn worst(a: Outcome, b: Outcome) -> Outcome {
     let rank = |outcome: Outcome| match outcome {
         Outcome::Failed => 3,
-        Outcome::NotInstalled => 2,
-        Outcome::Installed => 1,
-        Outcome::AlreadyInstalled => 0,
+        Outcome::NotRegistered => 2,
+        Outcome::Registered => 1,
+        Outcome::AlreadyRegistered => 0,
     };
     match rank(a) >= rank(b) {
         true => a,
@@ -440,12 +440,12 @@ fn worst(a: Outcome, b: Outcome) -> Outcome {
     }
 }
 
-/// Everything `install` is allowed to move in a tmux config.
+/// Everything `register` is allowed to move in a tmux config.
 ///
 /// One list for both tmux steps rather than one each, because they edit the
 /// same file in sequence: the format step's baseline is taken before the hook
 /// step has written, so it sees the hooks appear as well. The assertion that
-/// matters is unchanged - *nothing this installer is not responsible for*
+/// matters is unchanged - *nothing `register` is not responsible for*
 /// moved - and an abandoned config still shows up instantly, because it reverts
 /// everything else the user set.
 ///
@@ -611,7 +611,7 @@ fn faulty(stage: &str) -> bool {
 
 /// What to say about `/etc/tmux.conf`, which is never chosen.
 ///
-/// It needs root and it installs the tool for every user of the machine, which
+/// It needs root and it registers the tool for every user of the machine, which
 /// is not what anyone typing this command meant. So it is reported, with the
 /// way to ask for it on purpose.
 fn system_wide_note(listed: Option<&str>, exists: impl Fn(&Path) -> bool) -> String {
@@ -622,7 +622,7 @@ fn system_wide_note(listed: Option<&str>, exists: impl Fn(&Path) -> bool) -> Str
         .filter(|candidate| tmux_conf::is_system_wide(candidate) && exists(candidate))
         .map(|candidate| {
             format!(
-                "{} exists and is not being touched: it needs root, and it would install \
+                "{} exists and is not being touched: it needs root, and it would register \
                  this for every user of the machine.\nPass --tmux-config if that really \
                  was the intent.\n",
                 candidate.display()
@@ -708,7 +708,7 @@ pub fn run(options: &Options, prompt: &dyn prompt::Interaction) -> Report {
 
     // Phase 3. Every question, and then no more questions.
     if tmux.is_none() {
-        prompt.say("This is what install would do:");
+        prompt.say("This is what register would do:");
     }
     let approved = confirm(planned, prompt, &mut report);
 
@@ -732,7 +732,7 @@ pub fn run(options: &Options, prompt: &dyn prompt::Interaction) -> Report {
 /// Show every planned change and take the answers, in one pass.
 ///
 /// What comes back is the work to do, not indices into what was planned:
-/// everything settled here - already installed, handed back, refused - is
+/// everything settled here - already registered, handed back, refused - is
 /// settled, and `apply` never sees it again.
 fn confirm(
     planned: Vec<Planned>,
@@ -743,13 +743,13 @@ fn confirm(
     for item in planned {
         let (step, what) = (item.step, item.what);
         match item.action {
-            Action::AlreadyInstalled => {
-                prompt.say(&format!("  {what} - already installed"));
-                report.record(step, Outcome::AlreadyInstalled);
+            Action::AlreadyRegistered => {
+                prompt.say(&format!("  {what} - already registered"));
+                report.record(step, Outcome::AlreadyRegistered);
             }
             Action::Manual(advice) => {
-                prompt.say(&format!("  {what} - not installed\n{advice}"));
-                report.record(step, Outcome::NotInstalled);
+                prompt.say(&format!("  {what} - not registered\n{advice}"));
+                report.record(step, Outcome::NotRegistered);
             }
             Action::Failed(why) => {
                 prompt.say(&format!("  {what} - failed\n    {why}"));
@@ -771,12 +771,12 @@ fn confirm(
                         claude,
                         marketplace,
                     }),
-                    false => report.record(step, Outcome::NotInstalled),
+                    false => report.record(step, Outcome::NotRegistered),
                 }
             }
             Action::Adopt(change) => {
                 prompt.say(&format!(
-                    "  {what} - already installed, but not in a block we manage"
+                    "  {what} - already registered, but not in a block we manage"
                 ));
                 for note in &change.notes {
                     prompt.say(&format!("    {note}"));
@@ -787,8 +787,8 @@ fn confirm(
                 ) {
                     true => approved.push(Work::Write { step, what, change }),
                     // Declining leaves the file untouched and the step reports
-                    // success, because the hooks *are* installed.
-                    false => report.record(step, Outcome::AlreadyInstalled),
+                    // success, because the hooks *are* registered.
+                    false => report.record(step, Outcome::AlreadyRegistered),
                 }
             }
             Action::Write(change) => {
@@ -817,7 +817,7 @@ fn confirm(
                 // other step's own block.
                 match prompt.confirm(&format!("Write {what} - {}?", change.path.display()), true) {
                     true => approved.push(Work::Write { step, what, change }),
-                    false => report.record(step, Outcome::NotInstalled),
+                    false => report.record(step, Outcome::NotRegistered),
                 }
             }
         }
@@ -838,7 +838,7 @@ fn apply(approved: Vec<Work>, prompt: &dyn prompt::Interaction, report: &mut Rep
             } => match claude.install_plugin(&marketplace) {
                 Ok(()) => {
                     report.lines.push(format!("{what}: plugin installed"));
-                    report.record(step, Outcome::Installed);
+                    report.record(step, Outcome::Registered);
                 }
                 // The routes are chosen by what is available, not by what
                 // worked. Falling back here would edit `~/.claude/settings.json`
@@ -879,7 +879,7 @@ fn write_one(
         Ok(plan) => plan,
         Err(why) => {
             refused = Some(why);
-            write::Plan::AlreadyInstalled
+            write::Plan::AlreadyRegistered
         }
     });
     if let Some(why) = refused {
@@ -909,13 +909,13 @@ fn rebuild(rebuild: &Rebuild, current: &str) -> Result<write::Plan, String> {
 
 /// What a completed write means for the step that asked for it.
 ///
-/// A write can come back as "already installed" even when the plan said
+/// A write can come back as "already registered" even when the plan said
 /// otherwise: the plan reads the file before the confirmation, and the merge
 /// runs again inside the lock against whatever is there by then.
 fn outcome_of(written: write::Outcome) -> Outcome {
     match written {
-        write::Outcome::AlreadyInstalled => Outcome::AlreadyInstalled,
-        write::Outcome::Created | write::Outcome::Edited => Outcome::Installed,
+        write::Outcome::AlreadyRegistered => Outcome::AlreadyRegistered,
+        write::Outcome::Created | write::Outcome::Edited => Outcome::Registered,
     }
 }
 
@@ -923,7 +923,7 @@ fn summary_line(what: &str, written: &write::Written) -> String {
     let did = match written.outcome {
         write::Outcome::Created => "created",
         write::Outcome::Edited => "edited",
-        write::Outcome::AlreadyInstalled => "already installed",
+        write::Outcome::AlreadyRegistered => "already registered",
     };
     let backup = written
         .backup
@@ -999,10 +999,10 @@ fn plan_agents(options: &Options, prompt: &dyn prompt::Interaction) -> Vec<Plann
         .collect()
 }
 
-/// Which agents to install for.
+/// Which agents to register for.
 ///
 /// Named on the command line wins outright. Otherwise every agent is listed,
-/// preselected when either signal hits, so nothing is ever installed without
+/// preselected when either signal hits, so nothing is ever registered without
 /// having been shown.
 fn chosen_agents(
     options: &Options,
@@ -1063,7 +1063,7 @@ fn plan_plugin(claude: &agents::Claude, options: &Options) -> Action {
     match claude.plugin_installed() {
         // Idempotency stops here: it must not go on to check where the
         // marketplace points, and must never re-add it to "correct" it.
-        Some(true) => Action::AlreadyInstalled,
+        Some(true) => Action::AlreadyRegistered,
         Some(false) => Action::Plugin {
             claude: claude.clone(),
             marketplace,
@@ -1087,7 +1087,7 @@ fn plan_merge(agent: &'static agents::Agent, options: &Options) -> Action {
         // Verified as a real setup: a user who copied the shipped drop-in by
         // hand before this subcommand existed has the hooks and no markers.
         // Only a marked block is ours to rewrite or, later, to remove.
-        Ok(write::Plan::AlreadyInstalled) if agent.present_unmarked(&seen.contents) => {
+        Ok(write::Plan::AlreadyRegistered) if agent.present_unmarked(&seen.contents) => {
             Action::Adopt(Box::new(Change {
                 what: agent.label.to_owned(),
                 preview: agent.adopt(&seen.contents),
@@ -1100,7 +1100,7 @@ fn plan_merge(agent: &'static agents::Agent, options: &Options) -> Action {
                 announced: false,
             }))
         }
-        Ok(write::Plan::AlreadyInstalled) => Action::AlreadyInstalled,
+        Ok(write::Plan::AlreadyRegistered) => Action::AlreadyRegistered,
         Ok(write::Plan::Write(preview)) => Action::Write(Box::new(Change {
             what: agent.label.to_owned(),
             preview,
@@ -1144,7 +1144,7 @@ fn agent_notes(agent: &'static agents::Agent, seen: &write::Inspection) -> Vec<S
         notes.push(
             "these hooks are already there, without markers. Adopting them wraps them in a \
              block this tool manages and changes nothing about what they do; declining leaves \
-             the file exactly as it is, and the hooks are installed either way."
+             the file exactly as it is, and the hooks are registered either way."
                 .to_owned(),
         );
     }
@@ -1178,7 +1178,7 @@ impl TmuxPlan {
         // Said as part of the plan's own heading rather than on a line of its
         // own, so that there is no line to print when there is nothing to say.
         prompt.say(&format!(
-            "{}This is what install would do:",
+            "{}This is what register would do:",
             system_wide_note(probe::config_files().as_deref(), |path| path.exists()) // coverage: off: needs a real tmux with a present /etc/tmux.conf to reach
         ));
 
@@ -1202,7 +1202,7 @@ impl TmuxPlan {
 
     /// The refusal both tmux steps share when the config was already broken.
     ///
-    /// Editing it would produce an install nobody could validate, and the user
+    /// Editing it would produce a registration nobody could validate, and the user
     /// would reasonably blame the tool that touched the file last for a
     /// breakage it inherited.
     fn refusal(&self) -> Option<Action> {
@@ -1292,7 +1292,7 @@ impl TmuxPlan {
             Err(error) => return Action::Manual(format!("    {error}")),
         };
         if tmux_conf::sources_snippet(&seen.contents) {
-            return Action::AlreadyInstalled;
+            return Action::AlreadyRegistered;
         }
         // A path no quoting can carry is handed back before anything is
         // written: a `source-file` line tmux cannot read costs the user the
@@ -1422,7 +1422,7 @@ impl TmuxPlan {
     ///
     /// The last assignment in tmux's own order is the one that wins, and so the
     /// one to edit. Editing any earlier one produces a line tmux discards:
-    /// a successful-looking install with no glyph and nothing in the diff.
+    /// a successful-looking registration with no glyph and nothing in the diff.
     fn plan_splice(
         &self,
         option: &str,
@@ -1443,9 +1443,9 @@ impl TmuxPlan {
                 last.line.first + 1
             ));
         };
-        if line.already_installed() {
+        if line.already_registered() {
             // Wherever the user put the term, they put it there on purpose.
-            return Action::AlreadyInstalled;
+            return Action::AlreadyRegistered;
         }
         let Some(rewritten) = line.spliced_line() else {
             return self.manual_term(&format!(
@@ -1583,7 +1583,7 @@ impl TmuxPlan {
     }
 
     /// The manual path: print the term and what we found, and report the step
-    /// as not installed. The run's exit code stays 0, because a refusal the
+    /// as not registered. The run's exit code stays 0, because a refusal the
     /// user chose is not an error - and this is the state they are in today,
     /// so falling into it leaves them no worse off than before they ran
     /// anything.
@@ -1774,15 +1774,15 @@ mod tests {
         // The agent step has one target per agent, and the summary has to say
         // something true about all of them at once.
         let mut report = Report::default();
-        report.record(Step::Agents, Outcome::AlreadyInstalled);
+        report.record(Step::Agents, Outcome::AlreadyRegistered);
         assert_eq!(
             report.outcome(Step::Agents),
-            Some(Outcome::AlreadyInstalled)
+            Some(Outcome::AlreadyRegistered)
         );
-        report.record(Step::Agents, Outcome::Installed);
-        assert_eq!(report.outcome(Step::Agents), Some(Outcome::Installed));
-        report.record(Step::Agents, Outcome::NotInstalled);
-        assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotInstalled));
+        report.record(Step::Agents, Outcome::Registered);
+        assert_eq!(report.outcome(Step::Agents), Some(Outcome::Registered));
+        report.record(Step::Agents, Outcome::NotRegistered);
+        assert_eq!(report.outcome(Step::Agents), Some(Outcome::NotRegistered));
         report.record(Step::Agents, Outcome::Failed);
         assert_eq!(report.outcome(Step::Agents), Some(Outcome::Failed));
 
@@ -1811,13 +1811,13 @@ mod tests {
     }
 
     #[test]
-    fn a_run_that_installed_or_was_already_installed_exits_zero() {
+    fn a_run_that_registered_or_was_already_registered_exits_zero() {
         let mut report = Report::default();
         for outcome in [
-            Outcome::Installed,
-            Outcome::AlreadyInstalled,
+            Outcome::Registered,
+            Outcome::AlreadyRegistered,
             // A refusal the user chose is not an error.
-            Outcome::NotInstalled,
+            Outcome::NotRegistered,
         ] {
             report.record(Step::TmuxFormat, outcome);
         }
@@ -1833,7 +1833,7 @@ mod tests {
             whole.apply("theirs\n"),
             Ok(write::Plan::Write("ours\n".to_owned()))
         );
-        assert_eq!(whole.apply("ours\n"), Ok(write::Plan::AlreadyInstalled));
+        assert_eq!(whole.apply("ours\n"), Ok(write::Plan::AlreadyRegistered));
 
         // A snippet path no tmux quoting can carry is a refusal rather than a
         // line that makes tmux abandon the config file it sits in.
@@ -1851,14 +1851,14 @@ mod tests {
             .written()
             .unwrap();
         assert!(out.contains("source-file /x/tmux-agent-status.conf"));
-        assert_eq!(block.apply(&out), Ok(write::Plan::AlreadyInstalled));
+        assert_eq!(block.apply(&out), Ok(write::Plan::AlreadyRegistered));
 
         // The new pair.
         let pair =
             Rebuild::FormatPair("set -g window-status-format 'x#{?@agent_status,y,}'\n".to_owned());
         let out = pair.apply("").unwrap().written().unwrap();
         assert!(has_marked_block(&out));
-        assert_eq!(pair.apply(&out), Ok(write::Plan::AlreadyInstalled));
+        assert_eq!(pair.apply(&out), Ok(write::Plan::AlreadyRegistered));
 
         // An agent merge, which is the agent's own function.
         let codex = Rebuild::Agent(agents::by_name("codex").expect("a row"));
@@ -1921,7 +1921,7 @@ mod tests {
 
     #[test]
     fn the_system_config_is_reported_and_never_chosen() {
-        // It needs root, and it would install this for every user of the
+        // It needs root, and it would register this for every user of the
         // machine, which is not what anyone typing the command meant.
         let note = system_wide_note(Some("/etc/tmux.conf,~/.tmux.conf"), |_| true);
         assert!(note.contains("/etc/tmux.conf"), "{note}");
@@ -1936,7 +1936,7 @@ mod tests {
     }
 
     #[test]
-    fn everything_install_may_move_is_named() {
+    fn everything_register_may_move_is_named() {
         let ours = ours_to_change();
         for option in format::OPTIONS {
             assert!(ours.contains(&option.to_owned()), "{option}");
@@ -1954,11 +1954,11 @@ mod tests {
         // The plan reads the file before the confirmation; the merge runs
         // again inside the lock, and by then somebody else may have done it.
         assert_eq!(
-            outcome_of(write::Outcome::AlreadyInstalled),
-            Outcome::AlreadyInstalled
+            outcome_of(write::Outcome::AlreadyRegistered),
+            Outcome::AlreadyRegistered
         );
-        assert_eq!(outcome_of(write::Outcome::Created), Outcome::Installed);
-        assert_eq!(outcome_of(write::Outcome::Edited), Outcome::Installed);
+        assert_eq!(outcome_of(write::Outcome::Created), Outcome::Registered);
+        assert_eq!(outcome_of(write::Outcome::Edited), Outcome::Registered);
     }
 
     #[test]
@@ -1968,7 +1968,7 @@ mod tests {
         let wrapped = adopt.apply(vibe.contents).unwrap().written().unwrap();
         assert!(has_marked_block(&wrapped));
         // Only a marked block is ours, so a second adoption has nothing to do.
-        assert_eq!(adopt.apply(&wrapped), Ok(write::Plan::AlreadyInstalled));
+        assert_eq!(adopt.apply(&wrapped), Ok(write::Plan::AlreadyRegistered));
 
         let one = Rebuild::FormatOne {
             option: format::OPTIONS[1].to_owned(),
@@ -1978,7 +1978,7 @@ mod tests {
         // done, which is the whole reason the check is per option.
         let other_done = format!("set -g {} 'x{}'\n", format::OPTIONS[0], format::TERM);
         let out = one.apply(&other_done).unwrap().written().unwrap();
-        assert_eq!(one.apply(&out), Ok(write::Plan::AlreadyInstalled));
+        assert_eq!(one.apply(&out), Ok(write::Plan::AlreadyRegistered));
     }
 
     #[test]
@@ -2009,10 +2009,10 @@ mod tests {
         assert!(!summary_line("x", &created).contains("backup"));
 
         let already = write::Written {
-            outcome: write::Outcome::AlreadyInstalled,
+            outcome: write::Outcome::AlreadyRegistered,
             ..created
         };
-        assert!(summary_line("x", &already).contains("already installed"));
+        assert!(summary_line("x", &already).contains("already registered"));
     }
 
     #[test]
@@ -2061,7 +2061,7 @@ mod tests {
         let here = tmp.path().join("checkout");
         fs::create_dir_all(&here).unwrap();
         fs::create_dir(here.join(".git")).unwrap();
-        assert_eq!(git_repo_of(&here.join("src/install/mod.rs")), Some(here));
+        assert_eq!(git_repo_of(&here.join("src/register/mod.rs")), Some(here));
         assert_eq!(git_repo_of(Path::new("/")), None);
     }
 

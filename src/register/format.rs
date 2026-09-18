@@ -134,7 +134,7 @@ impl FormatLine {
     /// Whether this value already reads `@agent_status`.
     ///
     /// Wherever the user put the term, they put it there on purpose.
-    pub fn already_installed(&self) -> bool {
+    pub fn already_registered(&self) -> bool {
         references_agent_status(&self.raw)
     }
 
@@ -163,7 +163,7 @@ impl FormatLine {
 ///
 /// A user's unrelated `#{@agent_status_colour}` is not our term, and matching
 /// the full literal term instead would miss anyone who dropped the space or
-/// wrapped it in styling and then install a second copy beside their first.
+/// wrapped it in styling and then register a second copy beside their first.
 pub fn references_agent_status(value: &str) -> bool {
     let name = "@agent_status";
     let mut rest = value;
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(parsed.option, "window-status-format");
         assert_eq!(parsed.quoting, Quoting::Single);
         assert_eq!(parsed.raw, FALLBACK_DEFAULT);
-        assert!(!parsed.already_installed());
+        assert!(!parsed.already_registered());
         assert_eq!(
             parsed.spliced_line().unwrap(),
             format!(
@@ -588,7 +588,7 @@ mod tests {
     fn a_value_that_already_carries_the_term_is_left_alone() {
         let parsed =
             line("set -g window-status-format '#I:#W#{?@agent_status, #{@agent_status},}'");
-        assert!(parsed.already_installed());
+        assert!(parsed.already_registered());
     }
 
     #[test]
