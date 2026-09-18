@@ -2,6 +2,7 @@
   lib,
   rustPlatform,
   tmux,
+  unixtools,
 }:
 
 rustPlatform.buildRustPackage {
@@ -14,8 +15,26 @@ rustPlatform.buildRustPackage {
   # Cargo.lock is committed, so there is nothing to regenerate on a bump.
   cargoLock.lockFile = ../Cargo.lock;
 
-  # Half the suite drives a real tmux server.
-  nativeCheckInputs = [ tmux ];
+  # Half the suite drives a real tmux server, which needs a real, writable
+  # $HOME to start against - the Linux sandbox's placeholder `/homeless-shelter`
+  # exists (so `cd` into it works, if uselessly), but the Darwin sandbox never
+  # creates it at all, and `tmux new-session` fails outright with a cwd that
+  # does not exist. Verified: on aarch64-darwin, `nix build .#checks` fails
+  # every `install_probe` test with `spawn` returning ENOENT until `$HOME` is
+  # a real directory.
+  #
+  # The lock ownership tests shell out to `ps` and `hostname`, which the build
+  # sandbox's minimal $PATH does not otherwise carry. `unixtools` picks the
+  # right implementation per platform (the real `ps`/`hostname` on Darwin,
+  # `procps`/`inetutils` on Linux).
+  nativeCheckInputs = [
+    tmux
+    unixtools.hostname
+    unixtools.ps
+  ];
+  preCheck = ''
+    export HOME=$(mktemp -d)
+  '';
 
   postInstall = ''
     install -Dm644 share/tmux/tmux-agent-status.conf \

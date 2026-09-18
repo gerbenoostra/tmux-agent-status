@@ -76,9 +76,9 @@ fn assert_ok_and_silent(out: &Output) {
         String::from_utf8_lossy(&out.stdout)
     );
     assert!(
-        out.stderr.is_empty(),
+        support::stderr_of(out).is_empty(),
         "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
+        support::stderr_of(out)
     );
 }
 

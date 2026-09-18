@@ -20,17 +20,80 @@ lint:
 test:
     cargo test
 
-# Run the test suite with 100% line and region coverage.
+# Run the test suite and hold every region of `src/` to covered.
 # The bell path writes to /dev/tty, so the runner needs a controlling terminal;
 # `script` creates one and is available on both Linux (util-linux) and macOS.
+#
+# The bar is read from the exported segments rather than from
+# `--fail-under-regions`, because the two do not agree. `src/` is compiled
+# twice - once with `cfg(test)` for the lib's own test binary, once as the rlib
+# the integration tests link - and `llvm-cov report` leaves a handful of spans
+# unmerged between the two, so its summary counts regions as missed that
+# `llvm-cov show` renders as covered. The segments are the view `show` renders,
+# and they answer one question consistently: is there a region nothing reached?
+# Full region coverage implies full line coverage, so that one bar is enough.
+#
+# A line that cannot be reached says so for itself, with a trailing
+# `// coverage: off` and the reason it is unreachable. The marker is matched
+# against the whole line, so it exempts every region on that line and not only
+# the one that is uncovered today: keep it to lines that carry nothing else, or
+# say in the comment what else it covers.
+#
+# `src/install/prompt.rs` is the one file excluded, and the exception is kept to
+# one named file so it stays reviewable: it is the only module that knows there
+# is a terminal, and exercising it means driving a pty, which would prove that
+# `dialoguer` works rather than that we do. Everything worth asserting about a
+# run's decisions lives in the modules it feeds, which hold the bar.
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
+    command -v jq >/dev/null || { echo "the coverage gate needs jq." >&2; exit 1; }
+    ignore='src/install/prompt\.rs$'
     if [[ "{{os()}}" == "macos" ]]; then
-        script -q /dev/null cargo llvm-cov --summary-only --fail-under-lines 100 --fail-under-regions 100
+        script -q /dev/null cargo llvm-cov --no-report
     else
-        script -q /dev/null -c 'cargo llvm-cov --summary-only --fail-under-lines 100 --fail-under-regions 100'
+        script -q /dev/null -c "cargo llvm-cov --no-report"
     fi
+    cargo llvm-cov report --summary-only --ignore-filename-regex "$ignore"
+    echo
+    echo "The misses above are counted per compilation, not per region; the bar"
+    echo "below is the merged region view. See the comment on this recipe."
+    report="$(mktemp)"
+    regions="$(mktemp)"
+    trap 'rm -f "$report" "$regions"' EXIT
+    cargo llvm-cov report --json --ignore-filename-regex "$ignore" --output-path "$report"
+    # A segment carries [line, column, count, has-count, region-entry, gap].
+    # One with a count of zero that is not a gap is a region nothing reached.
+    # Written to a file rather than piped into the loop: a gate that cannot
+    # fail is worse than no gate, and `set -e` does not reach into a process
+    # substitution, so a `jq` that dies there would read as "nothing to report".
+    jq -r '.data[].files[] | .filename as $file
+           | (.segments // [])[]
+           | select(.[3] and .[2] == 0 and (.[5] | not))
+           | "\($file):\(.[0])"' "$report" | sort -u > "$regions"
+    # The same argument: a report naming no file at all is a broken run, not a
+    # clean one.
+    files="$(jq -r '[.data[].files[].filename] | length' "$report")"
+    if (( files == 0 )); then
+        echo "the coverage report names no files; nothing was measured." >&2
+        exit 1
+    fi
+    uncovered=0
+    while IFS= read -r region; do
+        [[ -n "$region" ]] || continue
+        file="${region%:*}"
+        line="${region##*:}"
+        if [[ "$(sed -n "${line}p" "$file")" == *'// coverage: off'* ]]; then
+            continue
+        fi
+        echo "uncovered region: $file:$line" >&2
+        uncovered=$((uncovered + 1))
+    done < "$regions"
+    if (( uncovered )); then
+        echo "$uncovered uncovered region(s) in $files file(s); the bar is all of them." >&2
+        exit 1
+    fi
+    echo "Every region of src/ was reached, across $files files."
 
 # What CI runs.
 check: fmt-check lint test
