@@ -14,6 +14,17 @@ find or copy those files unless you are configuring the tool manually.
 
 tmux 3.0 or newer, because the per-pane state is a pane option (`set-option -p`), which 3.0 added.
 
+## One-line installer
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
+```
+
+Detects your platform, downloads the matching release tarball, verifies its checksum, and installs
+the binary to `~/.local/bin` (override with `TMUX_AGENT_STATUS_INSTALL_DIR`). Pin a version with
+`TMUX_AGENT_STATUS_VERSION=v0.0.1`. See `install.sh` in the repository root for the full set of
+environment variables.
+
 ## Nix profile
 
 ```sh
@@ -55,16 +66,6 @@ source-file ~/.tmux/tmux-agent-status.conf
 `register` can still configure writable agent files and report the window-format change for your
 Home Manager configuration.
 
-## One-line installer
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
-```
-
-Detects your platform, downloads the matching release tarball, verifies its checksum, and installs
-the binary to `~/.local/bin` (override with `TMUX_AGENT_STATUS_INSTALL_DIR`). Pin a version with
-`TMUX_AGENT_STATUS_VERSION=v0.0.1`. See `install.sh` in the repository root for the full set of
-environment variables.
 
 ## Prebuilt binary
 

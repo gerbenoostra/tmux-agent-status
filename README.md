@@ -45,6 +45,10 @@ Setup has two steps:
 
 1. [Install the CLI](docs/install.md) with the one-line installer, Nix, a prebuilt binary, Cargo, or
    from source.
+   Simplest approach:
+   ```sh
+    curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
+    ```
 2. Configure tmux and your installed agents:
 
 ```sh
@@ -57,7 +61,7 @@ it runs (`run-shell`, `if-shell`, a plugin manager) runs there too. If it cannot
 read-only file safely, it prints the change for you to apply instead.
 
 Start with `tmux-agent-status register --dry-run` to inspect the plan without changing anything.
-Use `tmux-agent-status register --help` for step selection, non-interactive operation, and target
+Use `tmux-agent-status --help` for step selection, non-interactive operation, and target
 overrides.
 
 ## Manual configuration
