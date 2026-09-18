@@ -115,7 +115,7 @@ Ensure `~/.local/bin` is on the `PATH` inherited by your agent hooks, then run
 
 ## Manual file reference
 
-You only need these paths when following the README's [manual configuration](../README.md#manual-configuration):
+You only need these paths when following the [manual configuration](register.md#manual-configuration):
 
 | Installation method | Tmux snippet | Agent configurations |
 | --- | --- | --- |
