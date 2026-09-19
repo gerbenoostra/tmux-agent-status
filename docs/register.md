@@ -1,25 +1,27 @@
 # Register the hooks
 
-With `tmux-agent-status` on your `PATH` ([install it](install.md) first), one command configures
-tmux and your agents:
+With `tmux-agent-status` on your `PATH` ([install it](install.md) first), one command configures tmux and your agents:
 
 ```sh
 tmux-agent-status register
 ```
 
 `register` detects your agents, previews and confirms every change, backs up every file it edits,
-and checks your tmux configuration against a throwaway server - which loads your config, so whatever
+and checks the final tmux configuration against a throwaway server; which loads your config, so whatever
 it runs (`run-shell`, `if-shell`, a plugin manager) runs there too. If it cannot edit a generated or
 read-only file safely, it prints the change for you to apply instead.
 
-Start with `tmux-agent-status register --dry-run` to inspect the plan without changing anything.
+Run `tmux-agent-status register --dry-run` to inspect the plan without changing anything.
+
+Run `tmux-agent-status register -y` to accept all changes.
+
 Use `tmux-agent-status --help` for step selection, non-interactive operation, and target
 overrides.
 
 ## Manual configuration
 
-`register` is the recommended route. If you prefer to manage every file yourself, configure the
-same three parts manually.
+`register` is the recommended route.
+If you prefer to manage every file yourself, configure the same three parts manually.
 
 ### Tmux hooks
 

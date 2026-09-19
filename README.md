@@ -39,6 +39,10 @@ without it renders them as underscores.
 Basically any agent that can hook into lifecycle events works.
 [docs/agents](docs/agents/README.md) gives an overview of the agents `register` can configure.
 
+## Requirements
+
+tmux 3.0 or newer.
+
 ## Setup
 
 Setup has two steps:
@@ -56,16 +60,16 @@ Setup has two steps:
    ```sh
    tmux-agent-status register
    ```
-
-`register` previews and confirms every change and backs up every file it edits; `--dry-run` inspects
-the plan without changing anything. What it changes, the manual configuration route, the optional
-bell and colour settings, and how to validate the result are covered in
-[docs/register.md](docs/register.md).
+   Its behavior, the manual configuration route, optional bell and colour settings, and how to validate the result are covered in [docs/register.md](docs/register.md).
 
 ## How it works
 
-The `tmux-agent-status` executable is called from your coding agent's lifecycle hooks.
-It writes a tmux option per pane indicating the agent status, summarizes the states of all panes to a single glyph on the window, and rings the terminal bell on the states that end a turn.
+The flow is:
+1. Your coding agent's lifecycle hooks call the `tmux-agent-status`.
+2. It writes a tmux option per pane indicating the agent status (`error`, `done`, `waiting`, or `working`)
+3. All pane states are summarized into a single single glyph on the window (`error` > `done` > `waiting` > `working`)
+4. It rings the terminal bell on any states that ends a turn (`done`, `error`, `waiting`).
+5. When you switch to the tmux window, the non-sticky pane states are reset (only `working` stays).
 
 We use two tmux options, separating status from final glyph:
 
@@ -78,10 +82,9 @@ They have different names, as tmux option inheritance uses the window properties
 To clear the status, we use two tmux hooks, both calling `tmux-agent-status clear-window <pane>`, as can be seen in [`share/tmux/tmux-agent-status.conf`](./share/tmux/tmux-agent-status.conf).
 
 Therefore, switching to a window, or to another pane inside it, drops that window's `waiting`, `error` and `done`;
-`working` survives, because otherwise an agent you glance at would go blank while it is still running.
+`working` survives, as the agent is still running.
 
-A turn that ends on the window you are **already** watching is cleared on the spot: the bell rings and no glyph appears,
-because you are looking at the pane that would have explained it.
+A turn that ends on the window you are **already** watching is cleared on the spot: the bell rings and no glyph appears.
 
 Watched means the window is the current window of a session with a client attached. So a turn that
 ends while you are **detached** keeps its glyph: re-attaching does not clear it, and it is still on
