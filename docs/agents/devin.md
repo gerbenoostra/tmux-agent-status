@@ -27,8 +27,7 @@ lower case and shorter than Claude's: `read`, `exec`, `grep`, `glob`,
 that block on you, and a blanket `working` on every tool call would say nothing
 the `PostToolUse` entry does not already say. It no longer guards against an
 overwrite - `working` is the lowest state within a pane and never replaces a
-`waiting`, whichever order the two hooks land in, which is what
-[013](../../tasks/plans/013-pane-state-precedence.md) fixed. The pane goes back
+`waiting`, whichever order the two hooks land in. The pane goes back
 to `working` on the first tool call after the window has been seen and the 💬
 cleared with it.
 

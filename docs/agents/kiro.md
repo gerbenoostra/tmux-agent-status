@@ -1,7 +1,8 @@
 # Kiro
 
 Shape A agent with a drop-in JSON hook file. Kiro reads hook files from
-`~/.kiro/hooks/`.
+`~/.kiro/hooks/` on the **v3 engine**; the installed 2.x engine embeds
+camelCase hooks in per-agent config instead, and that route is unverified.
 
 ## Supported states
 

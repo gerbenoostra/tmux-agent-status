@@ -4,7 +4,7 @@
 //! only when a human types it. The hook commands are unchanged and still write
 //! nothing but two tmux options and a bell. The contract that licences the
 //! writing - resolve symlinks, lock, back up, never truncate, verify, restore -
-//! is `tasks/plans/011-install-command.md`, and `write` is where it lives.
+//! is stated in CONTRIBUTING.md, and `write` is where it lives.
 
 pub mod agents;
 pub mod format;

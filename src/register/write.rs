@@ -1,14 +1,14 @@
 //! The one primitive that touches a user's file.
 //!
-//! 001 rejected a `setup` command on four specific objections, and each one is
+//! The objections to a tool editing a hand-maintained config file each became
 //! a step here rather than a refutation: resolve the symlink chain and edit the
 //! target, re-check the file's fingerprint immediately before the rename, hold
 //! an exclusive lock against our own concurrent runs, and never truncate - write
 //! a sibling temp file and `rename(2)` over it, so a crash at any instant leaves
 //! either the old file or the new one.
 //!
-//! The contract is the deliverable; every other module in `register` is a caller.
-//! `tasks/plans/011-install-command.md` is normative for it.
+//! The contract is the deliverable; every other module in `register` is a
+//! caller. CONTRIBUTING.md states it in full.
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};

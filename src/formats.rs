@@ -7,8 +7,12 @@
 //! decision that depends on what tmux holds - which state wins on a pane,
 //! whether the window is on screen, what the window's glyph is - is therefore a
 //! format that `set-option -F` expands against its target at the moment it
-//! sets it, and the server runs one command at a time. See
-//! `tasks/plans/013-pane-state-precedence.md`.
+//! sets it, and the server runs one command at a time. That makes each write a
+//! compare-and-set taken inside the server: no lock file, no read-then-write
+//! race. A `-F` write can only produce a value, so a clear produces `""` and is
+//! then normalised to unset by a conditional `if-shell -F ... 'set-option -u'`
+//! that decides on the value current at that instant - an unconditional unset
+//! could erase a concurrent write that landed in between.
 
 use crate::state::State;
 use crate::tmux::PANE_OPTION;
