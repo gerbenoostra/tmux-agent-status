@@ -69,7 +69,7 @@ adding a second one; JSON's last key silently wins.
   `~/.claude/settings.json` and `.claude/settings.json` by default
   (`read_config_from.claude`), so this project's Claude hook set is a candidate
   for the rule above: it carries `StopFailure` and `Notification`, which Devin
-  does not know. Install the drop-in on this page rather than relying on the
+  does not know. Register the drop-in on this page rather than relying on the
   Claude route.
 - **No `error` event.** Devin publishes no turn-abort event. `PostToolUse`
   carries `tool_response.success` and `tool_response.error`, but a failed tool

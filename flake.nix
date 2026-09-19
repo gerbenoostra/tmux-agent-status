@@ -38,6 +38,7 @@
             pkgs.jq
             pkgs.tmux
             pkgs.just
+            pkgs.shellcheck
           ];
           LLVM_COV = pkgs.lib.getExe' pkgs.llvmPackages.llvm "llvm-cov";
           LLVM_PROFDATA = pkgs.lib.getExe' pkgs.llvmPackages.llvm "llvm-profdata";

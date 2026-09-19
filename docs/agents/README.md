@@ -1,32 +1,32 @@
 # Supported agents
 
-## Install agent hooks
+## Register agent hooks
 
-The main installer detects your agents and configures their hooks together with tmux:
+`tmux-agent-status register` detects your agents and configures their hooks together with tmux:
 
 ```sh
-tmux-agent-status install
+tmux-agent-status register
 ```
 
 To configure only agent hooks, leaving tmux alone:
 
 ```sh
-tmux-agent-status install --agents
+tmux-agent-status register --agents
 ```
 
 Detected agents are preselected in a checklist. To select agents explicitly, use a comma-separated
 list (the `=` is required):
 
 ```sh
-tmux-agent-status install --agents=codex,cursor
+tmux-agent-status register --agents=codex,cursor
 ```
 
-The installer asks before every change and backs up every file it edits. If a generated or read-only
+`register` asks before every change and backs up every file it edits. If a generated or read-only
 file cannot be edited safely, it reports the manual change instead.
 
-## Manual installation
+## Manual registration
 
-Each supported agent has a guide for installing its hooks manually:
+Each supported agent has a guide for registering its hooks manually:
 
 - [Claude Code](claude-code.md)
 - [Codex CLI](codex.md)
@@ -81,7 +81,7 @@ upstream documentation or issue that says the event does not exist.
 ## Shapes
 
 There are different ways to hook onto lifecycle events, which is captured by "Shape".
-The shape is *what the agent invokes*, not how the config gets installed:
+The shape is *what the agent invokes*, not how the config gets registered:
 
 - **A**: hook config with one command per event, calling the `tmux-agent-status` CLI as adapter.
 - **B**: one callback receives a JSON payload, calling the `tmux-agent-status notify` subcommand.
@@ -119,9 +119,9 @@ defensively.
 - **Session start / end**: whether events map onto `reset` and `finish`. Agents
 without both keep the known limit that a crashed agent can strand `working`.
 
-## Installer delivery details
+## `register` delivery details
 
-The installer prefers plugin > drop-in file > file edit:
+`register` prefers plugin > drop-in file > file edit:
 
 - **The Claude Code plugin**, which ships its hook config in its own directory, so
   `~/.claude/settings.json` is not written at all. That is the default whenever `claude` is on

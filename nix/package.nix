@@ -20,7 +20,7 @@ rustPlatform.buildRustPackage {
   # exists (so `cd` into it works, if uselessly), but the Darwin sandbox never
   # creates it at all, and `tmux new-session` fails outright with a cwd that
   # does not exist. Verified: on aarch64-darwin, `nix build .#checks` fails
-  # every `install_probe` test with `spawn` returning ENOENT until `$HOME` is
+  # every `register_probe` test with `spawn` returning ENOENT until `$HOME` is
   # a real directory.
   #
   # The lock ownership tests shell out to `ps` and `hostname`, which the build

@@ -7,8 +7,8 @@ use std::process::ExitCode;
 
 use pico_args::Arguments;
 use tmux_agent_status::command;
-use tmux_agent_status::install;
 use tmux_agent_status::notify;
+use tmux_agent_status::register;
 use tmux_agent_status::state::{State, UnknownState};
 
 /// A wrong invocation: a bug in the caller's hook config, and so a loud one.
@@ -83,7 +83,7 @@ fn run() -> Result<ExitCode, MainError> {
         "finish" => run_finish(pargs),
         "clear-window" => run_clear_window(pargs),
         "notify" => run_notify(pargs),
-        "install" => run_install(pargs),
+        "register" => run_register(pargs),
         _ => {
             let free = free_strings(pargs)?;
             Err(unexpected_arguments(&subcommand, free))
@@ -210,12 +210,12 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// `tmux-agent-status install`.
+/// `tmux-agent-status register`.
 ///
 /// Deliberately not routed through `run_hook`: a hook exits 0 whatever happens,
 /// which is right for something an agent calls on every turn and worthless for
-/// an installer. This one reports what it did and exits accordingly.
-fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
+/// a registration command. This one reports what it did and exits accordingly.
+fn run_register(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let yes = pargs.contains(["-y", "--yes"]);
     let dry_run = pargs.contains("--dry-run");
     let probe = !pargs.contains("--no-tmux-probe");
@@ -224,7 +224,7 @@ fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let mut negative = Vec::new();
     // A bare `--agents` is taken first, so that only `--agents=<names>` is left
     // for the value lookup. The other way round, a bare `--agents` swallows
-    // whatever follows it - `--agents --tmux-hook` would install an agent
+    // whatever follows it - `--agents --tmux-hook` would register an agent
     // called `--tmux-hook` - and the flag could never be given on its own,
     // which is half of what it is for. That is also why the value form is
     // spelled with `=`.
@@ -233,29 +233,29 @@ fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     // `--agents=codex,cursor` selects the step *and* narrows it; a bare
     // `--agents` selects the step and leaves the choice to detection.
     if bare || named.is_some() {
-        positive.push(install::Step::Agents);
+        positive.push(register::Step::Agents);
     }
     if pargs.contains("--tmux-hook") {
-        positive.push(install::Step::TmuxHook);
+        positive.push(register::Step::TmuxHook);
     }
     if pargs.contains("--tmux-format") {
-        positive.push(install::Step::TmuxFormat);
+        positive.push(register::Step::TmuxFormat);
     }
     if pargs.contains("--no-agents") {
-        negative.push(install::Step::Agents);
+        negative.push(register::Step::Agents);
     }
     if pargs.contains("--no-tmux-hook") {
-        negative.push(install::Step::TmuxHook);
+        negative.push(register::Step::TmuxHook);
     }
     if pargs.contains("--no-tmux-format") {
-        negative.push(install::Step::TmuxFormat);
+        negative.push(register::Step::TmuxFormat);
     }
-    let steps = install::select(&positive, &negative).map_err(MainError::Usage)?;
+    let steps = register::select(&positive, &negative).map_err(MainError::Usage)?;
 
     let claude_route = match opt_value(&mut pargs, "--claude-route")?.as_deref() {
-        None | Some("auto") => install::agents::ClaudeRoute::Auto,
-        Some("plugin") => install::agents::ClaudeRoute::Plugin,
-        Some("settings") => install::agents::ClaudeRoute::Settings,
+        None | Some("auto") => register::agents::ClaudeRoute::Auto,
+        Some("plugin") => register::agents::ClaudeRoute::Plugin,
+        Some("settings") => register::agents::ClaudeRoute::Settings,
         Some(other) => {
             return Err(MainError::from(format!(
                 "unknown --claude-route `{other}`: valid routes are auto, plugin, settings"
@@ -265,23 +265,23 @@ fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let marketplace = opt_value(&mut pargs, "--marketplace")?;
     let tmux_config = opt_value(&mut pargs, "--tmux-config")?.map(PathBuf::from);
     let snippet = opt_value(&mut pargs, "--snippet")?.map(PathBuf::from);
-    reject_extra_with_prefix(pargs, "install")?;
+    reject_extra_with_prefix(pargs, "register")?;
 
     let agents = named.map(|names| parse_agents(&names)).transpose()?;
-    let home = install::Home::from_env()
-        .ok_or(MainError::from("install needs $HOME and there is none"))?;
+    let home = register::Home::from_env()
+        .ok_or(MainError::from("register needs $HOME and there is none"))?;
 
     // A question with no terminal and no `-y` is a usage error rather than a
     // guess: a tool that edits configs unattended is a tool nobody asked to
     // run.
-    let prompt = install::prompt::Prompt::new(yes, dry_run)
+    let prompt = register::prompt::Prompt::new(yes, dry_run)
         .map_err(|error| MainError::Usage(error.to_string()))?;
 
-    let options = install::Options {
+    let options = register::Options {
         steps,
         agents,
         claude_route,
-        claude: install::agents::Claude::on_path(),
+        claude: register::agents::Claude::on_path(),
         marketplace,
         tmux_config,
         snippet,
@@ -292,24 +292,24 @@ fn run_install(mut pargs: Arguments) -> Result<ExitCode, MainError> {
             .filter(|prefix| !prefix.is_empty())
             .map(PathBuf::from),
     };
-    Ok(ExitCode::from(install::run(&options, &prompt).exit_code()))
+    Ok(ExitCode::from(register::run(&options, &prompt).exit_code()))
 }
 
 /// Resolve the names `--agents=` gave.
 ///
 /// A name that is not in the table is a usage error listing the valid names: a
-/// typo'd `--agents=cursur` must never be read as "install nothing,
+/// typo'd `--agents=cursur` must never be read as "register nothing,
 /// successfully".
-fn parse_agents(names: &str) -> Result<Vec<&'static install::agents::Agent>, MainError> {
+fn parse_agents(names: &str) -> Result<Vec<&'static register::agents::Agent>, MainError> {
     names
         .split(',')
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(|name| {
-            install::agents::by_name(name).ok_or_else(|| {
+            register::agents::by_name(name).ok_or_else(|| {
                 MainError::Usage(format!(
                     "unknown agent `{name}`: valid names are {}",
-                    install::agents::names().join(", ")
+                    register::agents::names().join(", ")
                 ))
             })
         })
@@ -432,9 +432,9 @@ usage:
                               map a JSON payload from a shape-B agent
   tmux-agent-status notify --agent <name> --stdin [--json]
                               read the JSON payload from stdin
-  tmux-agent-status install [flags]
-                              write the agent hooks and tmux configuration the
-                              README documents, asking before each change
+  tmux-agent-status register [flags]
+                              write the agent hooks and tmux configuration
+                              docs/register.md documents, asking before each change
   tmux-agent-status --version      version, and the executable that is actually running
   tmux-agent-status --help         this text
 
@@ -446,7 +446,7 @@ The pane is resolved in this order: --pane, $TMUX_AGENT_STATUS_PANE, $TMUX_PANE.
 Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every write into a no-op. Set
 `TMUX_AGENT_STATUS_DEBUG=1` to log dropped events to stderr.
 
-install flags:
+register flags:
   --agents[=<name>[,<name>...]]  agent hooks; with names, only those agents
                                  the names need the `=`: a bare `--agents`
                                  leaves the choice to detection, so a space
@@ -462,14 +462,14 @@ install flags:
   --marketplace <source>         where to install the Claude Code plugin from
   --no-tmux-probe                do not check the edit against a throwaway tmux
 
-With no step flags, install does all three. Positive and negative step flags
+With no step flags, register does all three. Positive and negative step flags
 cannot be mixed.
 
 agents: {}
 
 states: {}
 ",
-        install::agents::names().join(", "),
+        register::agents::names().join(", "),
         states.join(", ")
     )
 }

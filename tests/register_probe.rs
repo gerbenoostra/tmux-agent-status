@@ -11,8 +11,8 @@
 use std::fs;
 use std::path::Path;
 
-use tmux_agent_status::install::format;
-use tmux_agent_status::install::probe;
+use tmux_agent_status::register::format;
+use tmux_agent_status::register::probe;
 
 mod support;
 
@@ -141,7 +141,7 @@ fn a_config_that_was_already_broken_shows_it_in_the_baseline() {
 
     // The config plainly sets `status-left`, and the baseline does not carry
     // it: the user's config was abandoned before we arrived, and editing it
-    // would produce an install nobody could validate.
+    // would produce a registration nobody could validate.
     assert!(
         probe::changes(&defaults, &baseline).is_empty(),
         "a pre-broken config must read back as tmux's defaults"
@@ -217,7 +217,7 @@ fn a_config_that_is_not_there_reads_back_as_tmuxs_defaults() {
     assert!(probe::changes(&empty, &missing).is_empty());
 }
 
-// A config that blocks must not block the install.
+// A config that blocks must not block the `register` run.
 #[test]
 fn a_config_that_blocks_is_given_up_on_and_leaves_nothing_running() {
     if !tmux_or_skip() {
@@ -236,7 +236,7 @@ fn a_config_that_blocks_is_given_up_on_and_leaves_nothing_running() {
     assert_eq!(found, None, "a config that blocks must not produce a dump");
     assert!(
         waited < std::time::Duration::from_secs(2),
-        "the install was held up for {waited:?}"
+        "the register run was held up for {waited:?}"
     );
 
     // The server is wedged in its own config and cannot answer `kill-server`

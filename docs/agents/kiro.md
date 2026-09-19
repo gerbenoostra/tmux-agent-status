@@ -15,7 +15,7 @@ Shape A agent with a drop-in JSON hook file. Kiro reads hook files from
 | error | — | — | no published error event; inferred only from hook exit code |
 
 
-## Install
+## Drop-in file
 
 Copy the drop-in file to Kiro's hooks directory:
 

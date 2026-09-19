@@ -9,7 +9,7 @@ use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
-use tmux_agent_status::install::write::{
+use tmux_agent_status::register::write::{
     self, Ask, Error, Faults, Outcome, Plan, SafeWrite, Verify, Warning, Written,
 };
 
@@ -312,17 +312,17 @@ fn a_second_run_writes_nothing_and_takes_no_backup() {
     let ask = Answer::yes();
     let written = writer(&target, &ask)
         .apply(|current| match current == "after\n" {
-            true => Plan::AlreadyInstalled,
+            true => Plan::AlreadyRegistered,
             false => Plan::Write("after\n".to_owned()),
         })
         .expect("the second run succeeds");
 
-    assert_eq!(written.outcome, Outcome::AlreadyInstalled);
+    assert_eq!(written.outcome, Outcome::AlreadyRegistered);
     assert_eq!(written.backup, None);
     assert_eq!(
         fs::metadata(&target).expect("metadata").mtime_nsec(),
         after_first,
-        "an already-installed file must not be rewritten"
+        "an already-registered file must not be rewritten"
     );
     assert_eq!(backups(&dir).len(), backups_after_first, "no new backup");
 }
@@ -789,7 +789,7 @@ fn a_stale_lock_is_broken_and_a_lock_from_elsewhere_is_not() {
     assert!(matches!(error, Error::Locked { .. }), "{error}");
 }
 
-// 16. N processes installing into the same file at once.
+// 16. N processes registering into the same file at once.
 #[test]
 fn concurrent_runs_produce_exactly_one_copy_of_our_entries() {
     let dir = TempDir::new("concurrent");
@@ -803,7 +803,7 @@ fn concurrent_runs_produce_exactly_one_copy_of_our_entries() {
                 scope.spawn(move || {
                     let ask = Answer::yes();
                     writer(&path, &ask).apply(|current| match current.contains("entries: 1") {
-                        true => Plan::AlreadyInstalled,
+                        true => Plan::AlreadyRegistered,
                         false => Plan::Write("entries: 1\n".to_owned()),
                     })
                 })
@@ -820,7 +820,10 @@ fn concurrent_runs_produce_exactly_one_copy_of_our_entries() {
     for result in &results {
         match result {
             Ok(written) => assert!(
-                matches!(written.outcome, Outcome::Edited | Outcome::AlreadyInstalled),
+                matches!(
+                    written.outcome,
+                    Outcome::Edited | Outcome::AlreadyRegistered
+                ),
                 "{written:?}"
             ),
             // Every loser reported a clean precondition or lock failure, and

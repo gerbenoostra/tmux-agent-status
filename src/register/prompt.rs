@@ -1,6 +1,6 @@
 //! The only module that knows whether there is a terminal.
 //!
-//! `-y` and `--dry-run` are answered here, so nothing else in `install`
+//! `-y` and `--dry-run` are answered here, so nothing else in `register`
 //! branches on interactivity: every other module takes an answer and acts on
 //! it. That is also why this is the one file `just coverage` skips - exercising
 //! it means driving a terminal, and a pty harness would prove that `dialoguer`
@@ -45,7 +45,7 @@ pub struct NoTerminal;
 impl std::fmt::Display for NoTerminal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(
-            "install needs to ask a question and there is no terminal to ask it on.\n\
+            "register needs to ask a question and there is no terminal to ask it on.\n\
              Pass -y to take the recommended answer to every question, or --dry-run \
              to see what it would do.",
         )
@@ -126,7 +126,7 @@ impl Interaction for Prompt {
 
     /// Choose from the agent list.
     ///
-    /// Every agent appears, preselected or not, so nothing is ever installed
+    /// Every agent appears, preselected or not, so nothing is ever registered
     /// without having been shown.
     fn choose(&self, question: &str, rows: &[(String, bool)]) -> Vec<usize> {
         let preselected = || {

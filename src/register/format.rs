@@ -1,6 +1,6 @@
 //! Reading and rewriting a `window-status-format` line in a tmux config file.
 //!
-//! Narrow on purpose. The parser recognises the shape the README asks for and
+//! Narrow on purpose. The parser recognises the shape `docs/register.md` asks for and
 //! refuses everything else, because the fallback - printing the line for the
 //! user to edit - is the state they are in today and costs them nothing. A
 //! general tmux parser is a project; a parser that knows when to stop is a
@@ -12,7 +12,7 @@
 
 use std::ops::Range;
 
-/// The term 001 and the README specify, and the only thing this module inserts.
+/// The term 001 and `docs/register.md` specify, and the only thing this module inserts.
 pub const TERM: &str = "#{?@agent_status, #{@agent_status},}";
 
 /// The two options that must carry the term.
@@ -134,7 +134,7 @@ impl FormatLine {
     /// Whether this value already reads `@agent_status`.
     ///
     /// Wherever the user put the term, they put it there on purpose.
-    pub fn already_installed(&self) -> bool {
+    pub fn already_registered(&self) -> bool {
         references_agent_status(&self.raw)
     }
 
@@ -163,7 +163,7 @@ impl FormatLine {
 ///
 /// A user's unrelated `#{@agent_status_colour}` is not our term, and matching
 /// the full literal term instead would miss anyone who dropped the space or
-/// wrapped it in styling and then install a second copy beside their first.
+/// wrapped it in styling and then register a second copy beside their first.
 pub fn references_agent_status(value: &str) -> bool {
     let name = "@agent_status";
     let mut rest = value;
@@ -524,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn the_term_is_the_one_the_readme_documents() {
+    fn the_term_is_the_one_register_md_documents() {
         assert_eq!(TERM, "#{?@agent_status, #{@agent_status},}");
     }
 
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(parsed.option, "window-status-format");
         assert_eq!(parsed.quoting, Quoting::Single);
         assert_eq!(parsed.raw, FALLBACK_DEFAULT);
-        assert!(!parsed.already_installed());
+        assert!(!parsed.already_registered());
         assert_eq!(
             parsed.spliced_line().unwrap(),
             format!(
@@ -588,7 +588,7 @@ mod tests {
     fn a_value_that_already_carries_the_term_is_left_alone() {
         let parsed =
             line("set -g window-status-format '#I:#W#{?@agent_status, #{@agent_status},}'");
-        assert!(parsed.already_installed());
+        assert!(parsed.already_registered());
     }
 
     #[test]

@@ -162,8 +162,8 @@ pub fn dump(config: &Path) -> Option<Dump> {
 /// The same, with the bound named.
 ///
 /// A config whose `run-shell` blocks - verified on 3.6a to hold up
-/// `new-session -d` for as long as the command takes - must not hold up an
-/// install. This is how long it gets.
+/// `new-session -d` for as long as the command takes - must not hold up a
+/// `register` run. This is how long it gets.
 pub fn dump_within(config: &Path, timeout: Duration) -> Option<Dump> {
     let server = Server::start_on(config, timeout)?;
     Dump::of(&server)
@@ -296,7 +296,7 @@ fn run_here(args: &[&str]) -> Option<String> {
 /// config's - verified. The walk in `tmux_conf` resolves one the same way, so
 /// the two read the same files, and reports that it had to guess.
 fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, String, String)> {
-    // The test-only switch, shared with the rest of `install`: a tmux that
+    // The test-only switch, shared with the rest of `register`: a tmux that
     // stops answering partway through a sequence is a thing that happens and
     // nothing a test can arrange.
     if std::env::var("TMUX_AGENT_STATUS_TEST_FAULT")
@@ -313,7 +313,7 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
         .stderr(Stdio::piped());
     // A process with no `HOME` - a daemon, a `systemd` unit, a `su -c` - runs
     // the probe from wherever it already is rather than refusing to start.
-    // `tests/install_no_home.rs` is the binary that reaches this.
+    // `tests/register_no_home.rs` is the binary that reaches this.
     if let Some(home) = std::env::var_os("HOME") {
         command.current_dir(home);
     }
@@ -330,8 +330,8 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
             }
             // Out of time, or a wait that itself failed. A config whose
             // `run-shell` blocks holds up `new-session -d` for as long as the
-            // command takes - verified on 3.6a - and must not hold up an
-            // install. Kill the client we started, then arrange for the server
+            // command takes - verified on 3.6a - and must not hold up a
+            // `register` run. Kill the client we started, then arrange for the server
             // it may have left behind.
             _ => {
                 let _ = child.kill();
@@ -358,7 +358,7 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
 /// Not waited on, deliberately. The server is wedged executing its own config
 /// and will not answer `kill-server` until it finishes, which is precisely the
 /// wait we just refused to sit through. Spawning the kill and walking away
-/// means the install is not held up and the server still goes, a moment later,
+/// means the `register` run is not held up and the server still goes, a moment later,
 /// on a socket nothing else uses.
 fn reap(socket: &str) {
     let _ = Command::new("tmux")

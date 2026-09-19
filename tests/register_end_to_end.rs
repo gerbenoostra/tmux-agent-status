@@ -1,7 +1,7 @@
-//! `install` against a real tmux, finishing the job.
+//! `register` against a real tmux, finishing the job.
 //!
 //! The other suites prove each piece in isolation. These prove the thing the
-//! plan actually promises: run `install`, start tmux on what it wrote, and a
+//! plan actually promises: run `register`, start tmux on what it wrote, and a
 //! real `@agent_status` renders in a real window entry - with no file edited by
 //! hand anywhere along the way.
 
@@ -25,7 +25,7 @@ impl Server {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let server = Server {
             socket: format!(
-                "tmux-agent-status-install-{}-{}",
+                "tmux-agent-status-register-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ),
@@ -97,9 +97,9 @@ fn bin_dir_first_on_path() -> String {
     }
 }
 
-fn install(home: &TempDir, args: &[&str]) -> Output {
+fn register(home: &TempDir, args: &[&str]) -> Output {
     Command::new(support::BIN)
-        .arg("install")
+        .arg("register")
         .args(args)
         .env("HOME", home.path())
         .env_remove("XDG_CONFIG_HOME")
@@ -127,11 +127,11 @@ fn wait_for(read: impl Fn() -> String, done: impl Fn(&str) -> bool) -> String {
     }
 }
 
-// 29. A config with a known format, installed into, then actually loaded: the
+// 29. A config with a known format, registered into, then actually loaded: the
 // term is in both options, both hooks are registered, and a hand-set
 // `@agent_status` renders in the window entry.
 #[test]
-fn an_installed_config_puts_a_real_glyph_on_a_real_window() {
+fn a_registered_config_puts_a_real_glyph_on_a_real_window() {
     if !support::tmux_or_skip() {
         return;
     }
@@ -144,7 +144,7 @@ fn an_installed_config_puts_a_real_glyph_on_a_real_window() {
     );
     let snippet = home.join(".config/tmux/tmux-agent-status.conf");
 
-    let out = install(
+    let out = register(
         &home,
         &[
             "-y",
@@ -218,7 +218,7 @@ fn a_config_with_no_format_line_gets_a_working_pair_from_tmuxs_own_default() {
     let config = home.write(".config/tmux/tmux.conf", "set -g status on\n");
     let snippet = home.join(".config/tmux/tmux-agent-status.conf");
 
-    let out = install(
+    let out = register(
         &home,
         &[
             "-y",
@@ -265,7 +265,7 @@ fn a_config_with_no_format_line_gets_a_working_pair_from_tmuxs_own_default() {
 }
 
 #[test]
-fn installing_into_a_config_twice_leaves_exactly_one_of_everything() {
+fn registering_into_a_config_twice_leaves_exactly_one_of_everything() {
     if !support::tmux_or_skip() {
         return;
     }
@@ -286,13 +286,13 @@ fn installing_into_a_config_twice_leaves_exactly_one_of_everything() {
     ];
     let args: Vec<&str> = args.iter().map(|a| a.as_ref()).collect();
 
-    assert_eq!(install(&home, &args).status.code(), Some(0));
+    assert_eq!(register(&home, &args).status.code(), Some(0));
     let after_first = fs::read_to_string(&config).expect("the config");
 
-    let second = install(&home, &args);
+    let second = register(&home, &args);
     assert_eq!(second.status.code(), Some(0), "{}", stdout(&second));
     assert!(
-        stdout(&second).contains("already installed"),
+        stdout(&second).contains("already registered"),
         "{}",
         stdout(&second)
     );
@@ -307,7 +307,7 @@ fn installing_into_a_config_twice_leaves_exactly_one_of_everything() {
     assert_eq!(
         after_first.matches(term).count(),
         2,
-        "the term was not installed exactly once per option:\n{after_first}"
+        "the term was not registered exactly once per option:\n{after_first}"
     );
     assert_eq!(
         after_first.matches("source-file").count(),
@@ -333,7 +333,7 @@ fn a_malformed_splice_is_rolled_back_and_the_config_still_works() {
     let before = fs::read_to_string(&config).expect("the config");
 
     let out = Command::new(support::BIN)
-        .arg("install")
+        .arg("register")
         .args([
             "-y",
             "--tmux-format",
@@ -394,7 +394,7 @@ fn the_reload_sources_the_config_into_the_server_that_loads_it() {
     let socket = server.socket_path();
 
     let out = Command::new(support::BIN)
-        .arg("install")
+        .arg("register")
         .args([
             "-y",
             "--tmux-format",
@@ -433,7 +433,7 @@ fn a_reload_tmux_refuses_is_reported_without_undoing_the_edit() {
     let socket = server.socket_path();
 
     let out = Command::new(support::BIN)
-        .arg("install")
+        .arg("register")
         .args([
             "-y",
             "--tmux-format",
@@ -561,8 +561,8 @@ fn rust_files(dir: &Path) -> Vec<std::path::PathBuf> {
 // An edit that changes the file and changes nothing about tmux. Checking that
 // nothing *unexpected* moved passes such an edit perfectly, so the probe is
 // asked for what the edit was for as well: without that, this run reported
-// both options installed, exited 0, and left a config whose effective format
-// carries no term - a successful-looking install with no glyph and nothing to
+// both options registered, exited 0, and left a config whose effective format
+// carries no term - a successful-looking registration with no glyph and nothing to
 // see in the diff.
 #[test]
 fn a_splice_a_later_assignment_overrides_is_rolled_back_and_reported() {
@@ -580,7 +580,7 @@ fn a_splice_a_later_assignment_overrides_is_rolled_back_and_reported() {
     );
     let before = fs::read_to_string(&config).expect("the config");
 
-    let out = install(
+    let out = register(
         &home,
         &[
             "-y",
@@ -623,7 +623,7 @@ fn a_source_line_pointing_at_a_snippet_that_sets_no_hooks_is_rolled_back() {
     );
     let before = fs::read_to_string(&config).expect("the config");
 
-    let out = install(
+    let out = register(
         &home,
         &[
             "-y",

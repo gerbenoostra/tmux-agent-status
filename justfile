@@ -16,6 +16,10 @@ fmt-check:
 lint:
     cargo clippy --all-targets -- -D warnings
 
+# Lint the shell installer.
+lint-sh:
+    shellcheck -s sh install.sh
+
 # Run the test suite.
 test:
     cargo test
@@ -39,7 +43,7 @@ test:
 # the one that is uncovered today: keep it to lines that carry nothing else, or
 # say in the comment what else it covers.
 #
-# `src/install/prompt.rs` is the one file excluded, and the exception is kept to
+# `src/register/prompt.rs` is the one file excluded, and the exception is kept to
 # one named file so it stays reviewable: it is the only module that knows there
 # is a terminal, and exercising it means driving a pty, which would prove that
 # `dialoguer` works rather than that we do. Everything worth asserting about a
@@ -48,7 +52,7 @@ coverage:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v jq >/dev/null || { echo "the coverage gate needs jq." >&2; exit 1; }
-    ignore='src/install/prompt\.rs$'
+    ignore='src/register/prompt\.rs$'
     if [[ "{{os()}}" == "macos" ]]; then
         script -q /dev/null cargo llvm-cov --no-report
     else
@@ -96,17 +100,17 @@ coverage:
     echo "Every region of src/ was reached, across $files files."
 
 # What CI runs.
-check: fmt-check lint test
+check: fmt-check lint lint-sh test
 
 # Validate the plugin and marketplace manifests (needs the `claude` CLI).
 check-plugin:
     #!/usr/bin/env bash
     set -euo pipefail
     # Not a CI job, because it needs the `claude` CLI. The check that actually
-    # rots - manifest against README - is a test, so it runs everywhere.
+    # rots - manifest against the agent doc - is a test, so it runs everywhere.
     if ! command -v claude >/dev/null 2>&1; then
         echo "claude CLI not found; skipping manifest validation." >&2
-        echo "The README/manifest drift check runs in 'just test'." >&2
+        echo "The agent-doc/manifest drift check runs in 'just test'." >&2
         exit 0
     fi
     claude plugin validate --strict .

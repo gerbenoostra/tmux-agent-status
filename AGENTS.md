@@ -14,7 +14,7 @@ the `Status:` line inside each file.
 commands (`set`, `reset`, `finish`, `clear-window`, `notify`) write two tmux options and ring the
 terminal bell, and nothing else: they never touch a window name, never shell out to git, never write
 a state file, never edit any config file, and never spawn a daemon. The one exception is the
-`install` subcommand, which a human types and which writes config files under the contract in
+`register` subcommand, which a human types and which writes config files under the contract in
 `tasks/plans/011-install-command.md`. The full design is in
 `tasks/plans/001-agent-window-status.md`; read it before changing behaviour.
 
@@ -26,12 +26,12 @@ a state file, never edit any config file, and never spawn a daemon. The one exce
   present: `show-options` yes, `set-option` never. A test asserts the option name never appears as a
   `set-option` argument anywhere in `src/`.
   The hazard is a property of the tmux *option*, not of the format string, so editing the **text of
-  the user's config file** is allowed, and is what `install --tmux-format` does - the same edit the
-  README asks the user to make by hand. See `tasks/plans/011-install-command.md`.
+  the user's config file** is allowed, and is what `register --tmux-format` does - the same edit
+  `docs/register.md` asks the user to make by hand. See `tasks/plans/011-install-command.md`.
 - `@agent_pane_status` (per pane) and `@agent_status` (per window rollup) are two names on purpose.
   tmux option inheritance makes a pane with no status read back as the window's value, so they can
   never be merged into one.
-- Agent hook entries are documented **and** written, but only by `install` and only under the safe
+- Agent hook entries are documented **and** written, but only by `register` and only under the safe
   write in `tasks/plans/011-install-command.md`: resolve symlinks and edit the target, lock, back
   up, write a sibling temp file and `rename(2)` over it, never truncate, verify, and restore on a
   failed verify. No hook command writes one. The delivery order is plugin > own drop-in file >

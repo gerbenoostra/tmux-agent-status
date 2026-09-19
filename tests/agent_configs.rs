@@ -256,16 +256,16 @@ fn validate_toml_file(path: &Path, agent: &str) {
     }
 }
 
-/// A new agent cannot be added without the installer learning about it.
+/// A new agent cannot be added without `register` learning about it.
 ///
-/// Every directory under `share/agents/` has a row in the installer's table,
+/// Every directory under `share/agents/` has a row in `register`'s table,
 /// and every row's embedded contents are byte-for-byte the shipped file. That
 /// second half is what keeps `include_str!` honest: the embedded bytes *are*
 /// the shipped files, so these drift checks still mean something about what a
 /// user ends up with.
 #[test]
-fn every_shipped_drop_in_has_a_row_in_the_installer_table() {
-    use tmux_agent_status::install::agents;
+fn every_shipped_drop_in_has_a_row_in_the_register_table() {
+    use tmux_agent_status::register::agents;
 
     let mut checked = 0;
     for entry in fs::read_dir(agents_dir()).unwrap() {
@@ -280,7 +280,7 @@ fn every_shipped_drop_in_has_a_row_in_the_installer_table() {
             .into_owned();
         let row = agents::by_name(&name).unwrap_or_else(|| {
             panic!(
-                "share/agents/{name}/ ships a drop-in but the installer has no row for it; \
+                "share/agents/{name}/ ships a drop-in but `register` has no row for it; \
                  valid names are {:?}",
                 agents::names()
             )
@@ -294,14 +294,14 @@ fn every_shipped_drop_in_has_a_row_in_the_installer_table() {
         assert_eq!(
             files.len(),
             1,
-            "share/agents/{name}/ ships {} files; the installer embeds one",
+            "share/agents/{name}/ ships {} files; `register` embeds one",
             files.len()
         );
         let shipped = fs::read_to_string(&files[0]).unwrap();
         assert_eq!(
             row.contents,
             shipped,
-            "the installer's embedded copy of {} has drifted from the shipped file",
+            "the `register` embedded copy of {} has drifted from the shipped file",
             files[0].display()
         );
         checked += 1;
@@ -316,19 +316,19 @@ fn every_shipped_drop_in_has_a_row_in_the_installer_table() {
 /// else. Both are embedded, so both need something holding them to the docs.
 #[test]
 fn the_agents_without_a_drop_in_directory_match_their_source() {
-    use tmux_agent_status::install::agents;
+    use tmux_agent_status::register::agents;
 
     let claude = agents::by_name("claude-code").expect("a row for Claude Code");
     let plugin = repo_root().join("plugins/tmux-agent-status/hooks/hooks.json");
     assert_eq!(
         claude.contents,
         fs::read_to_string(&plugin).unwrap(),
-        "the installer's Claude Code entries have drifted from {}",
+        "the `register` Claude Code entries have drifted from {}",
         plugin.display()
     );
 
     // Gemini's block is the one `docs/agents/gemini.md` tells a user to merge
-    // by hand, so the installer must offer to write exactly that.
+    // by hand, so `register` must offer to write exactly that.
     let gemini = agents::by_name("gemini").expect("a row for Gemini");
     let page = repo_root().join("docs/agents/gemini.md");
     let text = fs::read_to_string(&page).unwrap();
@@ -341,7 +341,7 @@ fn the_agents_without_a_drop_in_directory_match_their_source() {
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(gemini.contents).unwrap(),
         serde_json::from_str::<serde_json::Value>(&documented).unwrap(),
-        "the installer's Gemini block has drifted from {}",
+        "the `register` Gemini block has drifted from {}",
         page.display()
     );
 }

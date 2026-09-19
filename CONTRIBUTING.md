@@ -40,9 +40,11 @@ directory, normally `~/.cargo/bin`. It must be rerun after every edit and can st
 installation.
 
 ## Debugging tmux hooks
-Your tmux is configured with two tmux hooks, both call `tmux-agent-status clear-window <pane>`, which clears the status
-; the optional pane argument defaults to `$TMUX_PANE` for manual calls.
-pane without a value.
+Your tmux is configured with two tmux hooks, both calling `tmux-agent-status clear-window <pane>`,
+which clears the window's non-sticky states (`working` survives). The pane argument is optional and
+positional: the hooks pass `#{pane_id}`, which expands to an empty value when no pane is available.
+For manual calls the pane resolves in this order: an explicit argument (`--pane` or the positional),
+`$TMUX_AGENT_STATUS_PANE`, `$TMUX_PANE`.
 
 ## Debugging dropped events
 

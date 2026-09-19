@@ -7,7 +7,7 @@
 //! a sibling temp file and `rename(2)` over it, so a crash at any instant leaves
 //! either the old file or the new one.
 //!
-//! The contract is the deliverable; every other module in `install` is a caller.
+//! The contract is the deliverable; every other module in `register` is a caller.
 //! `tasks/plans/011-install-command.md` is normative for it.
 
 use std::fmt;
@@ -29,7 +29,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum Plan {
     /// The document already carries our entries. Nothing is written, and no
     /// backup is taken.
-    AlreadyInstalled,
+    AlreadyRegistered,
     /// A genuine semantic change, and so a write.
     Write(String),
 }
@@ -39,7 +39,7 @@ impl Plan {
     pub fn written(self) -> Option<String> {
         match self {
             Plan::Write(contents) => Some(contents),
-            Plan::AlreadyInstalled => None,
+            Plan::AlreadyRegistered => None,
         }
     }
 }
@@ -47,7 +47,7 @@ impl Plan {
 /// What a successful write did, which is what the summary reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    AlreadyInstalled,
+    AlreadyRegistered,
     /// The file did not exist and now does. Different from `Edited` because it
     /// is a different thing to want to undo.
     Created,
@@ -161,11 +161,11 @@ impl SafeWrite<'_> {
         let before = target.read(&self.faults)?;
         let fingerprint = Fingerprint::of(&target.resolved, &self.faults, "stat")?;
 
-        // 5. Merge, and decide "already installed" semantically.
+        // 5. Merge, and decide "already registered" semantically.
         let Plan::Write(after) = build(&before) else {
             return Ok(Written {
                 resolved: target.resolved,
-                outcome: Outcome::AlreadyInstalled,
+                outcome: Outcome::AlreadyRegistered,
                 backup: None,
             });
         };
@@ -1025,7 +1025,7 @@ impl fmt::Display for Error {
             Error::Declined(warning) => write!(f, "declined: {}", warning.message()),
             Error::Locked { lock, holder } => write!(
                 f,
-                "another tmux-agent-status install holds {}\n  held by: {holder}\n\
+                "another tmux-agent-status register holds {}\n  held by: {holder}\n\
                  Remove the lock file by hand if you are sure that process is gone.",
                 lock.display()
             ),
@@ -1144,7 +1144,7 @@ mod tests {
             Plan::Write("bytes".to_owned()).written(),
             Some("bytes".to_owned())
         );
-        assert_eq!(Plan::AlreadyInstalled.written(), None);
+        assert_eq!(Plan::AlreadyRegistered.written(), None);
     }
 
     #[test]

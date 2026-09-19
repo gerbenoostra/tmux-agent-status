@@ -10,7 +10,7 @@
 mod support;
 
 use support::tempdir::TempDir;
-use tmux_agent_status::install::probe;
+use tmux_agent_status::register::probe;
 
 #[test]
 fn a_tmux_that_stops_answering_is_no_answer_rather_than_a_wrong_one() {
@@ -21,7 +21,7 @@ fn a_tmux_that_stops_answering_is_no_answer_rather_than_a_wrong_one() {
     unsafe { std::env::set_var("TMUX_AGENT_STATUS_TEST_FAULT", "no-tmux") };
 
     // Every tmux invocation is optional and its failure is not an error, which
-    // is what lets a config be installed before tmux is.
+    // is what lets a config be registered before tmux is.
     assert_eq!(probe::dump(&config), None);
     assert_eq!(probe::check(&config), None);
     assert_eq!(probe::compiled_in_default(), None);

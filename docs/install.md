@@ -4,15 +4,26 @@ Choose one installation method below. When `tmux-agent-status` is on the `PATH` 
 agent hooks, complete setup with the same command for every method:
 
 ```sh
-tmux-agent-status install
+tmux-agent-status register
 ```
 
-The installer contains the tmux snippet and agent hook configurations it needs. You do not need to
+`register` contains the tmux snippet and agent hook configurations it needs. You do not need to
 find or copy those files unless you are configuring the tool manually.
 
 ## Requirements
 
 tmux 3.0 or newer, because the per-pane state is a pane option (`set-option -p`), which 3.0 added.
+
+## One-line installer
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
+```
+
+Detects your platform, downloads the matching release tarball, verifies its checksum, and installs
+the binary to `~/.local/bin` (override with `TMUX_AGENT_STATUS_INSTALL_DIR`). Pin a version with
+`TMUX_AGENT_STATUS_VERSION=v0.0.1`. See `install.sh` in the repository root for the full set of
+environment variables.
 
 ## Nix profile
 
@@ -35,8 +46,8 @@ Then add the package to your Home Manager module:
 home.packages = [ inputs.tmux-agent-status.packages.${pkgs.system}.tmux-agent-status ];
 ```
 
-Run `tmux-agent-status install` after applying the configuration. If Home Manager owns your tmux
-configuration as a read-only generated file, the installer reports the changes rather than editing
+Run `tmux-agent-status register` after applying the configuration. If Home Manager owns your tmux
+configuration as a read-only generated file, `register` reports the changes rather than editing
 it.
 
 To keep the tmux snippet declarative too, expose it at a stable path:
@@ -52,11 +63,13 @@ Then source it from the tmux configuration managed by Home Manager:
 source-file ~/.tmux/tmux-agent-status.conf
 ```
 
-The installer can still configure writable agent files and report the window-format change for your
+`register` can still configure writable agent files and report the window-format change for your
 Home Manager configuration.
+
 
 ## Prebuilt binary
 
+The one-line installer above wraps this; use these steps directly if you want to inspect each one.
 Every tagged release publishes a tarball per platform with a `.sha256` checksum beside it:
 
 ```sh
@@ -73,7 +86,7 @@ chmod 755 "$HOME/.local/bin/tmux-agent-status"
 ```
 
 Ensure `~/.local/bin` is on the `PATH` inherited by your agent hooks, then run
-`tmux-agent-status install`.
+`tmux-agent-status register`.
 
 ## Cargo
 
@@ -82,7 +95,7 @@ cargo install --git https://github.com/gerbenoostra/tmux-agent-status
 ```
 
 Cargo normally installs the command into `~/.cargo/bin`. Ensure that directory is on the `PATH`
-inherited by your agent hooks, then run `tmux-agent-status install`.
+inherited by your agent hooks, then run `tmux-agent-status register`.
 
 ## Build from source
 
@@ -98,11 +111,11 @@ chmod 755 "$HOME/.local/bin/tmux-agent-status"
 ```
 
 Ensure `~/.local/bin` is on the `PATH` inherited by your agent hooks, then run
-`tmux-agent-status install`.
+`tmux-agent-status register`.
 
 ## Manual file reference
 
-You only need these paths when following the README's [manual configuration](../README.md#manual-configuration):
+You only need these paths when following the [manual configuration](register.md#manual-configuration):
 
 | Installation method | Tmux snippet | Agent configurations |
 | --- | --- | --- |

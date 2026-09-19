@@ -1,9 +1,9 @@
-//! What `install` does in a process with no `$HOME`.
+//! What `register` does in a process with no `$HOME`.
 //!
 //! A test binary of its own, holding one test, because it works by removing an
 //! environment variable: `cargo test` runs the tests of one binary in threads
 //! of one process, and a variable removed in one of them is removed for all of
-//! them. `tests/install_probe_no_tmux.rs` is the same shape for the same
+//! them. `tests/register_probe_no_tmux.rs` is the same shape for the same
 //! reason.
 //!
 //! `$HOME` is where both the walk and the probe resolve a relative
@@ -14,7 +14,7 @@
 mod support;
 
 use support::tempdir::TempDir;
-use tmux_agent_status::install::{probe, tmux_conf};
+use tmux_agent_status::register::{probe, tmux_conf};
 
 #[test]
 fn with_no_home_a_relative_source_stands_as_the_config_wrote_it() {

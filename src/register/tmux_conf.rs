@@ -8,7 +8,7 @@
 //! sources a fragment that sets it ends up with the fragment's value, and
 //! reversing the two reverses the winner. Editing anything but the last one
 //! produces a line tmux discards, which is the worst outcome available: a
-//! successful-looking install with no glyph and nothing to see in the diff.
+//! successful-looking registration with no glyph and nothing to see in the diff.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ pub const SNIPPET_NAME: &str = "tmux-agent-status.conf";
 /// The shipped snippet, embedded rather than looked up at runtime.
 ///
 /// `cargo install` ships the binary and nothing else, so a runtime path lookup
-/// would leave the largest install route unable to install anything.
+/// would leave the largest install route unable to register anything.
 pub const SNIPPET: &str = include_str!("../../share/tmux/tmux-agent-status.conf");
 
 /// How deep a chain of `source-file` is followed before giving up.
@@ -51,7 +51,7 @@ impl Choice {
 /// Which config file the source-file line goes in.
 ///
 /// "Prefer the user one" is not a good enough specification, so this is the
-/// order, and `/etc/tmux.conf` is never in it: it needs root and it installs
+/// order, and `/etc/tmux.conf` is never in it: it needs root and it registers
 /// the tool for every user of the machine, which is not what anyone typing this
 /// command meant. It is reported instead, with the suggestion to pass
 /// `--tmux-config` if that really was the intent.
@@ -209,8 +209,8 @@ pub fn with_source_block(text: &str, snippet: &Path) -> Option<String> {
 
 /// A path as a tmux config line should spell it.
 ///
-/// Bare when nothing in it needs quoting, which is the spelling the README
-/// asks the user to paste. Otherwise the choice `format::requote` makes for the
+/// Bare when nothing in it needs quoting, which is the spelling
+/// `docs/register.md` asks the user to paste. Otherwise the choice `format::requote` makes for the
 /// same reasons: single quotes first, because nothing is an escape inside them
 /// and a path is full of things that would otherwise be one; double quotes for
 /// a path that holds a single quote; and `None` for one that defeats both.
@@ -531,7 +531,7 @@ mod tests {
             Path::new("/home/u/.config/tmux/tmux-agent-status.conf"),
         )
         .expect("an ordinary path can be spelled");
-        // Bare, which is the spelling the README asks the user to paste.
+        // Bare, which is the spelling `docs/register.md` asks the user to paste.
         assert!(out.contains("source-file /home/u/.config/tmux/tmux-agent-status.conf"));
         assert!(sources_snippet(&out));
         assert!(super::super::has_marked_block(&out));

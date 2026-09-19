@@ -1,4 +1,4 @@
-//! `install` as a user runs it: a real process, a real `$HOME`, real files.
+//! `register` as a user runs it: a real process, a real `$HOME`, real files.
 //!
 //! Every test here points the binary at a temp home, because the whole point of
 //! reading `$HOME` from the environment rather than `getpwuid` is that a tool
@@ -15,13 +15,13 @@ use support::tempdir::TempDir;
 
 /// The binary, pointed at a temp home, with nothing inherited that could
 /// decide what a test proves.
-fn install(home: &TempDir, args: &[&str]) -> Output {
+fn register(home: &TempDir, args: &[&str]) -> Output {
     command(home, args).output().expect("the binary runs")
 }
 
 fn command(home: &TempDir, args: &[&str]) -> Command {
     let mut cmd = Command::new(support::BIN);
-    cmd.arg("install")
+    cmd.arg("register")
         .args(args)
         .env("HOME", home.path())
         .env_remove("XDG_CONFIG_HOME")
@@ -86,7 +86,7 @@ fn residue(dir: &Path) -> Vec<String> {
 #[test]
 fn a_question_with_nobody_to_answer_it_is_a_usage_error() {
     let home = TempDir::new("cli-no-tty");
-    let out = install(&home, &[]);
+    let out = register(&home, &[]);
 
     assert_eq!(code(&out), 2, "{}", stderr(&out));
     let message = stderr(&out);
@@ -102,11 +102,11 @@ fn a_dry_run_prints_a_plan_and_touches_nothing() {
     fs::create_dir_all(home.join(".codex")).expect("the directory");
     let before = home.entries();
 
-    let out = install(&home, &["--dry-run", "--agents=codex"]);
+    let out = register(&home, &["--dry-run", "--agents=codex"]);
 
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     let text = stdout(&out);
-    assert!(text.contains("This is what install would do:"), "{text}");
+    assert!(text.contains("This is what register would do:"), "{text}");
     assert!(text.contains("Codex CLI"), "{text}");
     assert!(text.contains(".codex/hooks.json"), "{text}");
     assert!(
@@ -133,7 +133,7 @@ fn a_dry_run_of_the_tmux_steps_leaves_no_probe_socket_behind() {
     )
     .expect("the config");
 
-    let out = install(&home, &["--dry-run", "--no-agents"]);
+    let out = register(&home, &["--dry-run", "--no-agents"]);
 
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     assert!(residue(home.path()).is_empty());
@@ -159,7 +159,7 @@ fn a_dry_run_of_the_tmux_steps_leaves_no_probe_socket_behind() {
 #[test]
 fn an_unknown_agent_name_is_a_usage_error_listing_the_valid_ones() {
     let home = TempDir::new("cli-bad-agent");
-    let out = install(&home, &["--dry-run", "--agents=cursur"]);
+    let out = register(&home, &["--dry-run", "--agents=cursur"]);
 
     assert_eq!(code(&out), 2);
     let message = stderr(&out);
@@ -170,7 +170,7 @@ fn an_unknown_agent_name_is_a_usage_error_listing_the_valid_ones() {
 #[test]
 fn mixing_positive_and_negative_step_flags_is_a_usage_error() {
     let home = TempDir::new("cli-mixed-steps");
-    let out = install(&home, &["--dry-run", "--agents=codex", "--no-tmux-hook"]);
+    let out = register(&home, &["--dry-run", "--agents=codex", "--no-tmux-hook"]);
 
     assert_eq!(code(&out), 2);
     assert!(
@@ -183,7 +183,7 @@ fn mixing_positive_and_negative_step_flags_is_a_usage_error() {
 #[test]
 fn an_unknown_claude_route_is_a_usage_error() {
     let home = TempDir::new("cli-bad-route");
-    let out = install(&home, &["--dry-run", "--claude-route=sideways"]);
+    let out = register(&home, &["--dry-run", "--claude-route=sideways"]);
 
     assert_eq!(code(&out), 2);
     assert!(
@@ -194,11 +194,11 @@ fn an_unknown_claude_route_is_a_usage_error() {
 }
 
 #[test]
-fn a_real_run_installs_an_agent_and_a_second_run_writes_nothing() {
+fn a_real_run_registers_an_agent_and_a_second_run_writes_nothing() {
     let home = TempDir::new("cli-idempotent");
     let target = home.join(".codex/hooks.json");
 
-    let first = install(&home, &["-y", "--agents=codex"]);
+    let first = register(&home, &["-y", "--agents=codex"]);
     assert_eq!(code(&first), 0, "{}", stderr(&first));
     assert!(target.is_file(), "{}", stdout(&first));
     let written = fs::read_to_string(&target).expect("the file");
@@ -216,10 +216,10 @@ fn a_real_run_installs_an_agent_and_a_second_run_writes_nothing() {
         .expect("metadata")
         .modified()
         .expect("mtime");
-    let second = install(&home, &["-y", "--agents=codex"]);
+    let second = register(&home, &["-y", "--agents=codex"]);
     assert_eq!(code(&second), 0, "{}", stderr(&second));
     assert!(
-        stdout(&second).contains("already installed"),
+        stdout(&second).contains("already registered"),
         "{}",
         stdout(&second)
     );
@@ -248,7 +248,7 @@ fn a_merge_into_a_file_the_user_maintains_keeps_what_was_there() {
     )
     .expect("the config");
 
-    let out = install(&home, &["-y", "--agents=codex"]);
+    let out = register(&home, &["-y", "--agents=codex"]);
 
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     let after = fs::read_to_string(home.join(".codex/hooks.json")).expect("the file");
@@ -323,7 +323,7 @@ fn an_installed_plugin_leaves_settings_json_alone() {
 
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     assert!(
-        stdout(&out).contains("already installed"),
+        stdout(&out).contains("already registered"),
         "{}",
         stdout(&out)
     );
@@ -369,10 +369,10 @@ fn forcing_the_plugin_route_without_claude_fails_rather_than_merging() {
     assert!(!home.join(".claude/settings.json").exists());
 }
 
-// 22. No tmux on `PATH`: everything degrades, and the run still installs what
+// 22. No tmux on `PATH`: everything degrades, and the run still registers what
 // it can.
 #[test]
-fn with_no_tmux_at_all_the_run_still_installs_what_it_can() {
+fn with_no_tmux_at_all_the_run_still_registers_what_it_can() {
     let home = TempDir::new("cli-no-tmux");
     let empty = home.join("bin");
     fs::create_dir_all(&empty).expect("the bin directory");
@@ -386,7 +386,7 @@ fn with_no_tmux_at_all_the_run_still_installs_what_it_can() {
     assert_eq!(code(&out), 0, "{}", stdout(&out));
     let text = stdout(&out);
     assert!(home.join(".codex/hooks.json").is_file(), "{text}");
-    // Installing the config before installing tmux is a legitimate order to do
+    // Registering the config before installing tmux is a legitimate order to do
     // things in, so the config is still written even though nothing could be
     // checked against a live tmux.
     assert!(
@@ -405,13 +405,13 @@ fn a_refusal_the_user_can_act_on_is_not_a_failure() {
     // A file that is not JSON, so the agent step cannot merge into it.
     fs::write(home.join(".codex/hooks.json"), "not json at all\n").expect("the config");
 
-    let out = install(&home, &["-y", "--agents=codex"]);
+    let out = register(&home, &["-y", "--agents=codex"]);
 
     // A refusal the user can act on is not a failure: the step reports "not
-    // installed, here is what to do" and the run exits 0.
+    // registered, here is what to do" and the run exits 0.
     assert_eq!(code(&out), 0, "{}", stdout(&out));
     let text = stdout(&out);
-    assert!(text.contains("not installed"), "{text}");
+    assert!(text.contains("not registered"), "{text}");
     assert!(text.contains("by hand"), "{text}");
     assert_eq!(
         fs::read_to_string(home.join(".codex/hooks.json")).expect("the file"),
@@ -440,12 +440,12 @@ fn a_write_that_does_not_land_fails_the_run_and_restores_the_file() {
     assert!(stdout(&out).contains("restored from"), "{}", stdout(&out));
 }
 
-// 20. Exit codes for a mixed run: one target already installed, one applied,
+// 20. Exit codes for a mixed run: one target already registered, one applied,
 // one failed. The run does what it can and says exactly what it did not.
 #[test]
 fn a_mixed_run_finishes_the_work_it_can_and_exits_one() {
     let home = TempDir::new("cli-mixed-outcomes");
-    // Already installed: a Kiro file byte-identical to the shipped one.
+    // Already registered: a Kiro file byte-identical to the shipped one.
     let kiro = home.join(".kiro/hooks/tmux-agent-status.json");
     fs::create_dir_all(kiro.parent().expect("a parent")).expect("the directory");
     let shipped = fs::read_to_string(
@@ -467,7 +467,7 @@ fn a_mixed_run_finishes_the_work_it_can_and_exits_one() {
 
     let text = stdout(&out);
     assert_eq!(code(&out), 1, "{text}");
-    assert!(text.contains("already installed"), "{text}");
+    assert!(text.contains("already registered"), "{text}");
     // The step that could be done was not abandoned because another failed.
     assert!(
         home.join(".grok/hooks/tmux-agent-status.json").is_file(),
@@ -476,7 +476,7 @@ fn a_mixed_run_finishes_the_work_it_can_and_exits_one() {
     assert_eq!(
         fs::read_to_string(&kiro).expect("the file"),
         shipped,
-        "an already-installed file was rewritten"
+        "an already-registered file was rewritten"
     );
     // And the failure is loud, retryable, and names the way out.
     assert!(text.contains("--claude-route=settings"), "{text}");
@@ -493,7 +493,7 @@ fn a_negative_step_flag_skips_exactly_that_step() {
     )
     .expect("the config");
 
-    let out = install(&home, &["-y", "--no-agents", "--no-tmux-format"]);
+    let out = register(&home, &["-y", "--no-agents", "--no-tmux-format"]);
 
     assert_eq!(code(&out), 0, "{}", stdout(&out));
     let written = fs::read_to_string(home.join(".config/tmux/tmux.conf")).expect("the config");
@@ -552,13 +552,13 @@ fn a_target_in_a_directory_we_cannot_write_is_handed_back() {
     fs::write(codex.join("hooks.json"), "{}\n").expect("the config");
     fs::set_permissions(&codex, fs::Permissions::from_mode(0o555)).expect("chmod");
 
-    let out = install(&home, &["-y", "--agents=codex"]);
+    let out = register(&home, &["-y", "--agents=codex"]);
 
     // A refusal the user can act on, not a failure: they are left exactly
     // where they were, holding the block they need.
     assert_eq!(code(&out), 0, "{}", stdout(&out));
     let text = stdout(&out);
-    assert!(text.contains("not installed"), "{text}");
+    assert!(text.contains("not registered"), "{text}");
     assert!(text.contains("not writable"), "{text}");
     assert_eq!(
         fs::read_to_string(codex.join("hooks.json")).expect("the file"),
@@ -578,7 +578,7 @@ fn a_tmux_config_we_cannot_write_is_handed_back_with_the_term() {
     // alone: whether a shipped snippet is found beside the binary depends on
     // how the binary under test was laid out, which is not what this is for.
     let snippet = home.join("snippet.conf");
-    let out = install(
+    let out = register(
         &home,
         &[
             "-y",
@@ -590,7 +590,7 @@ fn a_tmux_config_we_cannot_write_is_handed_back_with_the_term() {
 
     assert_eq!(code(&out), 0, "{}", stdout(&out));
     let text = stdout(&out);
-    assert!(text.contains("not installed"), "{text}");
+    assert!(text.contains("not registered"), "{text}");
     assert!(text.contains("not writable"), "{text}");
     // Both steps hand something back, and the format step prints the term.
     assert!(
@@ -634,7 +634,7 @@ fn a_snippet_we_cannot_write_is_handed_back_rather_than_failing() {
     fs::create_dir_all(&locked).expect("the directory");
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).expect("chmod");
 
-    let out = install(
+    let out = register(
         &home,
         &[
             "-y",
@@ -666,7 +666,7 @@ fn a_value_that_cannot_be_requoted_is_handed_back_with_the_term() {
     fs::write(&config, "set -g window-status-format back\\ slash\n").expect("the config");
     let before = fs::read_to_string(&config).expect("the config");
 
-    let out = install(&home, &["-y", "--tmux-format"]);
+    let out = register(&home, &["-y", "--tmux-format"]);
 
     assert_eq!(code(&out), 0, "{}", stdout(&out));
     let text = stdout(&out);
@@ -732,7 +732,7 @@ fn a_config_we_cannot_write_is_handed_back_whichever_shape_it_has() {
         fs::write(dir.join("tmux.conf"), existing).expect("the config");
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).expect("chmod");
 
-        let out = install(&home, &["-y", "--tmux-format"]);
+        let out = register(&home, &["-y", "--tmux-format"]);
 
         assert_eq!(code(&out), 0, "{}", stdout(&out));
         assert!(
@@ -793,7 +793,7 @@ fn a_flag_given_without_its_value_is_a_usage_error_naming_it() {
     ] {
         let home = TempDir::new("cli-no-value");
         // The flag last, so there is nothing for it to take.
-        let out = install(&home, &["--dry-run", flag]);
+        let out = register(&home, &["--dry-run", flag]);
 
         match flag {
             // A bare `--agents` is the documented way to say "only the
@@ -816,7 +816,7 @@ fn the_agents_flag_given_twice_is_a_usage_error() {
     // The bare form is taken first, so the second one is left for the value
     // lookup with nothing to take.
     let home = TempDir::new("cli-agents-twice");
-    let out = install(&home, &["--dry-run", "--agents", "--agents"]);
+    let out = register(&home, &["--dry-run", "--agents", "--agents"]);
 
     assert_eq!(code(&out), 2, "{}", stdout(&out));
     assert!(stderr(&out).contains("--agents"), "{}", stderr(&out));
@@ -845,14 +845,14 @@ fn an_empty_prefix_runs_exactly_as_an_unset_one_does() {
 #[test]
 fn a_stray_argument_is_a_usage_error() {
     let home = TempDir::new("cli-stray");
-    let out = install(&home, &["--dry-run", "nonsense"]);
+    let out = register(&home, &["--dry-run", "nonsense"]);
 
     assert_eq!(code(&out), 2);
     assert!(stderr(&out).contains("nonsense"), "{}", stderr(&out));
 }
 
 #[test]
-fn with_no_home_there_is_nowhere_to_install_to() {
+fn with_no_home_there_is_nowhere_to_register_to() {
     let home = TempDir::new("cli-no-home");
     let out = command(&home, &["--dry-run"])
         .env_remove("HOME")
@@ -891,10 +891,10 @@ fn a_file_we_cannot_read_is_reported_rather_than_guessed_at() {
     fs::write(&target, "{}\n").expect("the config");
     fs::set_permissions(&target, fs::Permissions::from_mode(0o000)).expect("chmod");
 
-    let out = install(&home, &["-y", "--agents=codex"]);
+    let out = register(&home, &["-y", "--agents=codex"]);
 
     assert_eq!(code(&out), 0, "{}", stdout(&out));
-    assert!(stdout(&out).contains("not installed"), "{}", stdout(&out));
+    assert!(stdout(&out).contains("not registered"), "{}", stdout(&out));
 }
 
 #[test]
@@ -940,7 +940,7 @@ fn the_help_text_documents_the_subcommand_and_its_flags() {
         .expect("the binary runs");
     let text = stdout(&out);
 
-    assert!(text.contains("tmux-agent-status install"), "{text}");
+    assert!(text.contains("tmux-agent-status register"), "{text}");
     for flag in [
         "--agents",
         "--tmux-hook",
@@ -981,7 +981,7 @@ fn a_format_line_split_over_continuations_is_spliced_like_any_other() {
     )
     .expect("the config");
 
-    let out = install(&home, &["-y", "--tmux-format"]);
+    let out = register(&home, &["-y", "--tmux-format"]);
 
     assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
     assert!(!stdout(&out).contains("moved under us"), "{}", stdout(&out));
@@ -1027,7 +1027,7 @@ fn a_relative_source_is_followed_from_home_and_the_guess_is_reported() {
     let from_home = home.join("fragment.conf");
     fs::write(&from_home, "set -g window-status-format '#I:#W-home'\n").expect("the fragment");
 
-    let out = install(&home, &["-y", "--tmux-format"]);
+    let out = register(&home, &["-y", "--tmux-format"]);
 
     assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
     // The guess is disclosed before anything is written.
@@ -1086,7 +1086,7 @@ fn a_snippet_path_no_quoting_can_carry_is_handed_back() {
     fs::write(&config, "set -g status on\n").expect("the config");
     let snippet = home.join("it's $HOME/tmux-agent-status.conf");
 
-    let out = install(
+    let out = register(
         &home,
         &[
             "-y",

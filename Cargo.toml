@@ -17,7 +17,7 @@ categories = ["command-line-utilities"]
 # `zeroize` are for something this tool never asks for.
 dialoguer = { version = "0.12.0", default-features = false, features = ["editor"] }
 # `eq-separator`: pico-args ships with no features at all, so `--key=value` is
-# not understood without this. `install --agents=codex,cursor` is the
+# not understood without this. `register --agents=codex,cursor` is the
 # documented spelling, and it is the only unambiguous one for a flag whose
 # value is optional.
 pico-args = { version = "0.5.0", features = ["eq-separator"] }
