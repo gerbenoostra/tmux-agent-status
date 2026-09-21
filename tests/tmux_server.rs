@@ -216,8 +216,9 @@ impl Server {
             .collect()
     }
 
-    /// The two facts that together mean "on screen": current window, and a
-    /// client attached to look at it.
+    /// Whether the window is its session's current one and a client is
+    /// attached: the precondition the tests wait for. tmux cannot tell that
+    /// from anyone looking, so it says nothing about attention.
     fn window_active_and_attached(&self, target: &str) -> String {
         self.tmux(&[
             "display-message",
