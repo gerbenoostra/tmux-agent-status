@@ -196,8 +196,9 @@ fn source_argument(line: &str) -> Option<String> {
 
 /// The block that sources the snippet.
 ///
-/// Appended at the end: the snippet sets hooks only, and a hook set late is a
-/// hook set, so position does not matter here the way it does for the format.
+/// Appended at the end: the snippet sets an option and hooks only, and one set
+/// late is one set, so position does not matter here the way it does for the
+/// format.
 /// `None` when the snippet's path cannot be spelled safely, which sends the
 /// step to the manual path like any other line this module will not write.
 pub fn with_source_block(text: &str, snippet: &Path) -> Option<String> {
@@ -449,9 +450,20 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_snippet_is_embedded_and_sets_the_hooks() {
-        assert!(SNIPPET.contains("set-hook -g 'session-window-changed[50]'"));
-        assert!(SNIPPET.contains("tmux-agent-status clear-window"));
+    fn the_shipped_snippet_is_embedded_and_sets_the_option_and_all_three_hooks() {
+        assert!(SNIPPET.contains("\nset -g focus-events on\n"));
+        for hook in [
+            "pane-focus-in",
+            "session-window-changed",
+            "window-pane-changed",
+        ] {
+            let line = format!(
+                "set-hook -g '{hook}[50]' 'run-shell -b \"tmux-agent-status clear-pane #{{pane_id}}\"'"
+            );
+            assert!(SNIPPET.contains(&line), "{hook}");
+        }
+        // The window-wide command would acknowledge panes nobody focused.
+        assert!(!SNIPPET.contains("clear-window"));
     }
 
     #[test]

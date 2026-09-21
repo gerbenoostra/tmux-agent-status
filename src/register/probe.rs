@@ -60,6 +60,10 @@ impl Dump {
         for args in [
             ["show-options", "-g"],
             ["show-options", "-gw"],
+            // `focus-events` is a server option, which neither of the above
+            // lists (verified on 3.6a: only `-s` does, though `-gv` asks for
+            // it by name).
+            ["show-options", "-s"],
             ["show-hooks", "-g"],
             ["show-hooks", "-gw"],
         ] {

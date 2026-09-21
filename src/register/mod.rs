@@ -455,6 +455,7 @@ fn worst(a: Outcome, b: Outcome) -> Outcome {
 fn ours_to_change() -> Vec<String> {
     let mut names: Vec<String> = format::OPTIONS.iter().map(|o| (*o).to_owned()).collect();
     names.extend(HOOKS.iter().map(|hook| (*hook).to_owned()));
+    names.push(FOCUS_EVENTS.to_owned());
     names
 }
 
@@ -467,8 +468,10 @@ fn ours_to_change() -> Vec<String> {
 /// anywhere. That is the worst outcome this module has, so the probe is asked
 /// for the other half directly.
 pub enum Landed {
-    /// The hook step: both hooks are registered afterwards, which is what says
-    /// the sourced snippet actually ran.
+    /// The hook step: every hook is registered and `focus-events` reads back
+    /// `on` afterwards, which is what says the sourced snippet actually ran.
+    /// The option is checked as well because a snippet that lands the hooks
+    /// but not the option silently loses the one hook that sees the terminal.
     ///
     /// Only a snippet that exists and sets no hooks reaches this. One that is
     /// missing is refused earlier and better: tmux will not read a config that
@@ -485,16 +488,24 @@ impl Landed {
     /// Whether what this edit was for is in the dump tmux just gave us.
     fn found(&self, dumped: &probe::Dump) -> Result<(), String> {
         match self {
-            Landed::Hooks => match HOOKS
-                .iter()
-                .find(|hook| !dumped.any_value(hook, |set| set.contains(agents::COMMAND_PREFIX)))
-            {
-                None => Ok(()),
-                Some(missing) => Err(format!(
-                    "the source-file line landed, but tmux read the config back without the \
-                     {missing} hook: the file it points at does not set it."
-                )),
-            },
+            Landed::Hooks => {
+                if let Some(missing) = HOOKS.iter().find(|hook| {
+                    !dumped.any_value(hook, |set| set.contains(agents::COMMAND_PREFIX))
+                }) {
+                    return Err(format!(
+                        "the source-file line landed, but tmux read the config back without the \
+                         {missing} hook: the file it points at does not set it."
+                    ));
+                }
+                match dumped.any_value(FOCUS_EVENTS, |value| value == "on") {
+                    true => Ok(()),
+                    false => Err(format!(
+                        "the source-file line landed, but tmux reads {FOCUS_EVENTS} as off: \
+                         the file it points at does not turn it on, or a later line turns it \
+                         off, and pane-focus-in then never sees the terminal regain focus."
+                    )),
+                }
+            }
             // What is reported is what was observed. A later assignment is the
             // likeliest reason tmux does not read the term back, and it is not
             // the only one - a window-local `setw` at config-load time, a
@@ -666,12 +677,25 @@ fn unspellable(snippet: &Path) -> String {
     )
 }
 
-/// The two hooks the shipped snippet registers.
+/// The hooks the shipped snippet registers.
 ///
 /// Named here as well as in the snippet because this is the list the probe
 /// checks actually arrived: a `source-file` line pointing at something that
-/// sets neither of them is a line that does nothing.
-const HOOKS: [&str; 2] = ["session-window-changed", "window-pane-changed"];
+/// sets none of them is a line that does nothing.
+const HOOKS: [&str; 3] = [
+    "session-window-changed",
+    "window-pane-changed",
+    "pane-focus-in",
+];
+
+/// What the source-file step says about the one global option the snippet sets,
+/// because nothing else in the plan shows the user what the snippet contains.
+const FOCUS_EVENTS_NOTE: &str = "the snippet turns on the global tmux option focus-events, so \
+that returning to the terminal clears the focused pane; docs/register.md says how to decline it";
+
+/// The option the shipped snippet turns on: without it `pane-focus-in` fires on
+/// attach and never when the terminal regains focus.
+const FOCUS_EVENTS: &str = "focus-events";
 
 /// Run the whole thing.
 ///
@@ -1306,7 +1330,7 @@ impl TmuxPlan {
             rebuild: Rebuild::SourceBlock(snippet.to_path_buf()),
             parses: not_empty,
             creating: !seen.exists,
-            notes: Vec::new(),
+            notes: vec![FOCUS_EVENTS_NOTE.to_owned()],
             verify: self.verification(Landed::Hooks),
             path: seen.resolved,
             announced: false,
@@ -1941,12 +1965,17 @@ mod tests {
         for option in format::OPTIONS {
             assert!(ours.contains(&option.to_owned()), "{option}");
         }
-        for hook in ["session-window-changed", "window-pane-changed"] {
+        for hook in [
+            "session-window-changed",
+            "window-pane-changed",
+            "pane-focus-in",
+        ] {
             assert!(ours.contains(&hook.to_owned()), "{hook}");
         }
+        assert!(ours.contains(&"focus-events".to_owned()));
         // And nothing else, because anything else moving is the tell that tmux
         // abandoned the config.
-        assert_eq!(ours.len(), 4);
+        assert_eq!(ours.len(), 6);
     }
 
     #[test]

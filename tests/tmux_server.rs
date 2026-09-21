@@ -231,6 +231,19 @@ impl Server {
         .to_owned()
     }
 
+    /// One pane's own state, empty when it holds none.
+    fn pane_status(&self, pane: &str) -> String {
+        self.tmux(&["display-message", "-p", "-t", pane, "#{@agent_pane_status}"])
+            .trim_end()
+            .to_owned()
+    }
+
+    /// Source the shipped snippet, the way a user's `tmux.conf` does. The path is
+    /// relative to the crate root, which is where `cargo test` runs.
+    fn source_snippet(&self) {
+        self.tmux(&["source-file", "share/tmux/tmux-agent-status.conf"]);
+    }
+
     /// The window rollup, empty when the option is unset.
     fn window_status(&self, target: &str) -> String {
         self.tmux(&["display-message", "-p", "-t", target, "#{@agent_status}"])
@@ -715,42 +728,144 @@ fn the_status_bar_renders_the_glyph_after_a_truncated_name() {
 }
 
 #[test]
-fn the_shipped_hooks_clear_a_window_when_it_is_looked_at() {
+fn the_shipped_snippet_registers_the_option_and_all_three_hooks() {
     let server = Server::start();
-    let agent = server.first_pane();
-    let elsewhere = server.new_window("elsewhere");
-    server.tmux(&["source-file", "share/tmux/tmux-agent-status.conf"]);
-    assert_ok(&server.agent_status(&agent, &["set", "done"]));
-    assert_ok(&server.agent_status(&elsewhere, &["set", "waiting"]));
+
+    server.source_snippet();
+
+    assert_eq!(
+        server.tmux(&["show-options", "-gv", "focus-events"]).trim(),
+        "on"
+    );
+    // Each hook in the scope tmux keeps it in.
+    let global = server.tmux(&["show-hooks", "-g"]);
+    assert!(global.contains("session-window-changed[50]"), "{global}");
+    let window = server.tmux(&["show-hooks", "-gw"]);
+    for hook in ["pane-focus-in[50]", "window-pane-changed[50]"] {
+        assert!(window.contains(hook), "{hook}: {window}");
+    }
+    for hooks in [&global, &window] {
+        assert!(!hooks.contains("clear-window"), "{hooks}");
+    }
+}
+
+#[test]
+fn a_pane_focus_in_clears_the_pane_it_names_and_no_other() {
+    // The hook that sees the terminal, on its own: the two fallbacks are
+    // removed, so only `pane-focus-in` can be what clears anything here.
+    let server = Server::start();
+    let here = server.first_pane();
+    let target = server.new_window("target");
+    let sibling = server.split(&target);
+    let _client = server.attach();
+    server.source_snippet();
+    for hook in ["session-window-changed[50]", "window-pane-changed[50]"] {
+        server.tmux(&["set-hook", "-gu", hook]);
+    }
+    assert_ok(&server.agent_status(&here, &["set", "done"]));
+    assert_ok(&server.agent_status(&target, &["set", "done"]));
+    assert_ok(&server.agent_status(&sibling, &["set", "waiting"]));
+    assert_eq!(server.window_status(&target), "\u{1f4ac}");
+
+    // The client moves onto the window, and tmux focuses the pane it lands on.
+    server.tmux(&["select-window", "-t", "t:1"]);
+
+    wait_for(|| server.pane_status(&target), |status| status.is_empty());
+    // The visible sibling was not read, the window glyph is recomputed from it,
+    // and the window left behind keeps its own.
+    assert_eq!(server.pane_status(&sibling), "waiting");
+    assert_eq!(server.window_status(&target), "\u{1f4ac}");
+    assert_eq!(server.pane_status(&here), "done");
+    assert_eq!(server.window_status(&here), "\u{2705}");
+}
+
+#[test]
+fn without_focus_events_a_switch_still_clears_the_pane_it_lands_on() {
+    // No client and the option off: `pane-focus-in` cannot fire, so this is the
+    // fallback pair on its own.
+    let server = Server::start();
+    let here = server.first_pane();
+    let target = server.new_window("target");
+    let sibling = server.split(&target);
+    server.source_snippet();
+    server.tmux(&["set-option", "-g", "focus-events", "off"]);
+    assert_ok(&server.agent_status(&here, &["set", "done"]));
+    assert_ok(&server.agent_status(&target, &["set", "waiting"]));
+    assert_ok(&server.agent_status(&sibling, &["set", "error"]));
 
     // Switching windows: session-window-changed, carrying the new pane.
     server.tmux(&["select-window", "-t", "t:1"]);
 
-    // The hooks run in the background, so the effect arrives a moment later.
+    wait_for(|| server.pane_status(&target), |status| status.is_empty());
+    // The pane left behind and the sibling on the same window keep theirs.
+    assert_eq!(server.pane_status(&here), "done");
+    assert_eq!(server.pane_status(&sibling), "error");
+    assert_eq!(server.window_status(&target), "\u{2757}");
+
+    // Switching panes inside the window: window-pane-changed.
+    server.tmux(&["select-pane", "-t", &sibling]);
+
+    wait_for(|| server.pane_status(&sibling), |status| status.is_empty());
+    assert_eq!(server.pane_status(&here), "done");
+    wait_for(|| server.window_status(&target), |status| status.is_empty());
+}
+
+/// Attach a client with the snippet sourced and `focus-events` set to `mode`,
+/// then detach it and attach another: the pane the first attach lands on is
+/// acknowledged, every other pane and window keeps its state through both.
+///
+/// Only the first attach fires `pane-focus-in` (probed on tmux 3.6a, in both
+/// modes and for a dying as well as a detached client): tmux keeps the pane
+/// flagged as focused across a detach, so a later attach finds nothing to
+/// announce. The second half therefore pins what the plan promises - nothing
+/// else moves - and not that the landing pane clears again.
+fn attach_cycle_with_focus_events(mode: &str) {
+    let server = Server::start();
+    let landing = server.first_pane();
+    let beside = server.split(&landing);
+    let elsewhere = server.new_window("elsewhere");
+    server.source_snippet();
+    server.tmux(&["set-option", "-g", "focus-events", mode]);
+    assert_ok(&server.agent_status(&landing, &["set", "done"]));
+    assert_ok(&server.agent_status(&beside, &["set", "error"]));
+    assert_ok(&server.agent_status(&elsewhere, &["set", "waiting"]));
+
+    let first = server.attach();
+
+    // Attaching fires `pane-focus-in` for the pane it lands on, whatever
+    // `focus-events` says.
+    wait_for(|| server.pane_status(&landing), |status| status.is_empty());
     wait_for(
-        || server.window_status(&elsewhere),
-        |status| status.is_empty(),
+        || server.window_status(&landing),
+        |status| status == "\u{2757}",
     );
-    // Only the window looked at; the one left behind keeps its glyph.
-    assert_eq!(server.window_status(&agent), "✅");
+    assert_eq!(server.pane_status(&beside), "error");
+    assert_eq!(server.pane_status(&elsewhere), "waiting");
 
-    server.tmux(&["select-window", "-t", "t:0"]);
+    drop(first);
+    wait_for(
+        || server.tmux(&["list-clients", "-F", "#{client_name}"]),
+        |clients| clients.trim().is_empty(),
+    );
+    // Detaching acknowledges nothing.
+    assert_eq!(server.pane_status(&beside), "error");
+    assert_eq!(server.pane_status(&elsewhere), "waiting");
 
-    wait_for(|| server.window_status(&agent), |status| status.is_empty());
+    let _second = server.attach();
+
+    assert_eq!(server.pane_status(&beside), "error");
+    assert_eq!(server.pane_status(&elsewhere), "waiting");
+    assert_eq!(server.window_status(&elsewhere), "\u{1f4ac}");
 }
 
 #[test]
-fn the_shipped_hooks_clear_a_window_when_another_pane_of_it_is_selected() {
-    let server = Server::start();
-    let first = server.first_pane();
-    let second = server.split(&first);
-    server.tmux(&["source-file", "share/tmux/tmux-agent-status.conf"]);
-    assert_ok(&server.agent_status(&first, &["set", "error"]));
+fn an_attach_clears_only_the_pane_it_lands_on() {
+    attach_cycle_with_focus_events("on");
+}
 
-    // Switching panes inside the window: window-pane-changed.
-    server.tmux(&["select-pane", "-t", &second]);
-
-    wait_for(|| server.window_status(&first), |status| status.is_empty());
+#[test]
+fn an_attach_clears_only_the_pane_it_lands_on_with_focus_events_off() {
+    attach_cycle_with_focus_events("off");
 }
 
 #[test]

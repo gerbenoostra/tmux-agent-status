@@ -917,11 +917,22 @@ fn the_snippet_is_written_when_none_is_present_and_then_sourced() {
     assert_eq!(report.exit_code(), 0);
     let snippet = dir.join(".config/tmux/tmux-agent-status.conf");
     assert!(snippet.is_file(), "{}", script.output());
-    assert!(
-        fs::read_to_string(&snippet)
-            .expect("the snippet")
-            .contains("set-hook -g 'session-window-changed[50]'")
-    );
+    let written = fs::read_to_string(&snippet).expect("the snippet");
+    for hook in [
+        "session-window-changed",
+        "window-pane-changed",
+        "pane-focus-in",
+    ] {
+        assert!(
+            written.contains(&format!("set-hook -g '{hook}[50]'")),
+            "{hook}"
+        );
+    }
+    assert!(written.contains("\nset -g focus-events on\n"));
+    // The plan shows no file contents, so the one global option the snippet
+    // sets is said out loud where the user approves the source-file line.
+    let output = script.output();
+    assert!(output.contains("focus-events"), "{output}");
     assert!(
         fs::read_to_string(dir.join(".config/tmux/tmux.conf"))
             .expect("the config")
