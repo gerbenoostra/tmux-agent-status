@@ -933,10 +933,73 @@ fn the_snippet_is_written_when_none_is_present_and_then_sourced() {
     // sets is said out loud where the user approves the source-file line.
     let output = script.output();
     assert!(output.contains("focus-events"), "{output}");
+    // With the way to decline it, which has to survive the snippet being
+    // rewritten on the next run.
+    assert!(output.contains("set -g focus-events off"), "{output}");
+    assert_eq!(
+        output.matches("focus-events").count(),
+        2,
+        "said once: {output}"
+    );
     assert!(
         fs::read_to_string(dir.join(".config/tmux/tmux.conf"))
             .expect("the config")
             .contains("source-file")
+    );
+}
+
+// A snippet this tool wrote is rewritten whole on every run, which is what
+// turns `focus-events` on for an install that predates it. The source-file line
+// is already there and says nothing, so the snippet step has to.
+#[test]
+fn a_rerun_that_rewrites_the_snippet_says_it_turns_focus_events_on() {
+    let dir = TempDir::new("run-snippet-rerun");
+    dir.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let steps = || register::select(&[Step::TmuxHook], &[]).expect("valid");
+    assert_eq!(
+        register::run(&options(&dir, steps()), &Script::saying_yes()).exit_code(),
+        0
+    );
+
+    let script = Script::saying_yes();
+    let report = register::run(&options(&dir, steps()), &script);
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(output.contains("the tmux snippet - edit"), "{output}");
+    assert!(output.contains("already registered"), "{output}");
+    assert!(output.contains("set -g focus-events off"), "{output}");
+}
+
+// Nothing is written to a snippet that already exists, so the step that adds
+// the source-file line is where the option is said, and it is said once.
+#[test]
+fn a_snippet_that_already_exists_is_disclosed_by_the_source_line_step() {
+    let dir = TempDir::new("run-snippet-found");
+    dir.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let snippet = dir.write(
+        ".config/tmux/tmux-agent-status.conf",
+        include_str!("../share/tmux/tmux-agent-status.conf"),
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &Options {
+            snippet: Some(snippet),
+            ..options(
+                &dir,
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
+            )
+        },
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert_eq!(
+        output.matches("set -g focus-events off").count(),
+        1,
+        "{output}"
     );
 }
 

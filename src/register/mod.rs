@@ -1266,6 +1266,9 @@ impl TmuxPlan {
             options.prefix.as_deref(),
         );
         let mut planned = Vec::new();
+        // The option is said once: by the snippet step when this run writes the
+        // snippet, and by the source-file step when it points at one that exists.
+        let disclosed = matches!(snippet, tmux_conf::Choice::Create(_));
 
         // The snippet first: a source-file line pointing at nothing is worse
         // than no line at all.
@@ -1284,7 +1287,10 @@ impl TmuxPlan {
                         rebuild: Rebuild::Whole(tmux_conf::SNIPPET.to_owned()),
                         parses: not_empty,
                         creating: !seen.exists,
-                        notes: vec!["no shipped copy was found, so one is written here".to_owned()],
+                        notes: vec![
+                            "no shipped copy was found, so one is written here".to_owned(),
+                            FOCUS_EVENTS_NOTE.to_owned(),
+                        ],
                         verify: None,
                         path: seen.resolved,
                         announced: false,
@@ -1307,13 +1313,13 @@ impl TmuxPlan {
                      at could not be written."
                         .to_owned(),
                 ),
-                false => self.plan_source_line(snippet.path()),
+                false => self.plan_source_line(snippet.path(), disclosed),
             },
         });
         planned
     }
 
-    fn plan_source_line(&self, snippet: &Path) -> Action {
+    fn plan_source_line(&self, snippet: &Path, disclosed: bool) -> Action {
         let seen = match write::inspect(self.config.path(), &write::Faults::from_env()) {
             Ok(seen) => seen,
             Err(error) => return Action::Manual(format!("    {error}")),
@@ -1333,7 +1339,10 @@ impl TmuxPlan {
             rebuild: Rebuild::SourceBlock(snippet.to_path_buf()),
             parses: not_empty,
             creating: !seen.exists,
-            notes: vec![FOCUS_EVENTS_NOTE.to_owned()],
+            notes: match disclosed {
+                true => Vec::new(),
+                false => vec![FOCUS_EVENTS_NOTE.to_owned()],
+            },
             verify: self.verification(Landed::Hooks),
             path: seen.resolved,
             announced: false,
