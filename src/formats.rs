@@ -5,7 +5,7 @@
 //! An agent may run its hooks concurrently, so a decision taken on a value read
 //! in an earlier tmux call can be stale by the time it is written. Every
 //! decision that depends on what tmux holds - which state wins on a pane,
-//! whether the window is on screen, what the window's glyph is - is therefore a
+//! what the window's glyph is - is therefore a
 //! format that `set-option -F` expands against its target at the moment it
 //! sets it, and the server runs one command at a time. That makes each write a
 //! compare-and-set taken inside the server: no lock file, no read-then-write
@@ -22,11 +22,6 @@ fn status() -> String {
     format!("#{{{PANE_OPTION}}}")
 }
 
-/// `1` when the window is on screen: its session's current window, with a
-/// client attached to look at it. `session_attached` counts clients, and tmux
-/// reads `0` as false.
-const WATCHED: &str = "#{?window_active,#{?session_attached,1,},}";
-
 /// `then` when the pane holds `state`, `otherwise` when it does not.
 fn if_holds(state: State, then: &str, otherwise: &str) -> String {
     format!(
@@ -40,24 +35,19 @@ fn if_holds(state: State, then: &str, otherwise: &str) -> String {
 ///
 /// A state that outranks `state` in precedence keeps itself; anything else - a
 /// lower state, nothing, or a value this tool does not recognise - becomes
-/// `state`. A state that clears on focus clears the pane outright on a watched
-/// window instead: whoever it is for is already looking, and the pane's old
-/// state is over, whatever it was.
+/// `state`. Whether anyone is looking is never consulted: tmux cannot tell a
+/// focused terminal from a background tab, so the glyph is always written and
+/// only a focus event on the pane clears it.
 pub fn report(state: State) -> String {
-    let kept = State::ALL
+    State::ALL
         .into_iter()
         .filter(|held| held.precedence() > state.precedence())
         .fold(state.name().to_owned(), |otherwise, held| {
             if_holds(held, held.name(), &otherwise)
-        });
-    if state.is_sticky() {
-        kept
-    } else {
-        format!("#{{?{WATCHED},,{kept}}}")
-    }
+        })
 }
 
-/// The value a pane keeps once its window is seen: nothing in place of a state
+/// The value a pane keeps once it is acknowledged: nothing in place of a state
 /// that clears on focus, and whatever it holds otherwise, so a sticky state and
 /// a value this tool does not recognise both survive.
 pub fn seen() -> String {
@@ -65,12 +55,6 @@ pub fn seen() -> String {
         .into_iter()
         .filter(|state| !state.is_sticky())
         .fold(status(), |otherwise, state| if_holds(state, "", &otherwise))
-}
-
-/// The value a sibling of the reporting pane takes: [`seen`] when the window is
-/// watched, and what it already holds when it is not.
-pub fn sibling() -> String {
-    format!("#{{?{WATCHED},{},{}}}", seen(), status())
 }
 
 /// The window's glyph: the icon of the highest-ranked state any of its panes
@@ -118,12 +102,16 @@ mod tests {
     }
 
     #[test]
-    fn only_a_state_that_clears_on_focus_looks_at_the_window() {
+    fn no_report_consults_whether_the_window_is_on_screen() {
         for state in State::ALL {
-            assert_eq!(
-                report(state).contains(WATCHED),
-                !state.is_sticky(),
-                "report({state})"
+            let format = report(state);
+            assert!(
+                !format.contains("window_active"),
+                "report({state}): {format}"
+            );
+            assert!(
+                !format.contains("session_attached"),
+                "report({state}): {format}"
             );
         }
     }

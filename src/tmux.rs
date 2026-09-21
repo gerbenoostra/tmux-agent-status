@@ -60,11 +60,6 @@ impl Window {
             .filter(|pane| pane.has_status)
             .map(|pane| &pane.id)
     }
-
-    /// The panes other than the addressed one holding a status.
-    pub fn siblings_with_status(&self) -> impl Iterator<Item = &PaneId> {
-        self.panes_with_status().filter(|id| **id != self.pane)
-    }
 }
 
 /// One tmux command, as its arguments.
@@ -295,15 +290,11 @@ mod tests {
     }
 
     #[test]
-    fn siblings_leave_out_the_addressed_pane_and_panes_without_a_status() {
+    fn panes_with_status_leaves_out_panes_without_one() {
         let window = parse_window("%1\n%0\tdone\n%1\tdone\n%2\t\n").unwrap();
         assert_eq!(
             window.panes_with_status().collect::<Vec<_>>(),
             [&id("%0"), &id("%1")]
-        );
-        assert_eq!(
-            window.siblings_with_status().collect::<Vec<_>>(),
-            [&id("%0")]
         );
     }
 

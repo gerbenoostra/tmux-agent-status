@@ -101,22 +101,10 @@ pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
     tmux::run(&commands).map(drop)
 }
 
-/// The writes that report `state` on the window's addressed pane.
-///
-/// A state that clears on focus also applies the focus rule to the siblings of
-/// a watched window, since they are on screen together. A sibling with no
-/// status is left out: it has nothing to clear, and a status that arrives on it
-/// meanwhile is reported onto the watched window and clears itself.
+/// The writes that report `state` on the window's addressed pane, and only
+/// that pane.
 fn report(window: &Window, state: State) -> Vec<Cmd> {
     let mut commands = write(&window.pane, &formats::report(state)).to_vec();
-    if !state.is_sticky() {
-        let sibling = formats::sibling();
-        commands.extend(
-            window
-                .siblings_with_status()
-                .flat_map(|pane| write(pane, &sibling)),
-        );
-    }
     commands.extend(recompute(&window.pane));
     commands
 }

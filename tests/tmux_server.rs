@@ -216,13 +216,6 @@ impl Server {
             .collect()
     }
 
-    /// Whether tmux considers `target`'s window the session's current one.
-    fn window_active(&self, target: &str) -> String {
-        self.tmux(&["display-message", "-p", "-t", target, "#{window_active}"])
-            .trim_end()
-            .to_owned()
-    }
-
     /// The two facts that together mean "on screen": current window, and a
     /// client attached to look at it.
     fn window_active_and_attached(&self, target: &str) -> String {
@@ -351,23 +344,10 @@ fn pane_flag_overrides_tmux_pane() {
 }
 
 #[test]
-fn a_detached_session_is_not_being_watched() {
-    // tmux calls a detached session's current window active, but nobody is
-    // looking at it, so the state must survive to be seen on the next attach.
-    // Every other test on this server relies on the same rule.
-    let server = Server::start();
-    let pane = server.first_pane();
-    assert_eq!(server.window_active(&pane), "1");
-
-    assert_ok(&server.agent_status(&pane, &["set", "done"]));
-
-    assert_eq!(server.pane_statuses(&pane), ["done"]);
-    assert_eq!(server.window_status(&pane), "\u{2705}");
-}
-
-#[test]
-fn a_non_sticky_state_on_a_watched_window_never_renders() {
-    // "A `done` on the window you are already watching never renders at all."
+fn a_state_on_the_current_window_of_an_attached_session_is_painted() {
+    // tmux cannot tell a focused terminal from a background tab, so being the
+    // current window of an attached session does not mean anyone is looking:
+    // the glyph is written and only a focus event on the pane clears it.
     let server = Server::start();
     let pane = server.first_pane();
     let _client = server.attach();
@@ -378,18 +358,16 @@ fn a_non_sticky_state_on_a_watched_window_never_renders() {
 
     assert_ok(&server.agent_status(&pane, &["set", "done"]));
 
-    assert_eq!(server.pane_statuses(&pane), [""]);
-    assert_eq!(server.window_status(&pane), "");
+    assert_eq!(server.pane_statuses(&pane), ["done"]);
+    assert_eq!(server.window_status(&pane), "\u{2705}");
 }
 
 #[test]
-fn a_watched_window_supersedes_the_reporting_pane_and_clears_its_siblings() {
+fn a_report_on_an_attached_window_touches_no_other_pane() {
     let server = Server::start();
     let reporter = server.first_pane();
     let finished = server.split(&reporter);
     let busy = server.split(&reporter);
-    // Arranged while detached, so these are the states a real window carries
-    // by the time you look at it.
     assert_ok(&server.agent_status(&reporter, &["set", "working"]));
     assert_ok(&server.agent_status(&finished, &["set", "done"]));
     assert_ok(&server.agent_status(&busy, &["set", "working"]));
@@ -401,13 +379,11 @@ fn a_watched_window_supersedes_the_reporting_pane_and_clears_its_siblings() {
 
     assert_ok(&server.agent_status(&reporter, &["set", "waiting"]));
 
-    // The reporting pane's own `working` is over - the event supersedes it,
-    // sticky or not, or a turn that ends while you watch strands a 🤖 that no
-    // later focus event clears. Its siblings follow the ordinary focus rule.
+    // The siblings keep what they held, on screen or not.
     let mut statuses = server.pane_statuses(&reporter);
     statuses.sort();
-    assert_eq!(statuses, ["", "", "working"]);
-    assert_eq!(server.window_status(&reporter), "\u{1f916}");
+    assert_eq!(statuses, ["done", "waiting", "working"]);
+    assert_eq!(server.window_status(&reporter), "\u{1f4ac}");
 }
 
 #[test]
@@ -528,12 +504,11 @@ fn finish_recomputes_a_window_with_a_higher_ranked_sibling() {
 }
 
 #[test]
-fn finish_on_a_watched_window_leaves_no_glyph_behind() {
-    // What `/clear` does to a stranded `working`: the session ends while the
-    // user is looking at the window, so the ✅ nobody needs is never written.
+fn finish_on_an_attached_window_still_paints_its_glyph() {
+    // What `/clear` does to a stranded `working`: the session ends and the
+    // pane is resolved to `done`, which stays until the pane is acknowledged.
     let server = Server::start();
     let pane = server.first_pane();
-    // Arranged while detached, the way the turn that stranded it did.
     assert_ok(&server.agent_status(&pane, &["set", "working"]));
     let _client = server.attach();
     wait_for(
@@ -543,10 +518,10 @@ fn finish_on_a_watched_window_leaves_no_glyph_behind() {
 
     assert_ok(&server.agent_status(&pane, &["finish"]));
 
-    assert_eq!(server.pane_statuses(&pane), [""]);
-    assert_eq!(server.window_status(&pane), "");
+    assert_eq!(server.pane_statuses(&pane), ["done"]);
+    assert_eq!(server.window_status(&pane), "\u{2705}");
 
-    // The `SessionStart` of the successor session then finds nothing to clear.
+    // The `SessionStart` of the successor session then clears it.
     assert_ok(&server.agent_status(&pane, &["reset"]));
     assert_eq!(server.pane_statuses(&pane), [""]);
     assert_eq!(server.window_status(&pane), "");
