@@ -688,10 +688,13 @@ const HOOKS: [&str; 3] = [
     "pane-focus-in",
 ];
 
-/// What the source-file step says about the one global option the snippet sets,
-/// because nothing else in the plan shows the user what the snippet contains.
+/// What the plan says about the one global option the snippet sets, because
+/// nothing else in it shows the user what the snippet contains. It carries the
+/// opt-out itself: the snippet is rewritten whole and verified on every run, so
+/// only a line in the user's own config, after the source-file line, survives.
 const FOCUS_EVENTS_NOTE: &str = "the snippet turns on the global tmux option focus-events, so \
-that returning to the terminal clears the focused pane; docs/register.md says how to decline it";
+that returning to the terminal clears the focused pane; to decline it, add `set -g focus-events \
+off` to your own tmux config after the source-file line";
 
 /// The option the shipped snippet turns on: without it `pane-focus-in` fires on
 /// attach and never when the terminal regains focus.
