@@ -19,11 +19,10 @@ use crate::tmux::{self, Cmd, PaneId, Window};
 /// `tmux-agent-status set <state>`: report a state on the pane and recompute the window.
 ///
 /// The bell rings for every state that rings, whether or not the pane keeps it.
-/// A `waiting` refused by a `done` nobody has seen still means the agent is
-/// blocked on you, and the glyph cannot say so until the window is looked at;
-/// the bell is the one channel that still can. It is rung before tmux is
-/// touched, so no tmux, or a tmux that fails, costs the write and not the
-/// signal.
+/// A `waiting` refused by a `done` still means the agent is blocked on you, and
+/// precedence keeps the glyph on `done`; the bell is the one channel that still
+/// says so. It is rung before tmux is touched, so no tmux, or a tmux that
+/// fails, costs the write and not the signal.
 pub fn set(state: State, pane: Option<&str>) -> io::Result<()> {
     if state.rings_bell() {
         bell::ring();
