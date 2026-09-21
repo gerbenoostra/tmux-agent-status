@@ -4,15 +4,15 @@
 //!
 //! An agent may run its hooks concurrently, so a decision taken on a value read
 //! in an earlier tmux call can be stale by the time it is written. Every
-//! decision that depends on what tmux holds - which state wins on a pane,
-//! what the window's glyph is - is therefore a
-//! format that `set-option -F` expands against its target at the moment it
-//! sets it, and the server runs one command at a time. That makes each write a
-//! compare-and-set taken inside the server: no lock file, no read-then-write
-//! race. A `-F` write can only produce a value, so a clear produces `""` and is
-//! then normalised to unset by a conditional `if-shell -F ... 'set-option -u'`
-//! that decides on the value current at that instant - an unconditional unset
-//! could erase a concurrent write that landed in between.
+//! decision that depends on what tmux holds - which state wins on a pane, what
+//! the window's glyph is - is therefore a format that `set-option -F` expands
+//! against its target at the moment it sets it, and the server runs one command
+//! at a time. That makes each write a compare-and-set taken inside the server:
+//! no lock file, no read-then-write race. A `-F` write can only produce a
+//! value, so a clear produces `""` and is then normalised to unset by a
+//! conditional `if-shell -F ... 'set-option -u'` that decides on the value
+//! current at that instant - an unconditional unset could erase a concurrent
+//! write that landed in between.
 
 use crate::state::State;
 use crate::tmux::PANE_OPTION;
