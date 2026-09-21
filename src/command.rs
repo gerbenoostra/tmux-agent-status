@@ -14,7 +14,7 @@ use std::io;
 use crate::bell;
 use crate::formats;
 use crate::state::State;
-use crate::tmux::{self, Cmd, PaneId, Window};
+use crate::tmux::{self, Cmd, PaneId};
 
 /// `tmux-agent-status set <state>`: report a state on the pane and recompute the window.
 ///
@@ -31,7 +31,7 @@ pub fn set(state: State, pane: Option<&str>) -> io::Result<()> {
         return Ok(());
     };
     let window = tmux::window(&target)?;
-    tmux::run(&report(&window, state)).map(drop)
+    tmux::run(&report(&window.pane, state)).map(drop)
 }
 
 /// `tmux-agent-status start`: a turn begins on this pane.
@@ -63,7 +63,7 @@ pub fn finish(pane: Option<&str>) -> io::Result<()> {
         return Ok(());
     };
     let window = tmux::window(&target)?;
-    tmux::run(&report(&window, State::Done)).map(drop)
+    tmux::run(&report(&window.pane, State::Done)).map(drop)
 }
 
 /// `tmux-agent-status reset`: unconditionally drop this pane's session status.
@@ -100,11 +100,10 @@ pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
     tmux::run(&commands).map(drop)
 }
 
-/// The writes that report `state` on the window's addressed pane, and only
-/// that pane.
-fn report(window: &Window, state: State) -> Vec<Cmd> {
-    let mut commands = write(&window.pane, &formats::report(state)).to_vec();
-    commands.extend(recompute(&window.pane));
+/// The writes that report `state` on `pane`, and only that pane.
+fn report(pane: &PaneId, state: State) -> Vec<Cmd> {
+    let mut commands = write(pane, &formats::report(state)).to_vec();
+    commands.extend(recompute(pane));
     commands
 }
 
