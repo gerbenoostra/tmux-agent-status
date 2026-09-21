@@ -454,6 +454,116 @@ fn clear_window_clears_every_pane_but_keeps_working() {
 }
 
 #[test]
+fn clear_pane_clears_only_its_pane_and_leaves_a_sibling_alone() {
+    let server = Server::start();
+    let seen = server.first_pane();
+    let sibling = server.split(&seen);
+    assert_ok(&server.agent_status(&seen, &["set", "done"]));
+    assert_ok(&server.agent_status(&sibling, &["set", "waiting"]));
+
+    assert_ok(&server.agent_status(&seen, &["clear-pane"]));
+
+    assert_eq!(server.pane_statuses(&seen), ["", "waiting"]);
+    // The window falls back to what is left, and a sibling on screen stays.
+    assert_eq!(server.window_status(&seen), "💬");
+}
+
+#[test]
+fn clear_pane_keeps_a_working_pane_working() {
+    let server = Server::start();
+    let pane = server.first_pane();
+    assert_ok(&server.agent_status(&pane, &["set", "working"]));
+
+    assert_ok(&server.agent_status(&pane, &["clear-pane"]));
+
+    assert_eq!(server.pane_statuses(&pane), ["working"]);
+    assert_eq!(server.window_status(&pane), "🤖");
+}
+
+#[test]
+fn clear_pane_clears_waiting_and_error_and_the_window_option_with_them() {
+    let server = Server::start();
+    let pane = server.first_pane();
+    for state in ["waiting", "error"] {
+        assert_ok(&server.agent_status(&pane, &["set", state]));
+
+        assert_ok(&server.agent_status(&pane, &["clear-pane"]));
+
+        assert_eq!(server.pane_statuses(&pane), [""], "{state}");
+        assert!(
+            !server.pane_options(&pane).contains("@agent_pane_status"),
+            "{state}"
+        );
+        assert!(
+            !server.window_options(&pane).contains("@agent_status"),
+            "{state}"
+        );
+    }
+}
+
+#[test]
+fn clear_pane_on_a_pane_without_a_state_changes_nothing() {
+    let server = Server::start();
+    let bare = server.first_pane();
+    let sibling = server.split(&bare);
+    assert_ok(&server.agent_status(&sibling, &["set", "done"]));
+
+    assert_ok(&server.agent_status(&bare, &["clear-pane"]));
+
+    assert_eq!(server.pane_statuses(&bare), ["", "done"]);
+    assert_eq!(server.window_status(&bare), "✅");
+}
+
+#[test]
+fn clear_pane_heals_a_window_glyph_left_stale() {
+    let server = Server::start();
+    let pane = server.first_pane();
+    // A glyph no pane backs, as a failed write between the two would leave.
+    server.tmux(&["set-option", "-w", "-t", &pane, "@agent_status", "💬"]);
+
+    assert_ok(&server.agent_status(&pane, &["clear-pane"]));
+
+    assert_eq!(server.window_status(&pane), "");
+}
+
+#[test]
+fn clear_pane_takes_the_pane_as_an_argument() {
+    let server = Server::start();
+    let pane = server.first_pane();
+    let elsewhere = server.new_window("elsewhere");
+    assert_ok(&server.agent_status(&pane, &["set", "done"]));
+    assert_ok(&server.agent_status(&elsewhere, &["set", "waiting"]));
+
+    // Addressed from a different pane entirely, the way a hook does it.
+    assert_ok(&server.agent_status(&elsewhere, &["clear-pane", &pane]));
+
+    assert_eq!(server.window_status(&pane), "");
+    assert_eq!(server.pane_statuses(&elsewhere), ["waiting"]);
+    assert_eq!(server.window_status(&elsewhere), "💬");
+}
+
+#[test]
+fn clear_pane_of_a_pane_that_has_closed_writes_nothing() {
+    // A focus hook can name a pane that is gone by the time the binary runs.
+    let server = Server::start();
+    let survivor = server.first_pane();
+    let closing = server.split(&survivor);
+    let elsewhere = server.new_window("elsewhere");
+    assert_ok(&server.agent_status(&survivor, &["set", "waiting"]));
+    assert_ok(&server.agent_status(&elsewhere, &["set", "done"]));
+    server.tmux(&["kill-pane", "-t", &closing]);
+
+    let out = server.agent_status(&elsewhere, &["clear-pane", &closing]);
+
+    assert_ok(&out);
+    assert!(support::stderr_of(&out).is_empty());
+    assert_eq!(server.pane_statuses(&survivor), ["waiting"]);
+    assert_eq!(server.pane_statuses(&elsewhere), ["done"]);
+    assert_eq!(server.window_status(&survivor), "💬");
+    assert_eq!(server.window_status(&elsewhere), "✅");
+}
+
+#[test]
 fn reset_clears_only_its_pane_and_recomputes_the_rollup() {
     let server = Server::start();
     let reset = server.first_pane();
@@ -728,6 +838,8 @@ fn a_hook_outside_tmux_exits_zero_and_says_nothing() {
         ["finish"].as_slice(),
         ["clear-window"].as_slice(),
         ["clear-window", "%0"].as_slice(),
+        ["clear-pane"].as_slice(),
+        ["clear-pane", "%0"].as_slice(),
     ] {
         let out = Command::new(support::BIN)
             .args(args)

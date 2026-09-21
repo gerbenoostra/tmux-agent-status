@@ -60,6 +60,15 @@ impl Window {
             .filter(|pane| pane.has_status)
             .map(|pane| &pane.id)
     }
+
+    /// The addressed pane, if it holds a status.
+    pub fn addressed_with_status(&self) -> Option<&PaneId> {
+        self.panes
+            .iter()
+            .find(|pane| pane.id == self.pane)
+            .filter(|pane| pane.has_status)
+            .map(|pane| &pane.id)
+    }
 }
 
 /// One tmux command, as its arguments.
@@ -296,6 +305,14 @@ mod tests {
             window.panes_with_status().collect::<Vec<_>>(),
             [&id("%0"), &id("%1")]
         );
+    }
+
+    #[test]
+    fn addressed_with_status_is_the_addressed_pane_only_and_only_with_a_status() {
+        let window = parse_window("%1\n%0\tdone\n%1\twaiting\n").unwrap();
+        assert_eq!(window.addressed_with_status(), Some(&id("%1")));
+        let window = parse_window("%1\n%0\tdone\n%1\t\n").unwrap();
+        assert_eq!(window.addressed_with_status(), None);
     }
 
     #[test]

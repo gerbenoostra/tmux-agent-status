@@ -100,6 +100,33 @@ pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
     tmux::run(&commands).map(drop)
 }
 
+/// `tmux-agent-status clear-pane [<pane>]`: drop the non-sticky state of that
+/// one pane, then recompute its window.
+///
+/// The acknowledgement a focus hook sends: tmux said this pane gained focus, so
+/// this pane was seen. Its siblings were not, even when they share the screen,
+/// and keep whatever they hold. `working` is sticky and survives.
+///
+/// The recompute runs even when the pane holds nothing, which heals a window
+/// glyph a failed write left stale and keeps the command list non-empty.
+///
+/// A hook can fire for a pane that has closed since: the read then fails and
+/// the hook wrapper turns that into a silent exit 0, as for `clear_window`.
+/// The pane is an argument for the reason `clear_window` documents.
+pub fn clear_pane(pane: Option<&str>) -> io::Result<()> {
+    let Some(target) = tmux::resolve_pane(pane) else {
+        return Ok(());
+    };
+    let window = tmux::window(&target)?;
+    let mut commands: Vec<Cmd> = window
+        .addressed_with_status()
+        .into_iter()
+        .flat_map(|pane| write(pane, &formats::seen()))
+        .collect();
+    commands.extend(recompute(&window.pane));
+    tmux::run(&commands).map(drop)
+}
+
 /// The writes that report `state` on `pane`, and only that pane.
 fn report(pane: &PaneId, state: State) -> Vec<Cmd> {
     let mut commands = write(pane, &formats::report(state)).to_vec();
