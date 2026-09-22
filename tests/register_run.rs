@@ -1020,6 +1020,87 @@ fn a_rerun_replaces_the_snippet_the_config_sources_when_it_is_an_older_copy() {
     );
 }
 
+// `--snippet` says where a snippet lives or should go, but a config that
+// already sources one has answered that question itself: the sourced file is
+// the one tmux reads, so it is the one replaced, and the run says so rather
+// than leaving the flag looking honoured.
+#[test]
+fn an_explicit_snippet_elsewhere_is_named_when_the_sourced_one_is_replaced() {
+    let dir = TempDir::new("run-snippet-explicit");
+    let sourced = dir.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "set -g focus-events on\n",
+    );
+    let elsewhere = dir.write("elsewhere/tmux-agent-status.conf", "# not this one\n");
+    dir.write(
+        ".config/tmux/tmux.conf",
+        &format!("set -g status on\nsource-file {}\n", sourced.display()),
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &Options {
+            snippet: Some(elsewhere.clone()),
+            ..options(
+                &dir,
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
+            )
+        },
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(output.contains("--snippet names"), "{output}");
+    assert_eq!(
+        fs::read_to_string(&sourced).expect("the sourced snippet"),
+        include_str!("../share/tmux/tmux-agent-status.conf")
+    );
+    assert_eq!(
+        fs::read_to_string(&elsewhere).expect("the explicit path"),
+        "# not this one\n"
+    );
+}
+
+// tmux resolves a relative `source-file` against the directory its server was
+// started in, which this process cannot know. The replacement still goes to the
+// best guess, and the guess is named.
+//
+// Without the probe, because the probe answers this from its own working
+// directory: a relative line it cannot resolve is a config tmux will not read,
+// and that refusal comes first and is the right one. The guess is what is left
+// when the user has taken the probe away.
+#[test]
+fn a_relative_source_line_is_replaced_at_the_guess_and_the_guess_is_named() {
+    let dir = TempDir::new("run-snippet-relative");
+    let snippet = dir.write("tmux-agent-status.conf", "set -g focus-events on\n");
+    dir.write(
+        ".config/tmux/tmux.conf",
+        "set -g status on\nsource-file tmux-agent-status.conf\n",
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &Options {
+            probe: false,
+            ..options(
+                &dir,
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
+            )
+        },
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(output.contains("relative path"), "{output}");
+    assert!(output.contains("started in"), "{output}");
+    assert_eq!(
+        fs::read_to_string(&snippet).expect("the snippet"),
+        include_str!("../share/tmux/tmux-agent-status.conf")
+    );
+}
+
 // A snippet in a directory nothing can write to is reported and left alone.
 // The source-file line is a separate question, and it is already answered: the
 // line is in the config whatever this run can do to the file it names.
