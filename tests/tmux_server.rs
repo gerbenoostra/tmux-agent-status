@@ -1128,9 +1128,9 @@ fn a_state_is_refused_if_it_ranks_lower_than_the_one_the_pane_holds() {
 
 #[test]
 fn a_sibling_report_cannot_lower_a_state_that_outranks_it() {
-    // The race precedence exists for: an agent runs the hooks of one turn
-    // concurrently, so the `working` of a tool that finished arrives while the
-    // prompt of the tool that is blocked is still open.
+    // The race the pane precedence exists for: an agent runs the hooks of one
+    // turn concurrently, so the `working` of a tool that finished arrives while
+    // the prompt of the tool that is blocked is still open.
     let server = Server::start();
     let pane = server.first_pane();
     assert_ok(&server.agent_status(&pane, &["reset"]));

@@ -95,9 +95,9 @@ pane keeps its state, whether it is on screen in a split or hidden behind a zoom
 A turn that ends on the pane you are **already** focused on still paints its glyph and rings the
 bell: it stays until you type the next prompt, or move focus away and back. A turn that ends while
 you are **detached**, or while your terminal is showing another tab, keeps its glyph until you focus
-that pane again, which makes the glyph the signal that survives a reconnect - except for the pane you land on: the first client attach to a session fires
-focus for that one pane, clearing it too (a later re-attach clears nothing, on that pane or any
-other).
+that pane again, which makes the glyph the signal that survives a reconnect - except for the pane
+you land on: the first client attach to a session fires focus for that one pane, clearing it too (a
+later re-attach clears nothing, on that pane or any other).
 
 ## Interoperability
 

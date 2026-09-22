@@ -688,7 +688,7 @@ const HOOKS: [&str; 3] = [
     "pane-focus-in",
 ];
 
-/// What the plan says about the one global option the snippet sets, because
+/// What the user is told about the one global option the snippet sets, because
 /// nothing else in it shows the user what the snippet contains. It carries the
 /// opt-out itself: the snippet is rewritten whole and verified on every run, so
 /// only a line in the user's own config, after the source-file line, survives.
