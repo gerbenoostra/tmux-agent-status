@@ -1136,6 +1136,16 @@ fn a_sourced_snippet_that_cannot_be_written_is_reported_and_the_line_stands() {
         "{output}"
     );
     assert!(output.contains("is not writable"), "{output}");
+    // And what to do about it, which is the whole point of reporting it.
+    assert!(
+        output.contains("not the snippet this version ships"),
+        "{output}"
+    );
+    assert!(
+        output.contains("Either update whatever provides"),
+        "{output}"
+    );
+    assert!(output.contains("point the source-file line in"), "{output}");
     assert!(
         output.contains("the tmux source-file line - already registered"),
         "{output}"
@@ -1144,6 +1154,40 @@ fn a_sourced_snippet_that_cannot_be_written_is_reported_and_the_line_stands() {
         !output.contains("not adding a source-file line"),
         "{output}"
     );
+}
+
+// A copy nothing can write to, that is already this version's, is not a
+// problem to report: tmux runs the right hooks whoever owns the file.
+#[test]
+fn a_current_snippet_in_a_read_only_directory_is_already_registered() {
+    let dir = TempDir::new("run-snippet-readonly-current");
+    let snippet = dir.write(
+        "readonly/tmux-agent-status.conf",
+        include_str!("../share/tmux/tmux-agent-status.conf"),
+    );
+    dir.write(
+        ".config/tmux/tmux.conf",
+        &format!("set -g status on\nsource-file {}\n", snippet.display()),
+    );
+    fs::set_permissions(dir.join("readonly"), fs::Permissions::from_mode(0o555))
+        .expect("the directory can be made read-only");
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &options(
+            &dir,
+            register::select(&[Step::TmuxHook], &[]).expect("valid"),
+        ),
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(
+        output.contains("the tmux snippet - already registered"),
+        "{output}"
+    );
+    assert!(!output.contains("is not writable"), "{output}");
 }
 
 // Answering no leaves the older copy exactly as it was.

@@ -137,9 +137,11 @@ refused on the next run.
 If you are upgrading, re-run `tmux-agent-status register`. It reads the snippet your config already
 sources, compares it to the one this version ships, and offers to replace it when the two differ -
 so an older copy still setting the previous hooks is found even though the `source-file` line is
-already in place. Your own `window-status-format` edits are untouched. When the snippet belongs to a
-package manager it is read-only, and the run reports the path instead of writing it; upgrade the
-package. A tmux server already running keeps the hook values it read at `source-file` time, so the
+already in place. Your own `window-status-format` edits are untouched. A snippet that belongs to a
+package manager is read-only: one that already matches this version is simply reported as
+registered, and one that does not names both ways out - upgrade the package, or point the
+`source-file` line at a path of your own and run `register` again, which writes this version's
+snippet wherever that line points. A tmux server already running keeps the hook values it read at `source-file` time, so the
 new hooks and options only take effect on the next `source-file` or server restart.
 
 The tmux window status glyph rendering can be verified by setting a glyph by hand in tmux: `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.

@@ -1355,6 +1355,31 @@ impl TmuxPlan {
         planned
     }
 
+    /// What to say about a sourced snippet that is out of date and that this
+    /// run cannot write.
+    ///
+    /// The refusal on its own leaves the user where they started: the hooks
+    /// tmux runs are an older copy's, and "read-only" does not say what to do
+    /// about that. Both ways out are named, because which one is right depends
+    /// on who owns the file - a package manager's copy is upgraded through the
+    /// package, and a path of your own is rewritten by the next run.
+    ///
+    /// The second way is spelled as an edit to the source-file line rather than
+    /// as a flag, because that is what actually works: the line names the file
+    /// tmux reads, and this run writes whatever it names.
+    fn stale_and_unwritable(&self, snippet: &Path, error: &dyn fmt::Display) -> String {
+        indented(&format!(
+            "{error}\n\
+             It is also not the snippet this version ships, so the hooks tmux runs are the \
+             ones that copy sets.\n\
+             Either update whatever provides {}, or point the source-file line in {} at a \
+             path of your own and run this again: register writes this version's snippet \
+             wherever that line points.",
+            snippet.display(),
+            self.config.path().display()
+        ))
+    }
+
     /// The tmux config's bytes, or `None` when it cannot be read.
     ///
     /// Read rather than remembered, for the reason `Change::rebuild` exists:
@@ -1388,7 +1413,18 @@ impl TmuxPlan {
     ) -> Action {
         let seen = match write::inspect(&sourced.path, &write::Faults::from_env()) {
             Ok(seen) => seen,
-            Err(error) => return Action::Manual(indented(&error)),
+            // A copy we cannot write is only a problem if it is the wrong one.
+            // A package manager's copy that already matches this build is the
+            // ordinary, healthy case - tmux runs the right hooks either way -
+            // and reporting a read-only directory there would be a complaint
+            // about nothing.
+            Err(error) => {
+                let current = std::fs::read_to_string(&sourced.path).unwrap_or_default();
+                return match current == tmux_conf::SNIPPET {
+                    true => Action::AlreadyRegistered,
+                    false => Action::Manual(self.stale_and_unwritable(&sourced.path, &error)),
+                };
+            }
         };
         if seen.contents == tmux_conf::SNIPPET {
             // Nothing is written anywhere, so neither disclosure has anything
