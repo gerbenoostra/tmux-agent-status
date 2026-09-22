@@ -7,7 +7,7 @@ cloned it.
 ## What this tool is
 
 `tmux-agent-status` turns agent lifecycle events into one glyph on the tmux window entry. The hook
-commands (`set`, `reset`, `finish`, `clear-window`, `notify`) write two tmux options and ring the
+commands (`set`, `reset`, `finish`, `clear-pane`, `clear-window`, `notify`) write two tmux options and ring the
 terminal bell, and nothing else: they never touch a window name, never shell out to git, never write
 a state file, never edit any config file, and never spawn a daemon. The one exception is the
 `register` subcommand, which a human types and which writes config files under the safe-write
