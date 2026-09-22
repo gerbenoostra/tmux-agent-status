@@ -90,8 +90,7 @@ the fallback for switching windows and panes inside tmux when that option is off
 
 Therefore, focusing a pane drops that pane's `waiting`, `error` and `done`; `working` survives, as
 the agent is still running. Acknowledgement is scoped to the one pane that gained focus - a sibling
-pane that is merely visible keeps its state, whether it is on screen in a split or hidden behind
-another window.
+pane keeps its state, whether it is on screen in a split or hidden behind a zoomed pane.
 
 A turn that ends on the pane you are **already** focused on still paints its glyph and rings the
 bell: it stays until you type the next prompt, or move focus away and back. A turn that ends while
