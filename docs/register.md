@@ -134,10 +134,12 @@ the pane you land on, but returning to the terminal from elsewhere does not. To 
 `register` still owns and can rewrite the snippet itself, so an edit inside it may be undone or
 refused on the next run.
 
-If you are upgrading from a version that shipped only two hooks calling `clear-window`, re-run
-`tmux-agent-status register` (or re-source the snippet by hand) to pick up the three-hook,
-pane-scoped snippet and `focus-events on`; your own `window-status-format` edits are untouched. A
-tmux server already running keeps the hook values it read at `source-file` time, so the new hook and
-option only take effect on the next `source-file` or server restart.
+If you are upgrading, re-run `tmux-agent-status register`. It reads the snippet your config already
+sources, compares it to the one this version ships, and offers to replace it when the two differ -
+so an older copy still setting the previous hooks is found even though the `source-file` line is
+already in place. Your own `window-status-format` edits are untouched. When the snippet belongs to a
+package manager it is read-only, and the run reports the path instead of writing it; upgrade the
+package. A tmux server already running keeps the hook values it read at `source-file` time, so the
+new hooks and options only take effect on the next `source-file` or server restart.
 
 The tmux window status glyph rendering can be verified by setting a glyph by hand in tmux: `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.

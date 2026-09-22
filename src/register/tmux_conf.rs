@@ -173,10 +173,27 @@ fn beside(config: &Path, home: &Home) -> PathBuf {
 /// path: the location is the user's business, and a second source line is a
 /// second set of hooks.
 pub fn sources_snippet(text: &str) -> bool {
+    sourced_snippet(text).is_some()
+}
+
+/// The snippet file this config already sources, if it sources one.
+///
+/// The file tmux actually reads, which is the one an upgrade has to bring up to
+/// date - not the one `discover_snippet` would have picked, which is wherever
+/// this build's copy happens to sit. The two are different the moment the
+/// config sources a copy of its own, which is what every install route but a
+/// package manager leaves behind.
+///
+/// The last such line wins: the snippet only sets hooks and one option, and the
+/// last assignment of those is the one in force. The argument is expanded the
+/// way the walk expands it, so `~/` and a relative path resolve identically.
+pub fn sourced_snippet(text: &str) -> Option<PathBuf> {
     format::logical_lines(text)
         .iter()
+        .rev()
         .filter_map(|line| source_argument(&line.text))
-        .any(|path| Path::new(&path).file_name() == Some(SNIPPET_NAME.as_ref()))
+        .find(|path| Path::new(path).file_name() == Some(SNIPPET_NAME.as_ref()))
+        .and_then(|argument| expand(&argument).into_iter().next())
 }
 
 /// The path a `source`/`source-file` line names, if it is one.
@@ -532,6 +549,23 @@ mod tests {
         ] {
             assert!(!sources_snippet(line), "line {line:?}");
         }
+    }
+
+    #[test]
+    fn the_sourced_snippet_is_the_last_one_named_and_the_path_is_expanded() {
+        let home = std::env::var("HOME").expect("a home directory");
+        let text = "source-file /first/tmux-agent-status.conf\n\
+                    source-file ~/.tmux/tmux-agent-status.conf\n";
+        // The last one wins, for the same reason the last assignment does.
+        assert_eq!(
+            sourced_snippet(text),
+            Some(PathBuf::from(&home).join(".tmux/tmux-agent-status.conf"))
+        );
+        assert_eq!(
+            sourced_snippet("source-file /x/tmux-agent-status.conf\n"),
+            Some(PathBuf::from("/x/tmux-agent-status.conf"))
+        );
+        assert_eq!(sourced_snippet("set -g status on\n"), None);
     }
 
     #[test]
