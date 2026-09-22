@@ -53,14 +53,6 @@ pub struct Window {
 }
 
 impl Window {
-    /// Every pane holding a status.
-    pub fn panes_with_status(&self) -> impl Iterator<Item = &PaneId> {
-        self.panes
-            .iter()
-            .filter(|pane| pane.has_status)
-            .map(|pane| &pane.id)
-    }
-
     /// The addressed pane, if it holds a status.
     pub fn addressed_with_status(&self) -> Option<&PaneId> {
         self.panes
@@ -296,15 +288,6 @@ mod tests {
     fn a_value_with_tabs_is_still_a_status() {
         let window = parse_window("%0\n%0\twaiting\textra\n").unwrap();
         assert!(window.panes[0].has_status);
-    }
-
-    #[test]
-    fn panes_with_status_leaves_out_panes_without_one() {
-        let window = parse_window("%1\n%0\tdone\n%1\tdone\n%2\t\n").unwrap();
-        assert_eq!(
-            window.panes_with_status().collect::<Vec<_>>(),
-            [&id("%0"), &id("%1")]
-        );
     }
 
     #[test]

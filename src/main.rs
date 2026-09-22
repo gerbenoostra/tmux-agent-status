@@ -81,7 +81,6 @@ fn run() -> Result<ExitCode, MainError> {
         "start" => run_start(pargs),
         "reset" => run_reset(pargs),
         "finish" => run_finish(pargs),
-        "clear-window" => run_clear_window(pargs),
         "clear-pane" => run_clear_pane(pargs),
         "notify" => run_notify(pargs),
         "register" => run_register(pargs),
@@ -133,20 +132,7 @@ fn run_finish(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     Ok(run_hook(|| command::finish(pane), json))
 }
 
-fn run_clear_window(pargs: Arguments) -> Result<ExitCode, MainError> {
-    run_clear("clear-window", pargs, command::clear_window)
-}
-
-fn run_clear_pane(pargs: Arguments) -> Result<ExitCode, MainError> {
-    run_clear("clear-pane", pargs, command::clear_pane)
-}
-
-/// The shared argument shape of the two clearing commands.
-fn run_clear(
-    name: &str,
-    mut pargs: Arguments,
-    clear: impl FnOnce(Option<&str>) -> io::Result<()>,
-) -> Result<ExitCode, MainError> {
+fn run_clear_pane(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     // The pane is accepted as an optional positional argument because tmux
     // hooks pass `#{pane_id}`, which expands to "" when no pane is available.
     // `--pane ""` is treated as absent; a positional lets the same hook line
@@ -156,12 +142,12 @@ fn run_clear(
     let free = free_strings(pargs)?;
 
     if free.len() > 1 {
-        return Err(unexpected_arguments(name, free));
+        return Err(unexpected_arguments("clear-pane", free));
     }
 
     let positional = free.first().map(|s| s.as_str());
     let pane = pane_flag.as_deref().or(positional);
-    Ok(run_hook(|| clear(pane), json))
+    Ok(run_hook(|| command::clear_pane(pane), json))
 }
 
 fn run_notify(mut pargs: Arguments) -> Result<ExitCode, MainError> {
@@ -439,9 +425,6 @@ usage:
                               clear this pane's state and recompute the window
   tmux-agent-status finish [--pane <id>] [--json]
                               silently resolve this pane's session to done
-  tmux-agent-status clear-window [<pane>] [--pane <id>] [--json]
-                              clear the non-sticky states of every pane of that
-                              pane's window, defaulting to $TMUX_PANE
   tmux-agent-status clear-pane [<pane>] [--pane <id>] [--json]
                               clear the non-sticky state of that one pane,
                               defaulting to $TMUX_PANE

@@ -77,30 +77,6 @@ pub fn reset(pane: Option<&str>) -> io::Result<()> {
     tmux::run(&commands).map(drop)
 }
 
-/// `tmux-agent-status clear-window [<pane>]`: drop the non-sticky states of every
-/// pane of that pane's window, then recompute.
-///
-/// Every pane, not just the focused one. The shipped hooks call `clear-pane`
-/// instead, since a pane that is merely on screen has not been read; this
-/// window-wide command stays for configs that still call it.
-///
-/// The pane is an argument because tmux's `run-shell` does not put `TMUX_PANE`
-/// in a hook's environment - it does expand formats in the command, so a hook
-/// passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which is what a hand
-/// invocation from a pane has.
-pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
-    let Some(target) = tmux::resolve_pane(pane) else {
-        return Ok(());
-    };
-    let window = tmux::window(&target)?;
-    let mut commands: Vec<Cmd> = window
-        .panes_with_status()
-        .flat_map(|pane| write(pane, &formats::seen()))
-        .collect();
-    commands.extend(recompute(&window.pane));
-    tmux::run(&commands).map(drop)
-}
-
 /// `tmux-agent-status clear-pane [<pane>]`: drop the non-sticky state of that
 /// one pane, then recompute its window.
 ///
@@ -112,8 +88,12 @@ pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
 /// glyph a failed write left stale and keeps the command list non-empty.
 ///
 /// A hook can fire for a pane that has closed since: the read then fails and
-/// the hook wrapper turns that into a silent exit 0, as for `clear_window`.
-/// The pane is an argument for the reason `clear_window` documents.
+/// the hook wrapper turns that into a silent exit 0.
+///
+/// The pane is an argument because tmux's `run-shell` does not put `TMUX_PANE`
+/// in a hook's environment - it does expand formats in the command, so a hook
+/// passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which is what a hand
+/// invocation from a pane has.
 pub fn clear_pane(pane: Option<&str>) -> io::Result<()> {
     let Some(target) = tmux::resolve_pane(pane) else {
         return Ok(());

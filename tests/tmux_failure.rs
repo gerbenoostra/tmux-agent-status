@@ -112,7 +112,6 @@ fn boundary_commands_are_silent_when_reading_the_window_fails() {
         ["start"].as_slice(),
         ["reset"].as_slice(),
         ["finish"].as_slice(),
-        ["clear-window"].as_slice(),
         ["clear-pane"].as_slice(),
     ] {
         let out = run(args, &format!("{}:", dir.display()));
@@ -215,11 +214,7 @@ exit 1
 "#
         ),
     );
-    for args in [
-        ["clear-window", TMUX_PANE].as_slice(),
-        ["clear-pane", TMUX_PANE].as_slice(),
-        ["reset"].as_slice(),
-    ] {
+    for args in [["clear-pane", TMUX_PANE].as_slice(), ["reset"].as_slice()] {
         let out = run(args, &format!("{}:", dir.display()));
         assert_ok_and_silent(&out);
     }
@@ -238,7 +233,6 @@ fn disabled_runs_no_tmux_command() {
         ["set", "done"].as_slice(),
         ["reset"].as_slice(),
         ["finish"].as_slice(),
-        ["clear-window", TMUX_PANE].as_slice(),
         ["clear-pane", TMUX_PANE].as_slice(),
     ] {
         let out = run_disabled(args, &format!("{}:", dir.display()));

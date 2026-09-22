@@ -462,8 +462,6 @@ mod tests {
             );
             assert!(SNIPPET.contains(&line), "{hook}");
         }
-        // The window-wide command would acknowledge panes nobody focused.
-        assert!(!SNIPPET.contains("clear-window"));
     }
 
     #[test]

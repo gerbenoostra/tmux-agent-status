@@ -469,26 +469,6 @@ fn a_pane_with_no_state_reads_back_empty_while_the_window_has_one() {
 }
 
 #[test]
-fn clear_window_clears_every_pane_but_keeps_working() {
-    let server = Server::start();
-    let first = server.first_pane();
-    let second = server.split(&first);
-    let third = server.split(&first);
-    assert_ok(&server.agent_status(&first, &["set", "working"]));
-    assert_ok(&server.agent_status(&second, &["set", "done"]));
-    assert_ok(&server.agent_status(&third, &["set", "waiting"]));
-    assert_eq!(server.window_status(&first), "💬");
-
-    // Focusing the window clears the siblings too, not just the focused pane.
-    assert_ok(&server.agent_status(&first, &["clear-window"]));
-
-    let mut statuses = server.pane_statuses(&first);
-    statuses.sort();
-    assert_eq!(statuses, ["", "", "working"]);
-    assert_eq!(server.window_status(&first), "🤖");
-}
-
-#[test]
 fn clear_pane_clears_only_its_pane_and_leaves_a_sibling_alone() {
     let server = Server::start();
     let seen = server.first_pane();
@@ -679,7 +659,7 @@ fn clearing_the_last_state_unsets_the_window_option() {
     let pane = server.first_pane();
     assert_ok(&server.agent_status(&pane, &["set", "error"]));
 
-    assert_ok(&server.agent_status(&pane, &["clear-window"]));
+    assert_ok(&server.agent_status(&pane, &["clear-pane"]));
 
     assert_eq!(server.window_status(&pane), "");
     assert_eq!(server.format_term(&pane), "[]");
@@ -765,9 +745,6 @@ fn the_shipped_snippet_registers_the_option_and_all_three_hooks() {
     let window = server.tmux(&["show-hooks", "-gw"]);
     for hook in ["pane-focus-in[50]", "window-pane-changed[50]"] {
         assert!(window.contains(hook), "{hook}: {window}");
-    }
-    for hooks in [&global, &window] {
-        assert!(!hooks.contains("clear-window"), "{hooks}");
     }
 }
 
@@ -954,19 +931,6 @@ fn regaining_terminal_focus_clears_only_the_pane_the_client_landed_on() {
 }
 
 #[test]
-fn clear_window_takes_the_pane_as_an_argument() {
-    let server = Server::start();
-    let pane = server.first_pane();
-    let elsewhere = server.new_window("elsewhere");
-    assert_ok(&server.agent_status(&pane, &["set", "done"]));
-
-    // Addressed from a different pane entirely, the way a hook does it.
-    assert_ok(&server.agent_status(&elsewhere, &["clear-window", &pane]));
-
-    assert_eq!(server.window_status(&pane), "");
-}
-
-#[test]
 fn a_turn_ending_state_rings_the_bell_of_its_window() {
     let server = Server::start();
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
@@ -1036,8 +1000,6 @@ fn a_hook_outside_tmux_exits_zero_and_says_nothing() {
         ["set", "done"].as_slice(),
         ["reset"].as_slice(),
         ["finish"].as_slice(),
-        ["clear-window"].as_slice(),
-        ["clear-window", "%0"].as_slice(),
         ["clear-pane"].as_slice(),
         ["clear-pane", "%0"].as_slice(),
     ] {
@@ -1245,7 +1207,7 @@ fn a_cleared_option_is_unset_rather_than_empty() {
     let bare = server.new_window("no-agent-here");
     assert_ok(&server.agent_status(&pane, &["set", "error"]));
 
-    assert_ok(&server.agent_status(&pane, &["clear-window"]));
+    assert_ok(&server.agent_status(&pane, &["clear-pane"]));
 
     assert!(
         !server.pane_options(&pane).contains("@agent_pane_status"),
@@ -1259,7 +1221,7 @@ fn a_cleared_option_is_unset_rather_than_empty() {
     );
 
     // And a window this tool has never had anything to say about stays clean.
-    assert_ok(&server.agent_status(&bare, &["clear-window"]));
+    assert_ok(&server.agent_status(&bare, &["clear-pane"]));
     assert!(
         !server.window_options(&bare).contains("@agent_status"),
         "window options: {}",

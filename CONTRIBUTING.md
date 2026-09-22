@@ -60,8 +60,8 @@ subject of a bug. Read this section before changing behaviour.
   its `focus-events off` fallbacks, `session-window-changed` and
   `window-pane-changed`) acknowledges that pane; a sibling that is merely on
   screen, or a window tmux calls current on a detached session, is left
-  alone. The other clears are explicit events, not acknowledgement: `start`,
-  `reset` and a hand-called `clear-window`.
+  alone. The other clears are explicit events, not acknowledgement: `start`
+  and `reset`.
 - **`#W` does not expand inside a format modifier** such as
   `#{=/25/…:#W}` (observed on tmux 3.6); use `#{window_name}` there.
 
@@ -146,9 +146,8 @@ Your tmux is configured with three hooks, all calling `tmux-agent-status clear-p
 pane that gained focus, which clears that pane's non-sticky states (`working` survives) and
 recomputes the window glyph. `pane-focus-in` sees terminal focus and needs `focus-events on`;
 `session-window-changed` and `window-pane-changed` are the fallback for switching windows and panes
-when that option is off. `clear-window <pane>` remains available and clears every pane of the given
-pane's window, for a hand-pasted config that still calls it. The pane argument is optional and
-positional: the hooks pass `#{pane_id}`, which expands to an empty value when no pane is available.
+when that option is off. The pane argument is optional and positional: the hooks pass `#{pane_id}`,
+which expands to an empty value when no pane is available.
 For manual calls the pane resolves in this order: an explicit argument (`--pane` or the positional),
 `$TMUX_AGENT_STATUS_PANE`, `$TMUX_PANE`.
 
