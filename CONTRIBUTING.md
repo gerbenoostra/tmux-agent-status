@@ -58,9 +58,10 @@ subject of a bug. Read this section before changing behaviour.
   window being current or the session being attached - there is no
   "watched window" rule to refine. Only `pane-focus-in` firing for a pane (or
   its `focus-events off` fallbacks, `session-window-changed` and
-  `window-pane-changed`) clears that pane's non-sticky states; a sibling that
-  is merely on screen, or a window tmux calls current on a detached session,
-  is left alone.
+  `window-pane-changed`) acknowledges that pane; a sibling that is merely on
+  screen, or a window tmux calls current on a detached session, is left
+  alone. The other clears are explicit events, not acknowledgement: `start`,
+  `reset` and a hand-called `clear-window`.
 - **`#W` does not expand inside a format modifier** such as
   `#{=/25/…:#W}` (observed on tmux 3.6); use `#{window_name}` there.
 
