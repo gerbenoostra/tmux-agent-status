@@ -80,13 +80,14 @@ pub fn reset(pane: Option<&str>) -> io::Result<()> {
 /// `tmux-agent-status clear-window [<pane>]`: drop the non-sticky states of every
 /// pane of that pane's window, then recompute.
 ///
-/// Every pane, not just the focused one: all panes of a window are on screen
-/// together, so seeing the window is seeing them.
+/// Every pane, not just the focused one. The shipped hooks call `clear-pane`
+/// instead, since a pane that is merely on screen has not been read; this
+/// window-wide command stays for configs that still call it.
 ///
 /// The pane is an argument because tmux's `run-shell` does not put `TMUX_PANE`
-/// in a hook's environment - it does expand formats in the command, so the
-/// shipped hook passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which
-/// is what a hand invocation from a pane has.
+/// in a hook's environment - it does expand formats in the command, so a hook
+/// passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which is what a hand
+/// invocation from a pane has.
 pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
     let Some(target) = tmux::resolve_pane(pane) else {
         return Ok(());
