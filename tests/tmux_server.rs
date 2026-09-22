@@ -265,6 +265,28 @@ impl Server {
         host
     }
 
+    /// A three-servers-deep sandwich, so a pane on `self` sees real terminal
+    /// focus rather than just an active-pane change inside one server: a
+    /// level-0 detached server (`outer`) supplies the pty for a level-1
+    /// host's client, the host has a second window to switch to, and the
+    /// host's first window is the client attached to `self`. Switching the
+    /// host's window away and back drops and restores that client's
+    /// `focused` flag, forwarding `pane-focus-out`/`pane-focus-in` down onto
+    /// `self`'s attached pane - probed on tmux 3.6a by nesting exactly this
+    /// way. Both the host and `self` need `focus-events on` for the
+    /// forwarding to happen at all (probed on tmux 3.6a: with it off on
+    /// either server, the inner client's `focused` flag never moves); the
+    /// caller is responsible for `self`'s side (typically `source_snippet`).
+    /// `outer` is never attached to, which is what keeps its own client
+    /// permanently focused and makes it stand in for level 0.
+    fn nested_client(&self) -> (Server, Server) {
+        let host = self.attach();
+        host.new_window("elsewhere");
+        host.tmux(&["set-option", "-g", "focus-events", "on"]);
+        let outer = host.attach();
+        (host, outer)
+    }
+
     /// The documented format term, expanded for `target`.
     fn format_term(&self, target: &str) -> String {
         let expanded = self.tmux(&[
@@ -866,6 +888,69 @@ fn an_attach_clears_only_the_pane_it_lands_on() {
 #[test]
 fn an_attach_clears_only_the_pane_it_lands_on_with_focus_events_off() {
     attach_cycle_with_focus_events("off");
+}
+
+#[test]
+fn losing_and_regaining_terminal_focus_clears_the_pane_that_regained_it() {
+    // The actual reported defect: a background terminal tab, not just an
+    // active-pane change inside one server. The nested sandwich is what makes
+    // "the terminal loses focus" real rather than simulated.
+    let server = Server::start();
+    let inner = server.first_pane();
+    server.source_snippet();
+    // The client the sandwich attaches lands on `inner`, which fires its own
+    // `pane-focus-in` and spawns a hook run in the background; wait for that
+    // one to land before arranging the state under test, or it could race the
+    // assertions below.
+    server.put_status(&inner, "waiting");
+    let (host, _outer) = server.nested_client();
+    wait_for(|| server.pane_status(&inner), |status| status.is_empty());
+
+    // The host's window moves off the client attached to `server`: that
+    // client's terminal loses focus, and `pane-focus-out` reaches `inner`.
+    // Nothing acknowledges a pane on focus-out, so a state reported while the
+    // terminal is elsewhere is left for the user to find.
+    host.tmux(&["select-window", "-t", "t:1"]);
+    assert_ok(&server.agent_status(&inner, &["set", "done"]));
+    assert_eq!(server.pane_status(&inner), "done");
+
+    // The host's window returns: the client's terminal is focused again,
+    // `pane-focus-in` reaches `inner`, and only now is it acknowledged.
+    host.tmux(&["select-window", "-t", "t:0"]);
+    wait_for(|| server.pane_status(&inner), |status| status.is_empty());
+    wait_for(|| server.window_status(&inner), |status| status.is_empty());
+}
+
+#[test]
+fn regaining_terminal_focus_clears_only_the_pane_the_client_landed_on() {
+    // The pane that regains focus and its on-screen sibling, together: only
+    // the one the terminal focus actually returns to is acknowledged, and the
+    // window glyph is left to recompute from what the sibling still holds.
+    let server = Server::start();
+    let active = server.first_pane();
+    let sibling = server.split(&active);
+    server.source_snippet();
+    // As above: the sandwich's own attach lands on `active` and fires a
+    // background hook run first.
+    server.put_status(&active, "waiting");
+    let (host, _outer) = server.nested_client();
+    wait_for(|| server.pane_status(&active), |status| status.is_empty());
+
+    // `active` outranks `sibling` here, so the window glyph reflects `active`
+    // until it clears - the assertions below can only tell the recompute
+    // happened if the glyph actually changes when that clear lands.
+    assert_ok(&server.agent_status(&active, &["set", "waiting"]));
+    assert_ok(&server.agent_status(&sibling, &["set", "done"]));
+    assert_eq!(server.window_status(&active), "\u{1f4ac}");
+
+    host.tmux(&["select-window", "-t", "t:1"]);
+    host.tmux(&["select-window", "-t", "t:0"]);
+
+    wait_for(|| server.pane_status(&active), |status| status.is_empty());
+    // The sibling was never focused and keeps its state; the window glyph
+    // recomputes from it rather than vanishing with the active pane's.
+    assert_eq!(server.pane_status(&sibling), "done");
+    assert_eq!(server.window_status(&active), "\u{2705}");
 }
 
 #[test]
