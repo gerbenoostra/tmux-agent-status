@@ -10,7 +10,7 @@ Shape A agent: Claude Code reads hooks from a plugin's own directory or from `~/
 | start | `UserPromptSubmit` | `tmux-agent-status start` | a turn begins; replaces whatever the last turn left |
 | working | `PostToolUse` | `tmux-agent-status set working` |  |
 | done | `Stop` | `tmux-agent-status set done` | |
-| waiting | `Notification` (`permission_prompt\|elicitation_dialog\|elicitation_url_dialog\|agent_needs_input`), `PreToolUse` (`AskUserQuestion\|ExitPlanMode`) | `tmux-agent-status set waiting` | the types that mean blocked on you; see 013 |
+| waiting | `Notification` (`permission_prompt\|elicitation_dialog\|elicitation_url_dialog\|agent_needs_input`), `PreToolUse` (`AskUserQuestion\|ExitPlanMode`) | `tmux-agent-status set waiting` | the types that mean blocked on you; see [Quirks](#quirks) |
 | error | `StopFailure` | `tmux-agent-status set error` | a real turn-abort event, which most agents lack |
 | finish | `SessionEnd` | `tmux-agent-status finish` | resolves a lingering `working`, no bell |
 

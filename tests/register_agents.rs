@@ -6,7 +6,7 @@
 //! refuses, it is not there - are exactly the three a real CLI will not produce
 //! on demand. The one that matters is the middle one: a CLI that fails must
 //! fail the step and never quietly fall back to editing
-//! `~/.claude/settings.json`, which is the file 004 promises not to touch.
+//! `~/.claude/settings.json`, which the plugin route promises not to touch.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

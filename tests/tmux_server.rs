@@ -1084,7 +1084,7 @@ fn an_unknown_state_is_loud() {
 
 #[test]
 fn a_state_is_refused_if_it_ranks_lower_than_the_one_the_pane_holds() {
-    // The table 013 decides: within a pane `error` > `done` > `waiting` >
+    // The pane precedence: within a pane `error` > `done` > `waiting` >
     // `working`, and a value this tool does not recognise is replaced by any of
     // them. The glyph follows the pane, since it is the only pane here.
     let server = Server::start();
@@ -1128,7 +1128,7 @@ fn a_state_is_refused_if_it_ranks_lower_than_the_one_the_pane_holds() {
 
 #[test]
 fn a_sibling_report_cannot_lower_a_state_that_outranks_it() {
-    // The defect 013 fixes, as a race: an agent runs the hooks of one turn
+    // The race precedence exists for: an agent runs the hooks of one turn
     // concurrently, so the `working` of a tool that finished arrives while the
     // prompt of the tool that is blocked is still open.
     let server = Server::start();
@@ -1150,7 +1150,7 @@ fn a_sibling_report_cannot_lower_a_state_that_outranks_it() {
 
 #[test]
 fn the_window_shows_the_highest_ranked_state_of_its_panes() {
-    // The rollup rank is unchanged by 013 and is not the pane precedence:
+    // The rollup rank is not the pane precedence:
     // `waiting` > `error` > `done` > `working`, so a window holding one
     // finished and one blocked pane asks you to come to the blocked one.
     let server = Server::start();
@@ -1239,7 +1239,7 @@ fn a_cleared_option_is_unset_rather_than_empty() {
     // Every write is a format, and a format can only produce a value, so a
     // clear leaves an empty string behind unless it is normalised away. An
     // empty option would read the same through a format but show up in
-    // `show-options`, and 001 promises a window with no agent carries none.
+    // `show-options`, and a window with no agent must carry none.
     let server = Server::start();
     let pane = server.first_pane();
     let bare = server.new_window("no-agent-here");

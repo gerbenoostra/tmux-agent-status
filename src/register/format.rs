@@ -12,7 +12,7 @@
 
 use std::ops::Range;
 
-/// The term 001 and `docs/register.md` specify, and the only thing this module inserts.
+/// The term `docs/register.md` specifies, and the only thing this module inserts.
 pub const TERM: &str = "#{?@agent_status, #{@agent_status},}";
 
 /// The two options that must carry the term.
@@ -178,7 +178,7 @@ pub fn references_agent_status(value: &str) -> bool {
     false
 }
 
-/// Insert the term at the position 001 specifies.
+/// Insert the term at the position `docs/register.md` specifies.
 ///
 /// Immediately before the first `#{?window_flags`, which puts it after the
 /// name segment and outside any truncation; at the end of the value when there

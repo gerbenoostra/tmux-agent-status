@@ -155,7 +155,7 @@ fn manifest_and_agent_doc_watch_the_same_events() {
     assert_eq!(
         manifest.len(),
         EXPECTED_EVENTS,
-        "the hook set changed size; 001 decides which events are watched, so update it there first"
+        "the hook set changed size; update EXPECTED_EVENTS and the Supported states table together"
     );
 }
 

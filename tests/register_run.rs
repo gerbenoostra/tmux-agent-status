@@ -469,8 +469,8 @@ fn the_plugin_route_installs_and_leaves_settings_json_alone() {
         "{}",
         script.output()
     );
-    // 004's promise: the plugin writes its own bookkeeping, and we go nowhere
-    // near the file the user was told we would not touch.
+    // The plugin route's promise: the plugin writes its own bookkeeping, and
+    // we go nowhere near the file the user was told we would not touch.
     assert!(!dir.join(".claude/settings.json").exists());
 }
 

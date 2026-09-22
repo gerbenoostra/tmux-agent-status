@@ -1,9 +1,8 @@
 //! Config discovery and the config-order walk, against real files.
 //!
-//! The walk is what `011` calls its own defect: an early draft searched the
-//! main file and only descended into sourced ones if it found nothing, which
-//! gets the winner wrong whenever a fragment is sourced above a later
-//! assignment. tmux runs the commands in the order it meets them and the last
+//! The walk is where an early draft went wrong: it searched the main file and
+//! only descended into sourced ones if it found nothing, which gets the winner
+//! wrong whenever a fragment is sourced above a later assignment. tmux runs the commands in the order it meets them and the last
 //! assignment wins, so that is the order these tests assert.
 
 use std::fs;

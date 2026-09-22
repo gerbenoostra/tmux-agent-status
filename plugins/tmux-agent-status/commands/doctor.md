@@ -78,7 +78,7 @@ should call `tmux-agent-status clear-pane`.
   without `session-window-changed`, switching windows will not either; without `pane-focus-in`,
   returning terminal focus to tmux from another tab, desktop or monitor will not, however
   `focus-events` is set. The same `tmux-agent-status register --tmux-hook` repairs it.
-- `focus-events` not `on`: `pane-focus-in` still fires on the first client attach to a session (F9),
+- `focus-events` not `on`: `pane-focus-in` still fires on the first client attach to a session,
   but never again for a plain terminal-focus change - so returning to the terminal from another tab
   does not clear the pane you were looking at, even though the hook itself is present. The user adds
   `set -g focus-events on` to their tmux configuration, or re-runs `tmux-agent-status register

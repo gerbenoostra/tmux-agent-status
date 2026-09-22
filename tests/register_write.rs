@@ -1,9 +1,9 @@
 //! The safe write, against a real filesystem.
 //!
-//! This is the module `011` calls the deliverable, so these are the tests that
-//! matter most: every one of them is a way a config file could be lost, and the
-//! assertion is always the same - afterwards the user's file is either the one
-//! they had or the one they asked for, and never anything in between.
+//! This is the module `register` exists to get right, so these are the tests
+//! that matter most: every one of them is a way a config file could be lost,
+//! and the assertion is always the same - afterwards the user's file is either
+//! the one they had or the one they asked for, and never anything in between.
 
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
