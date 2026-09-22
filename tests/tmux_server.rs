@@ -839,8 +839,8 @@ fn without_focus_events_a_switch_still_clears_the_pane_it_lands_on() {
 /// Only the first attach fires `pane-focus-in` (probed on tmux 3.6a, in both
 /// modes and for a dying as well as a detached client): tmux keeps the pane
 /// flagged as focused across a detach, so a later attach finds nothing to
-/// announce. The second half therefore pins what the plan promises - nothing
-/// else moves - and not that the landing pane clears again.
+/// announce. The second half therefore pins only that nothing else moves, and
+/// not that the landing pane clears again.
 fn attach_cycle_with_focus_events(mode: &str) {
     let server = Server::start();
     let landing = server.first_pane();
