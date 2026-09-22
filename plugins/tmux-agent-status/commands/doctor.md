@@ -156,6 +156,6 @@ If every step passes and the user still sees no glyph, remember that a state is 
 on the pane the user is focused on; the likely cause is that something cleared it since. Focusing
 that pane - selecting it, switching to its window, or the terminal regaining focus while it is the
 active pane - drops `done`, `error` and `waiting`, and the next prompt replaces them with 🤖. When
-the bell path in step 4 passes, the terminal-side bell is the remaining signal. If that path does not pass, name its
-failing setting rather than claiming a signal could have reached the terminal or inventing a further
-check.
+the bell path in step 4 passes, the terminal-side bell is the remaining signal. If that path does
+not pass, name its failing setting rather than claiming a signal could have reached the terminal or
+inventing a further check.
