@@ -13,6 +13,7 @@ pub mod prompt;
 pub mod tmux_conf;
 pub mod write;
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 /// The comment that opens a block this tool manages.
@@ -455,6 +456,7 @@ fn worst(a: Outcome, b: Outcome) -> Outcome {
 fn ours_to_change() -> Vec<String> {
     let mut names: Vec<String> = format::OPTIONS.iter().map(|o| (*o).to_owned()).collect();
     names.extend(HOOKS.iter().map(|hook| (*hook).to_owned()));
+    names.push(FOCUS_EVENTS.to_owned());
     names
 }
 
@@ -467,14 +469,20 @@ fn ours_to_change() -> Vec<String> {
 /// anywhere. That is the worst outcome this module has, so the probe is asked
 /// for the other half directly.
 pub enum Landed {
-    /// The hook step: both hooks are registered afterwards, which is what says
-    /// the sourced snippet actually ran.
+    /// The hook step: every hook is registered afterwards, which is what says
+    /// the sourced snippet actually ran, and the snippet turns `focus-events`
+    /// on, because one that lands the hooks but not the option silently loses
+    /// the one hook that sees the terminal.
+    ///
+    /// The option is read from the snippet, not from tmux: a
+    /// `set -g focus-events off` after the source-file line is how a user
+    /// declines it, so tmux reading it as off is a choice as often as a fault.
     ///
     /// Only a snippet that exists and sets no hooks reaches this. One that is
     /// missing is refused earlier and better: tmux will not read a config that
     /// sources a file that is not there, so `probe::check` fails first and
     /// names the path it could not find.
-    Hooks,
+    Hooks { snippet: PathBuf },
     /// The format step: these options carry the term afterwards. Per option,
     /// because the two are written one at a time and the second has not been
     /// written yet when the first is checked.
@@ -485,16 +493,26 @@ impl Landed {
     /// Whether what this edit was for is in the dump tmux just gave us.
     fn found(&self, dumped: &probe::Dump) -> Result<(), String> {
         match self {
-            Landed::Hooks => match HOOKS
-                .iter()
-                .find(|hook| !dumped.any_value(hook, |set| set.contains(agents::COMMAND_PREFIX)))
-            {
-                None => Ok(()),
-                Some(missing) => Err(format!(
-                    "the source-file line landed, but tmux read the config back without the \
-                     {missing} hook: the file it points at does not set it."
-                )),
-            },
+            Landed::Hooks { snippet } => {
+                if let Some(missing) = HOOKS.iter().find(|hook| {
+                    !dumped.any_value(hook, |set| set.contains(agents::COMMAND_PREFIX))
+                }) {
+                    return Err(format!(
+                        "the config sources our snippet, but tmux read the config back without \
+                         the {missing} hook: the file it points at does not set it."
+                    ));
+                }
+                match std::fs::read_to_string(snippet)
+                    .is_ok_and(|text| tmux_conf::turns_on_focus_events(&text))
+                {
+                    true => Ok(()),
+                    false => Err(format!(
+                        "the config sources our snippet, but {} does not turn {FOCUS_EVENTS} \
+                         on, so pane-focus-in never sees the terminal regain focus.",
+                        snippet.display()
+                    )),
+                }
+            }
             // What is reported is what was observed. A later assignment is the
             // likeliest reason tmux does not read the term back, and it is not
             // the only one - a window-local `setw` at config-load time, a
@@ -652,6 +670,14 @@ fn ordering_notes(relative: &[String]) -> Vec<String> {
     }
 }
 
+/// A message indented under the step it belongs to, continuation lines included.
+///
+/// The steps print their refusals under a heading, and a message that indents
+/// only its first line reads as two entries rather than one.
+fn indented(message: &dyn fmt::Display) -> String {
+    format!("    {}", message.to_string().replace('\n', "\n    "))
+}
+
 /// What to say about a snippet path no tmux quoting can carry.
 ///
 /// A path holding both a `'` and one of the characters double quotes give a
@@ -666,12 +692,28 @@ fn unspellable(snippet: &Path) -> String {
     )
 }
 
-/// The two hooks the shipped snippet registers.
+/// The hooks the shipped snippet registers.
 ///
 /// Named here as well as in the snippet because this is the list the probe
 /// checks actually arrived: a `source-file` line pointing at something that
-/// sets neither of them is a line that does nothing.
-const HOOKS: [&str; 2] = ["session-window-changed", "window-pane-changed"];
+/// sets none of them is a line that does nothing.
+const HOOKS: [&str; 3] = [
+    "session-window-changed",
+    "window-pane-changed",
+    "pane-focus-in",
+];
+
+/// What the user is told about the one global option the snippet sets, because
+/// nothing else in it shows the user what the snippet contains. It carries the
+/// opt-out itself: the snippet is rewritten whole and verified on every run, so
+/// only a line in the user's own config, after the source-file line, survives.
+const FOCUS_EVENTS_NOTE: &str = "the snippet turns on the global tmux option focus-events, so \
+that returning to the terminal clears the focused pane; to decline it, add `set -g focus-events \
+off` to your own tmux config after the source-file line";
+
+/// The option the shipped snippet turns on: without it `pane-focus-in` fires on
+/// attach and never when the terminal regains focus.
+const FOCUS_EVENTS: &str = "focus-events";
 
 /// Run the whole thing.
 ///
@@ -1081,7 +1123,7 @@ fn plan_merge(agent: &'static agents::Agent, options: &Options) -> Action {
     let target = agent.target(&options.home);
     let seen = match write::inspect(&target, &write::Faults::from_env()) {
         Ok(seen) => seen,
-        Err(error) => return Action::Manual(format!("    {error}")),
+        Err(error) => return Action::Manual(indented(&error)),
     };
     match agent.merge(&seen.contents) {
         // Verified as a real setup: a user who copied the shipped drop-in by
@@ -1231,46 +1273,93 @@ impl TmuxPlan {
                 action: refusal,
             }];
         }
-        let snippet = tmux_conf::discover_snippet(
-            options.snippet.as_deref(),
-            options.exe.as_deref(),
-            self.config.path(),
-            &options.home,
-            options.prefix.as_deref(),
-        );
+        // The copy the config already sources is the one tmux reads, whatever
+        // this run would otherwise have discovered. An install route that left
+        // a copy of its own - which is every one but a package manager - leaves
+        // an upgrade nothing else to notice: the source-file line is already
+        // there, so without this the run reports the step done and the hooks
+        // stay the ones the old copy sets.
+        let installed = self
+            .contents()
+            .and_then(|text| tmux_conf::sourced_snippet(&text, &options.home));
+        let snippet = match &installed {
+            Some(Ok(sourced)) => tmux_conf::Choice::Existing(sourced.path.clone()),
+            // The line is there either way, so the source-file step only has
+            // to see that it is; the file it names is the snippet step's
+            // question.
+            Some(Err(_)) | None => tmux_conf::discover_snippet(
+                options.snippet.as_deref(),
+                options.exe.as_deref(),
+                self.config.path(),
+                &options.home,
+                options.prefix.as_deref(),
+            ),
+        };
         let mut planned = Vec::new();
+        // The option is said once: by the snippet step when this run writes the
+        // snippet, and by the source-file step when it points at one that
+        // exists. A config that already sources one never reaches the second
+        // half of that sentence: the line is there, so the source-file step
+        // says nothing either way.
+        let disclosed = matches!(snippet, tmux_conf::Choice::Create(_));
 
         // The snippet first: a source-file line pointing at nothing is worse
         // than no line at all.
-        if let tmux_conf::Choice::Create(path) = &snippet {
-            planned.push(Planned {
+        match &installed {
+            Some(Ok(sourced)) => planned.push(Planned {
                 step: Step::TmuxHook,
                 what: "the tmux snippet".to_owned(),
-                // Inspected like every other target, so that somewhere we
-                // cannot write is handed back while nothing has been written,
-                // rather than failing halfway through the step.
-                action: match write::inspect(path, &write::Faults::from_env()) {
-                    Err(error) => Action::Manual(format!("    {error}")),
-                    Ok(seen) => Action::Write(Box::new(Change {
+                action: self.plan_installed_snippet(sourced, options.snippet.as_deref()),
+            }),
+            Some(Err(argument)) => planned.push(Planned {
+                step: Step::TmuxHook,
+                what: "the tmux snippet".to_owned(),
+                action: Action::Manual(indented(&format!(
+                    "the source-file line in {} names {argument}, and a variable in it has no \
+                     value here, so the file tmux reads is not known to this run.\n\
+                     tmux expands it from the environment its server started with. Check that \
+                     file is this version's snippet, or spell the path out and run this again.",
+                    self.config.path().display()
+                ))),
+            }),
+            None => {
+                if let tmux_conf::Choice::Create(path) = &snippet {
+                    planned.push(Planned {
+                        step: Step::TmuxHook,
                         what: "the tmux snippet".to_owned(),
-                        preview: tmux_conf::SNIPPET.to_owned(),
-                        rebuild: Rebuild::Whole(tmux_conf::SNIPPET.to_owned()),
-                        parses: not_empty,
-                        creating: !seen.exists,
-                        notes: vec!["no shipped copy was found, so one is written here".to_owned()],
-                        verify: None,
-                        path: seen.resolved,
-                        announced: false,
-                    })),
-                },
-            });
+                        // Inspected like every other target, so that somewhere we
+                        // cannot write is handed back while nothing has been written,
+                        // rather than failing halfway through the step.
+                        action: match write::inspect(path, &write::Faults::from_env()) {
+                            Err(error) => Action::Manual(indented(&error)),
+                            Ok(seen) => Action::Write(Box::new(Change {
+                                what: "the tmux snippet".to_owned(),
+                                preview: tmux_conf::SNIPPET.to_owned(),
+                                rebuild: Rebuild::Whole(tmux_conf::SNIPPET.to_owned()),
+                                parses: not_empty,
+                                creating: !seen.exists,
+                                notes: vec![
+                                    "no shipped copy was found, so one is written here".to_owned(),
+                                    FOCUS_EVENTS_NOTE.to_owned(),
+                                ],
+                                verify: None,
+                                path: seen.resolved,
+                                announced: false,
+                            })),
+                        },
+                    });
+                }
+            }
         }
 
         // A source-file line pointing at nothing is worse than no line at all,
         // so the line only goes in if the thing it points at will be there.
-        let snippet_refused = planned
-            .iter()
-            .any(|item| matches!(item.action, Action::Manual(_)));
+        // A config that already sources one is past that question: the line is
+        // there, whatever this run could or could not do to the file it names.
+        let snippet_refused = installed.is_none()
+            && planned
+                .iter()
+                .any(|item| matches!(item.action, Action::Manual(_)));
         planned.push(Planned {
             step: Step::TmuxHook,
             what: Step::TmuxHook.title().to_owned(),
@@ -1280,16 +1369,129 @@ impl TmuxPlan {
                      at could not be written."
                         .to_owned(),
                 ),
-                false => self.plan_source_line(snippet.path()),
+                false => self.plan_source_line(snippet.path(), disclosed),
             },
         });
         planned
     }
 
-    fn plan_source_line(&self, snippet: &Path) -> Action {
+    /// What to say about a sourced snippet that is out of date and that this
+    /// run cannot write.
+    ///
+    /// The refusal on its own leaves the user where they started: the hooks
+    /// tmux runs are an older copy's, and "read-only" does not say what to do
+    /// about that. Both ways out are named, because which one is right depends
+    /// on who owns the file - a package manager's copy is upgraded through the
+    /// package, and a path of your own is rewritten by the next run.
+    ///
+    /// The second way is spelled as an edit to the source-file line rather than
+    /// as a flag, because that is what actually works: the line names the file
+    /// tmux reads, and this run writes whatever it names.
+    fn stale_and_unwritable(&self, snippet: &Path, error: &dyn fmt::Display) -> String {
+        indented(&format!(
+            "{error}\n\
+             It is also not the snippet this version ships, so the hooks tmux runs are the \
+             ones that copy sets.\n\
+             Either update whatever provides {}, or point the source-file line in {} at a \
+             path of your own and run this again: register writes this version's snippet \
+             wherever that line points.",
+            snippet.display(),
+            self.config.path().display()
+        ))
+    }
+
+    /// The tmux config's bytes, or `None` when it cannot be read.
+    ///
+    /// Read rather than remembered, for the reason `Change::rebuild` exists:
+    /// the file is the only thing that knows what is in it.
+    fn contents(&self) -> Option<String> {
+        write::inspect(self.config.path(), &write::Faults::from_env())
+            .ok()
+            .map(|seen| seen.contents)
+    }
+
+    /// Bring the snippet the config already sources up to this version.
+    ///
+    /// The whole file is ours, so the comparison is the whole file: anything
+    /// but our exact bytes is an older copy, a hand-edited one, or one from an
+    /// install route that ships something else - and all three answer the same
+    /// question, which is whether the hooks tmux runs are the hooks this build
+    /// means to register. Identical bytes are the common case and ask nothing.
+    ///
+    /// A copy a package manager owns is read-only, so `inspect` refuses it and
+    /// names the path; that is the whole of the report the user needs, because
+    /// the fix is to upgrade the package rather than to write over its store.
+    ///
+    /// Two things about the path itself are said out loud rather than assumed,
+    /// because both mean the file written may not be the file the user had in
+    /// mind: a `--snippet` naming somewhere else, and an argument tmux resolved
+    /// against a working directory this process cannot know.
+    fn plan_installed_snippet(
+        &self,
+        sourced: &tmux_conf::Sourced,
+        explicit: Option<&Path>,
+    ) -> Action {
+        let seen = match write::inspect(&sourced.path, &write::Faults::from_env()) {
+            Ok(seen) => seen,
+            // A copy we cannot write is only a problem if it is the wrong one.
+            // A package manager's copy that already matches this build is the
+            // ordinary, healthy case - tmux runs the right hooks either way -
+            // and reporting a read-only directory there would be a complaint
+            // about nothing.
+            Err(error) => {
+                let current = std::fs::read_to_string(&sourced.path).unwrap_or_default();
+                return match current == tmux_conf::SNIPPET {
+                    true => Action::AlreadyRegistered,
+                    false => Action::Manual(self.stale_and_unwritable(&sourced.path, &error)),
+                };
+            }
+        };
+        if seen.contents == tmux_conf::SNIPPET {
+            // Nothing is written anywhere, so neither disclosure has anything
+            // to be about: the file tmux reads is already this version's.
+            return Action::AlreadyRegistered;
+        }
+        let mut notes = vec![
+            "the copy this config sources is not the one this version ships, so it is \
+             replaced whole; your own tmux config is untouched"
+                .to_owned(),
+        ];
+        if let Some(explicit) = explicit.filter(|path| *path != sourced.path) {
+            notes.push(format!(
+                "--snippet names {}, but this config sources {}, which is the file tmux \
+                 reads and so the one replaced",
+                explicit.display(),
+                sourced.path.display()
+            ));
+        }
+        if sourced.relative {
+            notes.push(format!(
+                "the source-file line names a relative path, which tmux resolves against the \
+                 directory its server was started in; this run resolved it against $HOME, to \
+                 {}, and a server started elsewhere reads a different file",
+                sourced.path.display()
+            ));
+        }
+        notes.push(FOCUS_EVENTS_NOTE.to_owned());
+        Action::Write(Box::new(Change {
+            what: "the tmux snippet".to_owned(),
+            preview: tmux_conf::SNIPPET.to_owned(),
+            rebuild: Rebuild::Whole(tmux_conf::SNIPPET.to_owned()),
+            parses: not_empty,
+            creating: !seen.exists,
+            notes,
+            verify: self.verification(Landed::Hooks {
+                snippet: sourced.path.clone(),
+            }),
+            path: seen.resolved,
+            announced: false,
+        }))
+    }
+
+    fn plan_source_line(&self, snippet: &Path, disclosed: bool) -> Action {
         let seen = match write::inspect(self.config.path(), &write::Faults::from_env()) {
             Ok(seen) => seen,
-            Err(error) => return Action::Manual(format!("    {error}")),
+            Err(error) => return Action::Manual(indented(&error)),
         };
         if tmux_conf::sources_snippet(&seen.contents) {
             return Action::AlreadyRegistered;
@@ -1306,8 +1508,13 @@ impl TmuxPlan {
             rebuild: Rebuild::SourceBlock(snippet.to_path_buf()),
             parses: not_empty,
             creating: !seen.exists,
-            notes: Vec::new(),
-            verify: self.verification(Landed::Hooks),
+            notes: match disclosed {
+                true => Vec::new(),
+                false => vec![FOCUS_EVENTS_NOTE.to_owned()],
+            },
+            verify: self.verification(Landed::Hooks {
+                snippet: snippet.to_path_buf(),
+            }),
             path: seen.resolved,
             announced: false,
         }))
@@ -1395,7 +1602,7 @@ impl TmuxPlan {
         };
         let seen = match write::inspect(self.config.path(), &write::Faults::from_env()) {
             Ok(seen) => seen,
-            Err(error) => return self.manual_term(&format!("    {error}")),
+            Err(error) => return self.manual_term(&indented(&error)),
         };
         Action::Write(Box::new(Change {
             what: format!("the term in {option}"),
@@ -1461,7 +1668,7 @@ impl TmuxPlan {
         // reports rather than editing a loser.
         let seen = match write::inspect(&last.file, &write::Faults::from_env()) {
             Ok(seen) => seen,
-            Err(error) => return self.manual_term(&format!("    {error}")),
+            Err(error) => return self.manual_term(&indented(&error)),
         };
 
         // The full before/after, shown once, right where the edit question is
@@ -1526,7 +1733,7 @@ impl TmuxPlan {
         };
         let seen = match write::inspect(self.config.path(), &write::Faults::from_env()) {
             Ok(seen) => seen,
-            Err(error) => return self.manual_term(&format!("    {error}")),
+            Err(error) => return self.manual_term(&indented(&error)),
         };
         Action::Write(Box::new(Change {
             what: Step::TmuxFormat.title().to_owned(),
@@ -1941,12 +2148,17 @@ mod tests {
         for option in format::OPTIONS {
             assert!(ours.contains(&option.to_owned()), "{option}");
         }
-        for hook in ["session-window-changed", "window-pane-changed"] {
+        for hook in [
+            "session-window-changed",
+            "window-pane-changed",
+            "pane-focus-in",
+        ] {
             assert!(ours.contains(&hook.to_owned()), "{hook}");
         }
+        assert!(ours.contains(&"focus-events".to_owned()));
         // And nothing else, because anything else moving is the tell that tmux
         // abandoned the config.
-        assert_eq!(ours.len(), 4);
+        assert_eq!(ours.len(), 6);
     }
 
     #[test]

@@ -60,6 +60,10 @@ impl Dump {
         for args in [
             ["show-options", "-g"],
             ["show-options", "-gw"],
+            // `focus-events` is a server option, which neither of the above
+            // lists (verified on 3.6a: only `-s` does, though `-gv` asks for
+            // it by name).
+            ["show-options", "-s"],
             ["show-hooks", "-g"],
             ["show-hooks", "-gw"],
         ] {
@@ -462,7 +466,7 @@ mod tests {
         // an unset hook's empty value as the answer for the set one below it.
         let dump = dump_of(&[
             "session-window-changed",
-            "session-window-changed[50] run-shell -b \"tmux-agent-status clear-window\"",
+            "session-window-changed[50] run-shell -b \"tmux-agent-status clear-pane\"",
             "window-status-format \"#I:#W\"",
         ]);
         assert!(dump.any_value("session-window-changed", |set| {

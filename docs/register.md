@@ -120,10 +120,28 @@ To verify the tool is installed and on your path:
 tmux-agent-status --version
 ```
 
-The tmux hooks can be confirmed with:
+The tmux hooks and the `focus-events` option can be confirmed with:
 ```sh
 tmux show-hooks -g | grep tmux-agent-status    # session-window-changed
-tmux show-hooks -gw | grep tmux-agent-status   # window-pane-changed
+tmux show-hooks -gw | grep tmux-agent-status   # pane-focus-in, window-pane-changed
+tmux show-options -g focus-events              # on
 ```
+
+`focus-events on` is what lets `pane-focus-in` fire when your terminal regains focus after showing
+another tab, desktop or monitor - without it, switching windows or panes inside tmux still clears
+the pane you land on, but returning to the terminal from elsewhere does not. To decline it, add
+`set -g focus-events off` to your own tmux config, after the line that sources the shipped snippet;
+`register` still owns and can rewrite the snippet itself, so an edit inside it may be undone or
+refused on the next run.
+
+If you are upgrading, re-run `tmux-agent-status register`. It reads the snippet your config already
+sources, compares it to the one this version ships, and offers to replace it when the two differ -
+so an older copy still setting the previous hooks is found even though the `source-file` line is
+already in place. Your own `window-status-format` edits are untouched. A snippet that belongs to a
+package manager is read-only: one that already matches this version is simply reported as
+registered, and one that does not names both ways out - upgrade the package, or point the
+`source-file` line at a path of your own and run `register` again, which writes this version's
+snippet wherever that line points. A tmux server already running keeps the hook values it read at `source-file` time, so the
+new hooks and options only take effect on the next `source-file` or server restart.
 
 The tmux window status glyph rendering can be verified by setting a glyph by hand in tmux: `tmux set-option -w @agent_status ✅`, then `tmux set-option -w -u @agent_status`.

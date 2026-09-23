@@ -53,17 +53,13 @@ pub struct Window {
 }
 
 impl Window {
-    /// Every pane holding a status.
-    pub fn panes_with_status(&self) -> impl Iterator<Item = &PaneId> {
+    /// The addressed pane, if it holds a status.
+    pub fn addressed_with_status(&self) -> Option<&PaneId> {
         self.panes
             .iter()
+            .find(|pane| pane.id == self.pane)
             .filter(|pane| pane.has_status)
             .map(|pane| &pane.id)
-    }
-
-    /// The panes other than the addressed one holding a status.
-    pub fn siblings_with_status(&self) -> impl Iterator<Item = &PaneId> {
-        self.panes_with_status().filter(|id| **id != self.pane)
     }
 }
 
@@ -295,16 +291,11 @@ mod tests {
     }
 
     #[test]
-    fn siblings_leave_out_the_addressed_pane_and_panes_without_a_status() {
-        let window = parse_window("%1\n%0\tdone\n%1\tdone\n%2\t\n").unwrap();
-        assert_eq!(
-            window.panes_with_status().collect::<Vec<_>>(),
-            [&id("%0"), &id("%1")]
-        );
-        assert_eq!(
-            window.siblings_with_status().collect::<Vec<_>>(),
-            [&id("%0")]
-        );
+    fn addressed_with_status_is_the_addressed_pane_only_and_only_with_a_status() {
+        let window = parse_window("%1\n%0\tdone\n%1\twaiting\n").unwrap();
+        assert_eq!(window.addressed_with_status(), Some(&id("%1")));
+        let window = parse_window("%1\n%0\tdone\n%1\t\n").unwrap();
+        assert_eq!(window.addressed_with_status(), None);
     }
 
     #[test]

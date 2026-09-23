@@ -53,11 +53,15 @@ subject of a bug. Read this section before changing behaviour.
   wants you most. `start` is the only write that does not defer to what the
   pane holds - typing a prompt is seeing the pane, so that event clears what
   the last turn left.
-- **Watched means `window_active` *and* `session_attached`.** tmux calls a
-  detached session's current window active, but nobody is looking at it, so a
-  turn that ends while the client is away must leave its glyph for the next
-  attach. Unreadable flags conservatively mean "not watched" rather than
-  dropping the event.
+- **Acknowledgement is a focus event on one pane, never an inference.** A
+  state is always written and always shown, whatever tmux thinks about the
+  window being current or the session being attached - there is no
+  "watched window" rule to refine. Only `pane-focus-in` firing for a pane (or
+  its `focus-events off` fallbacks, `session-window-changed` and
+  `window-pane-changed`) acknowledges that pane; a sibling that is merely on
+  screen, or a window tmux calls current on a detached session, is left
+  alone. The other clears are explicit events, not acknowledgement: `start`
+  and `reset`.
 - **`#W` does not expand inside a format modifier** such as
   `#{=/25/…:#W}` (observed on tmux 3.6); use `#{window_name}` there.
 
@@ -138,9 +142,12 @@ directory, normally `~/.cargo/bin`. It must be rerun after every edit and can st
 installation.
 
 ## Debugging tmux hooks
-Your tmux is configured with two tmux hooks, both calling `tmux-agent-status clear-window <pane>`,
-which clears the window's non-sticky states (`working` survives). The pane argument is optional and
-positional: the hooks pass `#{pane_id}`, which expands to an empty value when no pane is available.
+Your tmux is configured with three hooks, all calling `tmux-agent-status clear-pane <pane>` for the
+pane that gained focus, which clears that pane's non-sticky states (`working` survives) and
+recomputes the window glyph. `pane-focus-in` sees terminal focus and needs `focus-events on`;
+`session-window-changed` and `window-pane-changed` are the fallback for switching windows and panes
+when that option is off. The pane argument is optional and positional: the hooks pass `#{pane_id}`,
+which expands to an empty value when no pane is available.
 For manual calls the pane resolves in this order: an explicit argument (`--pane` or the positional),
 `$TMUX_AGENT_STATUS_PANE`, `$TMUX_PANE`.
 
@@ -176,7 +183,7 @@ symlink:
 3. Install the resulting package or release binary using one of the documented installation routes.
 4. Confirm `tmux-agent-status --version` resolves to that installed binary.
 5. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
-6. Confirm each state reaches `@agent_status` and that focusing its window clears non-sticky states.
+6. Confirm each state reaches `@agent_status` and that focusing its pane clears non-sticky states.
 
 For Nix, the checkout itself can be tested without changing another configuration:
 

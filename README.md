@@ -18,17 +18,17 @@ The following agent states are distinguished:
 | State | Glyph | Means | Clears when |
 | --- | --- | --- | --- |
 | `working` | 🤖 | a turn is in flight | the next event on that pane |
-| `done` | ✅ | the turn ended cleanly | you look at the window |
-| `error` | ❗ | the turn aborted: API error, context overflow, unparseable tool call | you look at the window |
-| `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, an idle nag while it is still blocked | you look at the window |
+| `done` | ✅ | the turn ended cleanly | you focus that pane |
+| `error` | ❗ | the turn aborted: API error, context overflow, unparseable tool call | you focus that pane |
+| `waiting` | 💬 | blocked on you: permission prompt, plan mode, a question, an idle nag while it is still blocked | you focus that pane |
 
 If one window contains multiple agents, the most demanding status is shown: `waiting` > `error` > `done` > `working`.
 
 An agent runs several things at once, so its events arrive interleaved. Within one pane the glyph
 keeps the most important state you have not seen yet, `error` > `done` > `waiting` > `working`, and
-ignores a lower one until you look at the window or type the next prompt. A tool call finishing in
+ignores a lower one until you focus that pane or type the next prompt. A tool call finishing in
 parallel cannot hide an open permission prompt. The flip side: if the agent asks for something after
-a turn you have not looked at, the entry keeps its ✅, but the bell still rings.
+a turn you have not acknowledged, the entry keeps its ✅, but the bell still rings.
 
 For windows with no agent this tool is a no-op.
 
@@ -69,7 +69,10 @@ The flow is:
 2. It writes a tmux option per pane indicating the agent status (`error`, `done`, `waiting`, or `working`)
 3. All pane states are summarized into a single single glyph on the window (`error` > `done` > `waiting` > `working`)
 4. It rings the terminal bell on any states that ends a turn (`done`, `error`, `waiting`).
-5. When you switch to the tmux window, the non-sticky pane states are reset (only `working` stays).
+5. A state is always written and always shown, whatever tmux thinks about the window being current
+   or the session being attached.
+6. When a pane gains focus, its non-sticky state is reset (only `working` stays), and the window
+   glyph is recomputed from what its other panes still hold.
 
 We use two tmux options, separating status from final glyph:
 
@@ -79,22 +82,22 @@ We use two tmux options, separating status from final glyph:
 
 They have different names, as tmux option inheritance uses the window properties as fallback for pane properties.
 
-To clear the status, we use two tmux hooks, both calling `tmux-agent-status clear-window <pane>`, as can be seen in [`share/tmux/tmux-agent-status.conf`](./share/tmux/tmux-agent-status.conf).
+To clear the status, we use three tmux hooks, all calling `tmux-agent-status clear-pane <pane>` for
+the pane that gained focus, as can be seen in
+[`share/tmux/tmux-agent-status.conf`](./share/tmux/tmux-agent-status.conf): `pane-focus-in` sees
+terminal focus and needs `focus-events on`; `session-window-changed` and `window-pane-changed` are
+the fallback for switching windows and panes inside tmux when that option is off.
 
-Therefore, switching to a window, or to another pane inside it, drops that window's `waiting`, `error` and `done`;
-`working` survives, as the agent is still running.
+Therefore, focusing a pane drops that pane's `waiting`, `error` and `done`; `working` survives, as
+the agent is still running. Acknowledgement is scoped to the one pane that gained focus - a sibling
+pane keeps its state, whether it is on screen in a split or hidden behind a zoomed pane.
 
-A turn that ends on the window you are **already** watching is cleared on the spot: the bell rings and no glyph appears.
-
-Watched means the window is the current window of a session with a client attached. So a turn that
-ends while you are **detached** keeps its glyph: re-attaching does not clear it, and it is still on
-the window entry when you get back, until you switch window or pane. That makes the glyph the one
-signal that survives a reconnect, where the bell had nobody to reach.
-
-A terminal window sitting behind another tab, desktop or monitor is the case tmux cannot see: the
-client is attached, so tmux says you are watching, and the glyph is cleared on the spot. There the
-bell is your only signal, and it reaches you only with `bell-action any`
-(see [the bell settings](docs/register.md#optional-bell-settings) and [known limits](#known-limits)).
+A turn that ends on the pane you are **already** focused on still paints its glyph and rings the
+bell: it stays until you type the next prompt, or move focus away and back. A turn that ends while
+you are **detached**, or while your terminal is showing another tab, keeps its glyph until you focus
+that pane again, which makes the glyph the signal that survives a reconnect - except for the pane
+you land on: the first client attach to a session fires focus for that one pane, clearing it too (a
+later re-attach clears nothing, on that pane or any other).
 
 ## Interoperability
 
@@ -118,14 +121,16 @@ This can be useful for CI, demo recordings, nested test sessions, or any environ
 - An agent that dies without firing `Stop` or a session-end event keeps 🤖 until the next agent
   starts in that pane. We're planning a future `stale` 💤 state that decays from `working` after a
   timeout.
-- A **zoomed** pane's siblings are hidden, but tmux still calls the whole window watched: their
-  states clear when you look at the window, and a turn ending in a hidden sibling while you watch
-  leaves no glyph. The bell is all you get, and only with `bell-action any`.
-- The same goes for a terminal window behind another tab, desktop or monitor: the client is
-  attached, so tmux says you are looking. We're planning to read the client's focus flag so those
-  keep their glyph, which will need `focus-events on` in your tmux config.
-- Creating, splitting or closing a pane counts as looking at that window, so it clears the window's
-  non-sticky states.
+- With `focus-events off`, switching window or pane still clears the pane you land on, but returning
+  terminal focus (from another tab, desktop or monitor) does not - that needs `focus-events on`,
+  which the shipped snippet turns on for you.
+- A visible sibling pane, in a split or a zoomed pane's hidden siblings, keeps its state until you
+  select it yourself; being on screen is not the same as being focused.
+- The first client attach to a session clears the pane it lands on; every later re-attach clears
+  nothing, on that pane or any other.
+- Focus on any client attached to a session acknowledges the pane for everyone attached to it. Two
+  people sharing a session acknowledge each other's states - this tool assumes one person per
+  session.
 - Only agents that can push lifecycle events get a glyph at all. An absent glyph means "no signal".
 
 ## Development

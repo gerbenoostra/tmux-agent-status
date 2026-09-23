@@ -57,23 +57,34 @@ Also run `command -v tmux-agent-status`.
   behaviour.
 
 **2. The tmux snippet.**
-Two hooks, in **two different scopes** - checking only one scope is the easy mistake here:
+Three hooks, in **two different scopes**, plus one global option - checking only one scope is the
+easy mistake here:
 
 ```sh
-tmux show-hooks -g     # expect session-window-changed
-tmux show-hooks -gw    # expect window-pane-changed
+tmux show-hooks -g              # expect session-window-changed
+tmux show-hooks -gw             # expect pane-focus-in, window-pane-changed
+tmux show-options -g focus-events    # expect on
 ```
 
-Both lists are short; read them and find the `tmux-agent-status` entries yourself. Both should call
-`tmux-agent-status clear-window`.
+Both hook lists are short; read them and find the `tmux-agent-status` entries yourself. All three
+should call `tmux-agent-status clear-pane`.
 
-- Neither present: the snippet is not sourced. The user adds
+- None of the three hooks present: the snippet is not sourced. The user adds
   `source-file <path>/tmux-agent-status.conf` to their tmux configuration and reloads, or runs
   `tmux-agent-status register --tmux-hook`, which finds the snippet, adds that line and offers to
   reload. Suggest `--dry-run` first if they want to read the plan.
-- Only one present: report which is missing. Without `window-pane-changed`, switching panes inside
-  a window will not clear its `done`/`error`/`waiting`; without `session-window-changed`, switching
-  windows will not either. The same `tmux-agent-status register --tmux-hook` repairs it.
+- Some hooks present but not all: report which is missing and what it costs. Without
+  `window-pane-changed`, switching panes inside a window will not clear the pane you land on;
+  without `session-window-changed`, switching windows will not either; without `pane-focus-in`,
+  returning terminal focus to tmux from another tab, desktop or monitor will not, whatever
+  `focus-events` is set to. The same `tmux-agent-status register --tmux-hook` repairs it.
+- `focus-events` not `on`: `pane-focus-in` still fires on the first client attach to a session,
+  but never again for a plain terminal-focus change - so returning to the terminal from another tab
+  does not clear the pane you were looking at, even though the hook itself is present. A
+  `set -g focus-events off` in the user's own config, after the source-file line, is the documented
+  way to decline it: name that cost and leave it. Otherwise the snippet did not set it, and
+  re-running `tmux-agent-status register --tmux-hook` repairs it, since the shipped snippet sets
+  the option and `register` verifies that it does.
 
 **3. The format term.**
 `tmux show-options -g window-status-format` and `tmux show-options -g window-status-current-format`.
@@ -143,8 +154,10 @@ them together, rather than repeating the two single-step commands. Finish with w
 ✅ when it ends, ❗ on an aborted turn, 💬 when the agent is blocked on the user - and that a window
 with no agent renders exactly as it did before.
 
-If every step passes and the user still sees no glyph, the likely cause is that the turn ended on
-the window they were already watching: that state is cleared on the spot by design. When the bell
-path in step 4 passes, the terminal-side bell is the remaining signal. If that path does not pass,
-name its failing setting rather than claiming a signal could have reached the terminal or inventing
-a further check.
+If every step passes and the user still sees no glyph, remember that a state is always painted, even
+on the pane the user is focused on; the likely cause is that something cleared it since. Focusing
+that pane - selecting it, switching to its window, or the terminal regaining focus while it is the
+active pane - drops `done`, `error` and `waiting`, and the next prompt replaces them with 🤖. When
+the bell path in step 4 passes, the terminal-side bell is the remaining signal. If that path does
+not pass, name its failing setting rather than claiming a signal could have reached the terminal or
+inventing a further check.

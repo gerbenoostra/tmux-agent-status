@@ -128,7 +128,7 @@ fn wait_for(read: impl Fn() -> String, done: impl Fn(&str) -> bool) -> String {
 }
 
 // 29. A config with a known format, registered into, then actually loaded: the
-// term is in both options, both hooks are registered, and a hand-set
+// term is in both options, every hook and `focus-events` are registered, and a hand-set
 // `@agent_status` renders in the window entry.
 #[test]
 fn a_registered_config_puts_a_real_glyph_on_a_real_window() {
@@ -170,15 +170,25 @@ fn a_registered_config_puts_a_real_glyph_on_a_real_window() {
         );
     }
 
-    // Both hooks, one global and one window-scoped.
-    let hooks = format!(
-        "{}{}",
-        server.run(&["show-hooks", "-g"]),
-        server.run(&["show-hooks", "-gw"])
-    );
+    // Every hook, in the scope tmux keeps it in: `session-window-changed` is
+    // global, the other two are window-scoped.
+    let global = server.run(&["show-hooks", "-g"]);
+    let window = server.run(&["show-hooks", "-gw"]);
     assert!(
-        hooks.contains("session-window-changed") && hooks.contains("window-pane-changed"),
-        "the shipped hooks are not registered: {hooks}"
+        global.contains("session-window-changed"),
+        "the shipped hook is not registered: {global}"
+    );
+    for hook in ["window-pane-changed", "pane-focus-in"] {
+        assert!(
+            window.contains(hook) && window.contains("clear-pane"),
+            "the shipped {hook} hook is not registered: {window}"
+        );
+    }
+    assert_eq!(
+        server
+            .option(&["show-options", "-gv", "focus-events"])
+            .trim(),
+        "on"
     );
 
     // And the whole point: a glyph, rendered, in a window entry.
@@ -646,4 +656,122 @@ fn a_source_line_pointing_at_a_snippet_that_sets_no_hooks_is_rolled_back() {
         before,
         "the rejected edit was not rolled back"
     );
+}
+
+// The option is half of what the snippet is for: hooks that land without
+// `focus-events on` silently lose the one that sees the terminal regain focus.
+#[test]
+fn a_snippet_that_sets_the_hooks_but_not_focus_events_is_rolled_back() {
+    if !support::tmux_or_skip() {
+        return;
+    }
+    let home = TempDir::new("e2e-no-focus-events");
+    let config = home.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let snippet = home.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "set-hook -g 'pane-focus-in[50]' 'run-shell -b \"tmux-agent-status clear-pane #{pane_id}\"'\n\
+         set-hook -g 'session-window-changed[50]' 'run-shell -b \"tmux-agent-status clear-pane #{pane_id}\"'\n\
+         set-hook -g 'window-pane-changed[50]' 'run-shell -b \"tmux-agent-status clear-pane #{pane_id}\"'\n",
+    );
+    let before = fs::read_to_string(&config).expect("the config");
+
+    let out = register(
+        &home,
+        &[
+            "-y",
+            "--tmux-hook",
+            "--tmux-config",
+            &config.display().to_string(),
+            "--snippet",
+            &snippet.display().to_string(),
+        ],
+    );
+
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("does not turn focus-events on"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(
+        fs::read_to_string(&config).expect("the config"),
+        before,
+        "the rejected edit was not rolled back"
+    );
+}
+
+// The documented way to decline `focus-events` is a line of the user's own,
+// after the source-file line. That is a choice, not a snippet that failed to
+// land, so an upgrade still replaces the older copy the config sources.
+#[test]
+fn a_declined_focus_events_does_not_stop_an_older_snippet_being_replaced() {
+    if !support::tmux_or_skip() {
+        return;
+    }
+    let home = TempDir::new("e2e-declined-focus-events");
+    let snippet = home.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "set-hook -g 'session-window-changed[50]' 'run-shell -b \"tmux-agent-status clear-window #{pane_id}\"'\n",
+    );
+    let config = home.write(
+        ".config/tmux/tmux.conf",
+        &format!(
+            "source-file {}\nset -g focus-events off\n",
+            snippet.display()
+        ),
+    );
+
+    let out = register(
+        &home,
+        &[
+            "-y",
+            "--tmux-hook",
+            "--tmux-config",
+            &config.display().to_string(),
+        ],
+    );
+
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert_eq!(
+        fs::read_to_string(&snippet).expect("the snippet"),
+        include_str!("../share/tmux/tmux-agent-status.conf")
+    );
+}
+
+// tmux expands `$NAME` and `${NAME}` in a source-file argument (verified on
+// 3.6a), so a config that names its snippet through `$HOME` sources the real
+// file. The upgrade has to replace that file, not create one under a
+// directory literally called `$HOME`.
+#[test]
+fn a_snippet_sourced_through_a_variable_is_the_one_replaced() {
+    if !support::tmux_or_skip() {
+        return;
+    }
+    let home = TempDir::new("e2e-variable-source");
+    let snippet = home.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "set-hook -g 'session-window-changed[50]' 'run-shell -b \"tmux-agent-status clear-window #{pane_id}\"'\n",
+    );
+    let config = home.write(
+        ".config/tmux/tmux.conf",
+        "source-file ${HOME}/.config/tmux/tmux-agent-status.conf\n",
+    );
+
+    let out = register(
+        &home,
+        &[
+            "-y",
+            "--tmux-hook",
+            "--tmux-config",
+            &config.display().to_string(),
+        ],
+    );
+
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("relative path"), "{}", stdout(&out));
+    assert_eq!(
+        fs::read_to_string(&snippet).expect("the snippet"),
+        include_str!("../share/tmux/tmux-agent-status.conf")
+    );
+    assert!(!home.join("${HOME}").exists());
 }

@@ -60,8 +60,8 @@ fn help_flag_prints_usage() {
         assert!(text.contains("reset"), "{flag} missing reset command");
         assert!(text.contains("finish"), "{flag} missing finish command");
         assert!(
-            text.contains("clear-window"),
-            "{flag} missing clear-window command"
+            text.contains("clear-pane"),
+            "{flag} missing clear-pane command"
         );
         assert!(text.contains("states:"), "{flag} missing states list");
     }
@@ -122,7 +122,7 @@ fn non_utf8_arguments_are_usage_errors() {
         ["set", "done"].as_slice(),
         ["start"].as_slice(),
         ["reset"].as_slice(),
-        ["clear-window"].as_slice(),
+        ["clear-pane"].as_slice(),
         ["notify", "--agent", "mistral-vibe"].as_slice(),
     ] {
         let out = command(prefix)
@@ -171,7 +171,7 @@ fn pane_flag_requires_a_value() {
         ["start", "--pane"].as_slice(),
         ["reset", "--pane"].as_slice(),
         ["finish", "--pane"].as_slice(),
-        ["clear-window", "--pane"].as_slice(),
+        ["clear-pane", "--pane"].as_slice(),
         ["notify", "--agent", "mistral-vibe", "{}", "--pane"].as_slice(),
     ] {
         let out = run(args);
@@ -181,10 +181,10 @@ fn pane_flag_requires_a_value() {
 }
 
 #[test]
-fn clear_window_rejects_extra_arguments() {
-    let out = run(&["clear-window", "%0", "%1"]);
+fn the_clearing_command_rejects_extra_arguments() {
+    let out = run(&["clear-pane", "%0", "%1"]);
     assert_eq!(out.status.code(), Some(2));
-    assert!(stderr(&out).contains("unexpected arguments: clear-window %0 %1"));
+    assert!(stderr(&out).contains("unexpected arguments: clear-pane %0 %1"));
 }
 
 #[test]
@@ -196,8 +196,9 @@ fn pane_flag_is_allowed_on_hook_commands() {
         ["start", "--pane", "%0"].as_slice(),
         ["reset", "--pane", "%0"].as_slice(),
         ["finish", "--pane", "%0"].as_slice(),
-        ["clear-window", "--pane", "%0"].as_slice(),
-        ["clear-window", "%0", "--pane", "%1"].as_slice(),
+        ["clear-pane", "--pane", "%0"].as_slice(),
+        ["clear-pane", "%0"].as_slice(),
+        ["clear-pane", "%0", "--pane", "%1"].as_slice(),
     ] {
         let out = run(args);
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
@@ -212,7 +213,7 @@ fn disabled_turns_hook_commands_into_no_ops() {
         ["set", "done"].as_slice(),
         ["reset"].as_slice(),
         ["finish"].as_slice(),
-        ["clear-window"].as_slice(),
+        ["clear-pane"].as_slice(),
     ] {
         let out = run_env(args, "TMUX_AGENT_STATUS_DISABLED", "1");
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
@@ -237,7 +238,7 @@ fn json_flag_prints_empty_object_on_hook_commands() {
         ["start", "--json"].as_slice(),
         ["reset", "--json"].as_slice(),
         ["finish", "--json"].as_slice(),
-        ["clear-window", "--json"].as_slice(),
+        ["clear-pane", "--json"].as_slice(),
     ] {
         let out = run(args);
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
@@ -252,7 +253,7 @@ fn json_flag_prints_empty_object_when_disabled() {
         ["set", "done", "--json"].as_slice(),
         ["reset", "--json"].as_slice(),
         ["finish", "--json"].as_slice(),
-        ["clear-window", "--json"].as_slice(),
+        ["clear-pane", "--json"].as_slice(),
     ] {
         let out = run_env(args, "TMUX_AGENT_STATUS_DISABLED", "1");
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));

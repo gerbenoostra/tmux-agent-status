@@ -37,7 +37,7 @@ cp /path/to/share/agents/copilot/tmux-agent-status.json .github/hooks/
   events to `waiting`, which covers `permission_prompt` and `agent_idle`.
   Narrowing matters more than it used to: a `waiting` is no longer replaced by the
   next `working`, so a type that does not mean blocked on you leaves a 💬 up until
-  you look at the window. The two documented types are both fine; if Copilot
+  you focus that pane. The two documented types are both fine; if Copilot
   emits others, narrow the matcher in the JSON file the way
   [claude-code.md](claude-code.md) does.
 - **Subagent events are explicit.** `subagentStart`/`subagentStop` exist; a

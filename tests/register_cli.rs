@@ -307,8 +307,8 @@ fn a_failing_claude_fails_the_step_and_never_writes_settings_json() {
 
 #[test]
 fn an_installed_plugin_leaves_settings_json_alone() {
-    // 004's promise, through the CLI: on a machine with the plugin installed,
-    // nothing of ours goes anywhere near that file.
+    // The plugin route's promise, through the CLI: on a machine with the
+    // plugin installed, nothing of ours goes anywhere near that file.
     let home = TempDir::new("cli-claude-installed");
     stub(
         &home,

@@ -469,8 +469,8 @@ fn the_plugin_route_installs_and_leaves_settings_json_alone() {
         "{}",
         script.output()
     );
-    // 004's promise: the plugin writes its own bookkeeping, and we go nowhere
-    // near the file the user was told we would not touch.
+    // The plugin route's promise: the plugin writes its own bookkeeping, and
+    // we go nowhere near the file the user was told we would not touch.
     assert!(!dir.join(".claude/settings.json").exists());
 }
 
@@ -917,15 +917,371 @@ fn the_snippet_is_written_when_none_is_present_and_then_sourced() {
     assert_eq!(report.exit_code(), 0);
     let snippet = dir.join(".config/tmux/tmux-agent-status.conf");
     assert!(snippet.is_file(), "{}", script.output());
-    assert!(
-        fs::read_to_string(&snippet)
-            .expect("the snippet")
-            .contains("set-hook -g 'session-window-changed[50]'")
+    let written = fs::read_to_string(&snippet).expect("the snippet");
+    for hook in [
+        "session-window-changed",
+        "window-pane-changed",
+        "pane-focus-in",
+    ] {
+        assert!(
+            written.contains(&format!("set-hook -g '{hook}[50]'")),
+            "{hook}"
+        );
+    }
+    assert!(written.contains("\nset -g focus-events on\n"));
+    // The plan shows no file contents, so the one global option the snippet
+    // sets is said out loud where the user approves the source-file line.
+    let output = script.output();
+    assert!(output.contains("focus-events"), "{output}");
+    // With the way to decline it, which has to survive the snippet being
+    // rewritten on the next run.
+    assert!(output.contains("set -g focus-events off"), "{output}");
+    assert_eq!(
+        output.matches("focus-events").count(),
+        2,
+        "said once: {output}"
     );
     assert!(
         fs::read_to_string(dir.join(".config/tmux/tmux.conf"))
             .expect("the config")
             .contains("source-file")
+    );
+}
+
+// A rerun over an unchanged install asks for nothing: both halves of the step
+// are already what this version ships.
+#[test]
+fn a_rerun_over_an_unchanged_install_writes_nothing() {
+    let dir = TempDir::new("run-snippet-rerun");
+    dir.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let steps = || register::select(&[Step::TmuxHook], &[]).expect("valid");
+    assert_eq!(
+        register::run(&options(&dir, steps()), &Script::saying_yes()).exit_code(),
+        0
+    );
+
+    let script = Script::saying_yes();
+    let report = register::run(&options(&dir, steps()), &script);
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(
+        output.contains("the tmux snippet - already registered"),
+        "{output}"
+    );
+    assert!(
+        output.contains("the tmux source-file line - already registered"),
+        "{output}"
+    );
+}
+
+// The upgrade path. The source-file line is already there, so nothing about it
+// changes and it has nothing to say; the file it points at is an older copy,
+// and that is what the run has to notice, offer and replace.
+#[test]
+fn a_rerun_replaces_the_snippet_the_config_sources_when_it_is_an_older_copy() {
+    let dir = TempDir::new("run-snippet-stale");
+    let snippet = dir.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "set-hook -g 'session-window-changed[50]' 'run-shell -b \"tmux-agent-status clear-window\"'\n",
+    );
+    dir.write(
+        ".config/tmux/tmux.conf",
+        &format!("set -g status on\nsource-file {}\n", snippet.display()),
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &options(
+            &dir,
+            register::select(&[Step::TmuxHook], &[]).expect("valid"),
+        ),
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(output.contains("the tmux snippet - edit"), "{output}");
+    assert!(
+        output.contains("the tmux source-file line - already registered"),
+        "{output}"
+    );
+    // The note that says why, and the one global option the replacement sets.
+    assert!(
+        output.contains("not the one this version ships"),
+        "{output}"
+    );
+    assert!(output.contains("set -g focus-events off"), "{output}");
+
+    let written = fs::read_to_string(&snippet).expect("the snippet");
+    assert_eq!(
+        written,
+        include_str!("../share/tmux/tmux-agent-status.conf")
+    );
+}
+
+// `--snippet` says where a snippet lives or should go, but a config that
+// already sources one has answered that question itself: the sourced file is
+// the one tmux reads, so it is the one replaced, and the run says so rather
+// than leaving the flag looking honoured.
+#[test]
+fn an_explicit_snippet_elsewhere_is_named_when_the_sourced_one_is_replaced() {
+    let dir = TempDir::new("run-snippet-explicit");
+    let sourced = dir.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "set -g focus-events on\n",
+    );
+    let elsewhere = dir.write("elsewhere/tmux-agent-status.conf", "# not this one\n");
+    dir.write(
+        ".config/tmux/tmux.conf",
+        &format!("set -g status on\nsource-file {}\n", sourced.display()),
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &Options {
+            snippet: Some(elsewhere.clone()),
+            ..options(
+                &dir,
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
+            )
+        },
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(output.contains("--snippet names"), "{output}");
+    assert_eq!(
+        fs::read_to_string(&sourced).expect("the sourced snippet"),
+        include_str!("../share/tmux/tmux-agent-status.conf")
+    );
+    assert_eq!(
+        fs::read_to_string(&elsewhere).expect("the explicit path"),
+        "# not this one\n"
+    );
+}
+
+// tmux resolves a relative `source-file` against the directory its server was
+// started in, which this process cannot know. The replacement still goes to the
+// best guess, and the guess is named.
+//
+// Without the probe, because the probe answers this from its own working
+// directory: a relative line it cannot resolve is a config tmux will not read,
+// and that refusal comes first and is the right one. The guess is what is left
+// when the user has taken the probe away.
+#[test]
+fn a_relative_source_line_is_replaced_at_the_guess_and_the_guess_is_named() {
+    let dir = TempDir::new("run-snippet-relative");
+    let snippet = dir.write("tmux-agent-status.conf", "set -g focus-events on\n");
+    dir.write(
+        ".config/tmux/tmux.conf",
+        "set -g status on\nsource-file tmux-agent-status.conf\n",
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &Options {
+            probe: false,
+            ..options(
+                &dir,
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
+            )
+        },
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(output.contains("relative path"), "{output}");
+    assert!(output.contains("started in"), "{output}");
+    assert_eq!(
+        fs::read_to_string(&snippet).expect("the snippet"),
+        include_str!("../share/tmux/tmux-agent-status.conf")
+    );
+}
+
+// A snippet in a directory nothing can write to is reported and left alone.
+// The source-file line is a separate question, and it is already answered: the
+// line is in the config whatever this run can do to the file it names.
+#[test]
+fn a_sourced_snippet_that_cannot_be_written_is_reported_and_the_line_stands() {
+    let dir = TempDir::new("run-snippet-unwritable");
+    let snippet = dir.write(
+        "readonly/tmux-agent-status.conf",
+        "set -g focus-events on\n",
+    );
+    dir.write(
+        ".config/tmux/tmux.conf",
+        &format!("set -g status on\nsource-file {}\n", snippet.display()),
+    );
+    // Read-only, the way a package store holds its copy. The temp directory
+    // puts the modes back before it removes itself.
+    fs::set_permissions(dir.join("readonly"), fs::Permissions::from_mode(0o555))
+        .expect("the directory can be made read-only");
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &options(
+            &dir,
+            register::select(&[Step::TmuxHook], &[]).expect("valid"),
+        ),
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(
+        output.contains("the tmux snippet - not registered"),
+        "{output}"
+    );
+    assert!(output.contains("is not writable"), "{output}");
+    // And what to do about it, which is the whole point of reporting it.
+    assert!(
+        output.contains("not the snippet this version ships"),
+        "{output}"
+    );
+    assert!(
+        output.contains("Either update whatever provides"),
+        "{output}"
+    );
+    assert!(output.contains("point the source-file line in"), "{output}");
+    assert!(
+        output.contains("the tmux source-file line - already registered"),
+        "{output}"
+    );
+    assert!(
+        !output.contains("not adding a source-file line"),
+        "{output}"
+    );
+}
+
+// A copy nothing can write to, that is already this version's, is not a
+// problem to report: tmux runs the right hooks whoever owns the file.
+#[test]
+fn a_current_snippet_in_a_read_only_directory_is_already_registered() {
+    let dir = TempDir::new("run-snippet-readonly-current");
+    let snippet = dir.write(
+        "readonly/tmux-agent-status.conf",
+        include_str!("../share/tmux/tmux-agent-status.conf"),
+    );
+    dir.write(
+        ".config/tmux/tmux.conf",
+        &format!("set -g status on\nsource-file {}\n", snippet.display()),
+    );
+    fs::set_permissions(dir.join("readonly"), fs::Permissions::from_mode(0o555))
+        .expect("the directory can be made read-only");
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &options(
+            &dir,
+            register::select(&[Step::TmuxHook], &[]).expect("valid"),
+        ),
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(
+        output.contains("the tmux snippet - already registered"),
+        "{output}"
+    );
+    assert!(!output.contains("is not writable"), "{output}");
+}
+
+// Answering no leaves the older copy exactly as it was.
+#[test]
+fn a_declined_snippet_replacement_changes_nothing() {
+    let dir = TempDir::new("run-snippet-declined");
+    let was = "set -g focus-events on\n";
+    let snippet = dir.write(".config/tmux/tmux-agent-status.conf", was);
+    dir.write(
+        ".config/tmux/tmux.conf",
+        &format!("set -g status on\nsource-file {}\n", snippet.display()),
+    );
+
+    let report = register::run(
+        &options(
+            &dir,
+            register::select(&[Step::TmuxHook], &[]).expect("valid"),
+        ),
+        &Script::saying_no(),
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    assert_eq!(fs::read_to_string(&snippet).expect("the snippet"), was);
+}
+
+// A variable with no value here leaves the file tmux reads unknown, so nothing
+// is written anywhere - above all not a file under a directory literally named
+// after the variable - and the line already in the config stands.
+//
+// Without the probe, because tmux expanding the same variable to nothing would
+// refuse the config first, which is the right refusal but not this one.
+#[test]
+fn a_sourced_snippet_behind_an_unset_variable_is_handed_back() {
+    let dir = TempDir::new("run-snippet-unset-variable");
+    dir.write(
+        ".config/tmux/tmux.conf",
+        "source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/tmux-agent-status.conf\n",
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &Options {
+            probe: false,
+            ..options(
+                &dir,
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
+            )
+        },
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(
+        output.contains("the tmux snippet - not registered"),
+        "{output}"
+    );
+    assert!(output.contains("has no value here"), "{output}");
+    assert!(
+        output.contains("the tmux source-file line - already registered"),
+        "{output}"
+    );
+    assert!(!dir.join("$TMUX_AGENT_STATUS_UNSET_FOR_TEST").exists());
+}
+
+// Nothing is written to a snippet that already exists, so the step that adds
+// the source-file line is where the option is said, and it is said once.
+#[test]
+fn a_snippet_that_already_exists_is_disclosed_by_the_source_line_step() {
+    let dir = TempDir::new("run-snippet-found");
+    dir.write(".config/tmux/tmux.conf", "set -g status on\n");
+    let snippet = dir.write(
+        ".config/tmux/tmux-agent-status.conf",
+        include_str!("../share/tmux/tmux-agent-status.conf"),
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &Options {
+            snippet: Some(snippet),
+            ..options(
+                &dir,
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
+            )
+        },
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert_eq!(
+        output.matches("set -g focus-events off").count(),
+        1,
+        "{output}"
     );
 }
 

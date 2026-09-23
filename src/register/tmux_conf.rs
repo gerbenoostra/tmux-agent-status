@@ -173,15 +173,101 @@ fn beside(config: &Path, home: &Home) -> PathBuf {
 /// path: the location is the user's business, and a second source line is a
 /// second set of hooks.
 pub fn sources_snippet(text: &str) -> bool {
+    sourcing_line(text).is_some()
+}
+
+/// Whether a snippet's text turns `focus-events` on, the way the shipped one
+/// does.
+///
+/// Read from the file rather than from tmux, because the user declines the
+/// option with a line of their own after the source-file line, and that has to
+/// read as a choice rather than as a snippet that did not land.
+pub fn turns_on_focus_events(text: &str) -> bool {
+    format::logical_lines(text).iter().any(|line| {
+        format::words(&line.text).is_some_and(|words| words == ["set", "-g", "focus-events", "on"])
+    })
+}
+
+/// The snippet file this config already sources, if it sources one.
+///
+/// The file tmux actually reads, which is the one an upgrade has to bring up to
+/// date - not the one `discover_snippet` would have picked, which is wherever
+/// this build's copy happens to sit. The two are different the moment the
+/// config sources a copy of its own, which is what every install route but a
+/// package manager leaves behind.
+///
+/// The last such line wins: the snippet only sets hooks and one option, and the
+/// last assignment of those is the one in force.
+///
+/// Variables are expanded the way tmux expands them, `$HOME` and
+/// `$XDG_CONFIG_HOME` from the `Home` this run was given and any other from
+/// this process's environment. `Err` carries the argument as written when one
+/// of them has no value here: the file tmux reads is then not knowable, and
+/// writing to a guess would create a file nobody sources.
+///
+/// `~/` and a relative argument resolve against the `Home` this run was given
+/// rather than against the environment, for the reason `search_path` takes one:
+/// a path that reaches for `$HOME` itself is a path a test cannot steer. What
+/// tmux would have done with a relative one is a separate question, and
+/// `Sourced::relative` is where it is answered.
+pub fn sourced_snippet(text: &str, home: &Home) -> Option<Result<Sourced, String>> {
+    let (line, written) = sourcing_line(text)?;
+    let lookup = |name: &str| match name {
+        "HOME" => Some(home.home.to_string_lossy().into_owned()),
+        "XDG_CONFIG_HOME" => home
+            .xdg_config
+            .as_ref()
+            .map(|dir| dir.to_string_lossy().into_owned()),
+        _ => std::env::var(name).ok(),
+    };
+    let Some(argument) = format::expanded_words(&line, &lookup)
+        .as_deref()
+        .and_then(path_word)
+    else {
+        return Some(Err(written));
+    };
+    Some(Ok(Sourced {
+        // `join` with an absolute path discards the base, so `~/x`, `x` and
+        // `/x` are all this one line.
+        path: home.join(argument.strip_prefix("~/").unwrap_or(&argument)),
+        relative: is_relative(&argument),
+    }))
+}
+
+/// The last `source`/`source-file` line naming our snippet, and its argument,
+/// both as written.
+fn sourcing_line(text: &str) -> Option<(String, String)> {
     format::logical_lines(text)
-        .iter()
-        .filter_map(|line| source_argument(&line.text))
-        .any(|path| Path::new(&path).file_name() == Some(SNIPPET_NAME.as_ref()))
+        .into_iter()
+        .rev()
+        .find_map(|line| {
+            let argument = source_argument(&line.text)?;
+            (Path::new(&argument).file_name() == Some(SNIPPET_NAME.as_ref()))
+                .then_some((line.text, argument))
+        })
+}
+
+/// The snippet a config sources, and how certain the path is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sourced {
+    /// The file the argument names, resolved the way the walk resolves it.
+    pub path: PathBuf,
+    /// Whether tmux had to resolve the argument against a working directory,
+    /// which is the one thing about it this process cannot know: it is the
+    /// directory the server was started in, and `$HOME` is only the likeliest
+    /// guess. A replacement written to the guess is a replacement tmux may
+    /// never read, so this is said out loud rather than assumed away.
+    pub relative: bool,
 }
 
 /// The path a `source`/`source-file` line names, if it is one.
 fn source_argument(line: &str) -> Option<String> {
-    match format::words(line)?.as_slice() {
+    path_word(&format::words(line)?)
+}
+
+/// The path among a `source`/`source-file` line's words, if it is one.
+fn path_word(words: &[String]) -> Option<String> {
+    match words {
         [command, rest @ ..] if matches!(command.as_str(), "source" | "source-file") => {
             // tmux's own flags here take no values, so the path is simply the
             // last word that is not one.
@@ -196,8 +282,9 @@ fn source_argument(line: &str) -> Option<String> {
 
 /// The block that sources the snippet.
 ///
-/// Appended at the end: the snippet sets hooks only, and a hook set late is a
-/// hook set, so position does not matter here the way it does for the format.
+/// Appended at the end: the snippet sets an option and hooks only, and one set
+/// late is one set, so position does not matter here the way it does for the
+/// format.
 /// `None` when the snippet's path cannot be spelled safely, which sends the
 /// step to the manual path like any other line this module will not write.
 pub fn with_source_block(text: &str, snippet: &Path) -> Option<String> {
@@ -449,9 +536,18 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_snippet_is_embedded_and_sets_the_hooks() {
-        assert!(SNIPPET.contains("set-hook -g 'session-window-changed[50]'"));
-        assert!(SNIPPET.contains("tmux-agent-status clear-window"));
+    fn the_shipped_snippet_is_embedded_and_sets_the_option_and_all_three_hooks() {
+        assert!(turns_on_focus_events(SNIPPET));
+        for hook in [
+            "pane-focus-in",
+            "session-window-changed",
+            "window-pane-changed",
+        ] {
+            let line = format!(
+                "set-hook -g '{hook}[50]' 'run-shell -b \"tmux-agent-status clear-pane #{{pane_id}}\"'"
+            );
+            assert!(SNIPPET.contains(&line), "{hook}");
+        }
     }
 
     #[test]
@@ -522,6 +618,93 @@ mod tests {
         ] {
             assert!(!sources_snippet(line), "line {line:?}");
         }
+    }
+
+    #[test]
+    fn focus_events_is_on_only_when_a_line_sets_it_on() {
+        assert!(turns_on_focus_events(
+            "# a comment\nset -g focus-events on\n"
+        ));
+        assert!(!turns_on_focus_events("set -g focus-events off\n"));
+        assert!(!turns_on_focus_events("# set -g focus-events on\n"));
+        assert!(!turns_on_focus_events(
+            "set-hook -g 'pane-focus-in[50]' 'x'\n"
+        ));
+    }
+
+    #[test]
+    fn the_sourced_snippet_is_the_last_one_named_and_resolved_against_home() {
+        let home = home_at("/home/u");
+        let text = "source-file /first/tmux-agent-status.conf\n\
+                    source-file ~/.tmux/tmux-agent-status.conf\n";
+        // The last one wins, for the same reason the last assignment does.
+        let last = sourced_snippet(text, &home)
+            .expect("a sourced snippet")
+            .expect("a resolvable path");
+        assert_eq!(
+            last.path,
+            PathBuf::from("/home/u/.tmux/tmux-agent-status.conf")
+        );
+        assert!(!last.relative);
+
+        let absolute = sourced_snippet("source-file /x/tmux-agent-status.conf\n", &home)
+            .expect("a sourced snippet")
+            .expect("a resolvable path");
+        assert_eq!(absolute.path, PathBuf::from("/x/tmux-agent-status.conf"));
+        assert!(!absolute.relative);
+
+        // Resolved against the home we were given, and reported as a guess:
+        // tmux resolves it against wherever its server was started.
+        let guessed = sourced_snippet("source-file tmux-agent-status.conf\n", &home)
+            .expect("a sourced snippet")
+            .expect("a resolvable path");
+        assert_eq!(
+            guessed.path,
+            PathBuf::from("/home/u/tmux-agent-status.conf")
+        );
+        assert!(guessed.relative);
+
+        assert_eq!(sourced_snippet("set -g status on\n", &home), None);
+    }
+
+    #[test]
+    fn a_sourced_snippet_named_through_a_variable_is_expanded() {
+        let home = Home {
+            home: PathBuf::from("/home/u"),
+            xdg_config: Some(PathBuf::from("/xdg")),
+        };
+        let through_home =
+            sourced_snippet("source-file ${HOME}/.tmux/tmux-agent-status.conf\n", &home)
+                .expect("a sourced snippet")
+                .expect("a resolvable path");
+        assert_eq!(
+            through_home.path,
+            PathBuf::from("/home/u/.tmux/tmux-agent-status.conf")
+        );
+        assert!(!through_home.relative);
+
+        let through_xdg = sourced_snippet(
+            "source-file \"$XDG_CONFIG_HOME/tmux/tmux-agent-status.conf\"\n",
+            &home,
+        )
+        .expect("a sourced snippet")
+        .expect("a resolvable path");
+        assert_eq!(
+            through_xdg.path,
+            PathBuf::from("/xdg/tmux/tmux-agent-status.conf")
+        );
+
+        // A variable with no value here is handed back as written, rather than
+        // resolved to a file nobody sources.
+        assert_eq!(
+            sourced_snippet(
+                "source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/tmux-agent-status.conf\n",
+                &home
+            ),
+            Some(Err(
+                "$TMUX_AGENT_STATUS_UNSET_FOR_TEST/tmux-agent-status.conf".to_owned()
+            ))
+        );
     }
 
     #[test]

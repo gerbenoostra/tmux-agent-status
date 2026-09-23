@@ -8,7 +8,7 @@ pub enum HookCommand {
     Start,
     Reset,
     Finish,
-    ClearWindow,
+    ClearPane,
     Notify { agent: String },
 }
 
@@ -20,7 +20,7 @@ impl HookCommand {
             HookCommand::Start => "tmux-agent-status start".to_string(),
             HookCommand::Reset => "tmux-agent-status reset".to_string(),
             HookCommand::Finish => "tmux-agent-status finish".to_string(),
-            HookCommand::ClearWindow => "tmux-agent-status clear-window".to_string(),
+            HookCommand::ClearPane => "tmux-agent-status clear-pane".to_string(),
             HookCommand::Notify { agent } => format!("tmux-agent-status notify --agent {agent}"),
         }
     }
@@ -32,7 +32,7 @@ impl HookCommand {
             HookCommand::Start => "start".to_string(),
             HookCommand::Reset => "reset".to_string(),
             HookCommand::Finish => "finish".to_string(),
-            HookCommand::ClearWindow => "clear-window".to_string(),
+            HookCommand::ClearPane => "clear-pane".to_string(),
             HookCommand::Notify { agent } => format!("notify --agent {agent}"),
         }
     }
@@ -70,7 +70,7 @@ pub fn parse_command(source: &str, command: &str) -> HookCommand {
         ["start"] => HookCommand::Start,
         ["reset"] => HookCommand::Reset,
         ["finish"] => HookCommand::Finish,
-        ["clear-window"] => HookCommand::ClearWindow,
+        ["clear-pane"] => HookCommand::ClearPane,
         ["notify", "--agent", agent, ..] => HookCommand::Notify {
             agent: agent.to_string(),
         },

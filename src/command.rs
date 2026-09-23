@@ -14,16 +14,15 @@ use std::io;
 use crate::bell;
 use crate::formats;
 use crate::state::State;
-use crate::tmux::{self, Cmd, PaneId, Window};
+use crate::tmux::{self, Cmd, PaneId};
 
 /// `tmux-agent-status set <state>`: report a state on the pane and recompute the window.
 ///
 /// The bell rings for every state that rings, whether or not the pane keeps it.
-/// A `waiting` refused by a `done` nobody has seen still means the agent is
-/// blocked on you, and the glyph cannot say so until the window is looked at;
-/// the bell is the one channel that still can. It is rung before tmux is
-/// touched, so no tmux, or a tmux that fails, costs the write and not the
-/// signal.
+/// A `waiting` refused by a `done` still means the agent is blocked on you, and
+/// precedence keeps the glyph on `done`; the bell is the one channel that still
+/// says so. It is rung before tmux is touched, so no tmux, or a tmux that
+/// fails, costs the write and not the signal.
 pub fn set(state: State, pane: Option<&str>) -> io::Result<()> {
     if state.rings_bell() {
         bell::ring();
@@ -32,7 +31,7 @@ pub fn set(state: State, pane: Option<&str>) -> io::Result<()> {
         return Ok(());
     };
     let window = tmux::window(&target)?;
-    tmux::run(&report(&window, state)).map(drop)
+    tmux::run(&report(&window.pane, state)).map(drop)
 }
 
 /// `tmux-agent-status start`: a turn begins on this pane.
@@ -64,7 +63,7 @@ pub fn finish(pane: Option<&str>) -> io::Result<()> {
         return Ok(());
     };
     let window = tmux::window(&target)?;
-    tmux::run(&report(&window, State::Done)).map(drop)
+    tmux::run(&report(&window.pane, State::Done)).map(drop)
 }
 
 /// `tmux-agent-status reset`: unconditionally drop this pane's session status.
@@ -78,46 +77,41 @@ pub fn reset(pane: Option<&str>) -> io::Result<()> {
     tmux::run(&commands).map(drop)
 }
 
-/// `tmux-agent-status clear-window [<pane>]`: drop the non-sticky states of every
-/// pane of that pane's window, then recompute.
+/// `tmux-agent-status clear-pane [<pane>]`: drop the non-sticky state of that
+/// one pane, then recompute its window.
 ///
-/// Every pane, not just the focused one: all panes of a window are on screen
-/// together, so seeing the window is seeing them.
+/// The acknowledgement a focus hook sends: tmux said this pane gained focus, so
+/// this pane was seen. Its siblings were not, even when they share the screen,
+/// and keep whatever they hold. `working` is sticky and survives.
+///
+/// The recompute runs even when the pane holds nothing, which heals a window
+/// glyph a failed write left stale and keeps the command list non-empty.
+///
+/// A hook can fire for a pane that has closed since: the read then fails and
+/// the hook wrapper turns that into a silent exit 0.
 ///
 /// The pane is an argument because tmux's `run-shell` does not put `TMUX_PANE`
-/// in a hook's environment - it does expand formats in the command, so the
-/// shipped hook passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which
-/// is what a hand invocation from a pane has.
-pub fn clear_window(pane: Option<&str>) -> io::Result<()> {
+/// in a hook's environment - it does expand formats in the command, so a hook
+/// passes `#{pane_id}`. Without one, `$TMUX_PANE` is used, which is what a hand
+/// invocation from a pane has.
+pub fn clear_pane(pane: Option<&str>) -> io::Result<()> {
     let Some(target) = tmux::resolve_pane(pane) else {
         return Ok(());
     };
     let window = tmux::window(&target)?;
     let mut commands: Vec<Cmd> = window
-        .panes_with_status()
+        .addressed_with_status()
+        .into_iter()
         .flat_map(|pane| write(pane, &formats::seen()))
         .collect();
     commands.extend(recompute(&window.pane));
     tmux::run(&commands).map(drop)
 }
 
-/// The writes that report `state` on the window's addressed pane.
-///
-/// A state that clears on focus also applies the focus rule to the siblings of
-/// a watched window, since they are on screen together. A sibling with no
-/// status is left out: it has nothing to clear, and a status that arrives on it
-/// meanwhile is reported onto the watched window and clears itself.
-fn report(window: &Window, state: State) -> Vec<Cmd> {
-    let mut commands = write(&window.pane, &formats::report(state)).to_vec();
-    if !state.is_sticky() {
-        let sibling = formats::sibling();
-        commands.extend(
-            window
-                .siblings_with_status()
-                .flat_map(|pane| write(pane, &sibling)),
-        );
-    }
-    commands.extend(recompute(&window.pane));
+/// The writes that report `state` on `pane`, and only that pane.
+fn report(pane: &PaneId, state: State) -> Vec<Cmd> {
+    let mut commands = write(pane, &formats::report(state)).to_vec();
+    commands.extend(recompute(pane));
     commands
 }
 
