@@ -176,6 +176,18 @@ pub fn sources_snippet(text: &str) -> bool {
     sourced_argument(text).is_some()
 }
 
+/// Whether a snippet's text turns `focus-events` on, the way the shipped one
+/// does.
+///
+/// Read from the file rather than from tmux, because the user declines the
+/// option with a line of their own after the source-file line, and that has to
+/// read as a choice rather than as a snippet that did not land.
+pub fn turns_on_focus_events(text: &str) -> bool {
+    format::logical_lines(text).iter().any(|line| {
+        format::words(&line.text).is_some_and(|words| words == ["set", "-g", "focus-events", "on"])
+    })
+}
+
 /// The snippet file this config already sources, if it sources one.
 ///
 /// The file tmux actually reads, which is the one an upgrade has to bring up to
@@ -496,7 +508,7 @@ mod tests {
 
     #[test]
     fn the_shipped_snippet_is_embedded_and_sets_the_option_and_all_three_hooks() {
-        assert!(SNIPPET.contains("\nset -g focus-events on\n"));
+        assert!(turns_on_focus_events(SNIPPET));
         for hook in [
             "pane-focus-in",
             "session-window-changed",
@@ -577,6 +589,18 @@ mod tests {
         ] {
             assert!(!sources_snippet(line), "line {line:?}");
         }
+    }
+
+    #[test]
+    fn focus_events_is_on_only_when_a_line_sets_it_on() {
+        assert!(turns_on_focus_events(
+            "# a comment\nset -g focus-events on\n"
+        ));
+        assert!(!turns_on_focus_events("set -g focus-events off\n"));
+        assert!(!turns_on_focus_events("# set -g focus-events on\n"));
+        assert!(!turns_on_focus_events(
+            "set-hook -g 'pane-focus-in[50]' 'x'\n"
+        ));
     }
 
     #[test]

@@ -689,7 +689,7 @@ fn a_snippet_that_sets_the_hooks_but_not_focus_events_is_rolled_back() {
 
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     assert!(
-        stdout(&out).contains("reads focus-events as off"),
+        stdout(&out).contains("does not turn focus-events on"),
         "{}",
         stdout(&out)
     );
@@ -697,5 +697,43 @@ fn a_snippet_that_sets_the_hooks_but_not_focus_events_is_rolled_back() {
         fs::read_to_string(&config).expect("the config"),
         before,
         "the rejected edit was not rolled back"
+    );
+}
+
+// The documented way to decline `focus-events` is a line of the user's own,
+// after the source-file line. That is a choice, not a snippet that failed to
+// land, so an upgrade still replaces the older copy the config sources.
+#[test]
+fn a_declined_focus_events_does_not_stop_an_older_snippet_being_replaced() {
+    if !support::tmux_or_skip() {
+        return;
+    }
+    let home = TempDir::new("e2e-declined-focus-events");
+    let snippet = home.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "set-hook -g 'session-window-changed[50]' 'run-shell -b \"tmux-agent-status clear-window #{pane_id}\"'\n",
+    );
+    let config = home.write(
+        ".config/tmux/tmux.conf",
+        &format!(
+            "source-file {}\nset -g focus-events off\n",
+            snippet.display()
+        ),
+    );
+
+    let out = register(
+        &home,
+        &[
+            "-y",
+            "--tmux-hook",
+            "--tmux-config",
+            &config.display().to_string(),
+        ],
+    );
+
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert_eq!(
+        fs::read_to_string(&snippet).expect("the snippet"),
+        include_str!("../share/tmux/tmux-agent-status.conf")
     );
 }

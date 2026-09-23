@@ -80,9 +80,11 @@ should call `tmux-agent-status clear-pane`.
   `focus-events` is set to. The same `tmux-agent-status register --tmux-hook` repairs it.
 - `focus-events` not `on`: `pane-focus-in` still fires on the first client attach to a session,
   but never again for a plain terminal-focus change - so returning to the terminal from another tab
-  does not clear the pane you were looking at, even though the hook itself is present. The user adds
-  `set -g focus-events on` to their tmux configuration, or re-runs `tmux-agent-status register
-  --tmux-hook`, since the shipped snippet sets the option and `register` verifies it.
+  does not clear the pane you were looking at, even though the hook itself is present. A
+  `set -g focus-events off` in the user's own config, after the source-file line, is the documented
+  way to decline it: name that cost and leave it. Otherwise the snippet did not set it, and
+  re-running `tmux-agent-status register --tmux-hook` repairs it, since the shipped snippet sets
+  the option and `register` verifies that it does.
 
 **3. The format term.**
 `tmux show-options -g window-status-format` and `tmux show-options -g window-status-current-format`.

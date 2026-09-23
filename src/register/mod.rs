@@ -469,16 +469,20 @@ fn ours_to_change() -> Vec<String> {
 /// anywhere. That is the worst outcome this module has, so the probe is asked
 /// for the other half directly.
 pub enum Landed {
-    /// The hook step: every hook is registered and `focus-events` reads back
-    /// `on` afterwards, which is what says the sourced snippet actually ran.
-    /// The option is checked as well because a snippet that lands the hooks
-    /// but not the option silently loses the one hook that sees the terminal.
+    /// The hook step: every hook is registered afterwards, which is what says
+    /// the sourced snippet actually ran, and the snippet turns `focus-events`
+    /// on, because one that lands the hooks but not the option silently loses
+    /// the one hook that sees the terminal.
+    ///
+    /// The option is read from the snippet, not from tmux: a
+    /// `set -g focus-events off` after the source-file line is how a user
+    /// declines it, so tmux reading it as off is a choice as often as a fault.
     ///
     /// Only a snippet that exists and sets no hooks reaches this. One that is
     /// missing is refused earlier and better: tmux will not read a config that
     /// sources a file that is not there, so `probe::check` fails first and
     /// names the path it could not find.
-    Hooks,
+    Hooks { snippet: PathBuf },
     /// The format step: these options carry the term afterwards. Per option,
     /// because the two are written one at a time and the second has not been
     /// written yet when the first is checked.
@@ -489,7 +493,7 @@ impl Landed {
     /// Whether what this edit was for is in the dump tmux just gave us.
     fn found(&self, dumped: &probe::Dump) -> Result<(), String> {
         match self {
-            Landed::Hooks => {
+            Landed::Hooks { snippet } => {
                 if let Some(missing) = HOOKS.iter().find(|hook| {
                     !dumped.any_value(hook, |set| set.contains(agents::COMMAND_PREFIX))
                 }) {
@@ -498,12 +502,14 @@ impl Landed {
                          the {missing} hook: the file it points at does not set it."
                     ));
                 }
-                match dumped.any_value(FOCUS_EVENTS, |value| value == "on") {
+                match std::fs::read_to_string(snippet)
+                    .is_ok_and(|text| tmux_conf::turns_on_focus_events(&text))
+                {
                     true => Ok(()),
                     false => Err(format!(
-                        "the config sources our snippet, but tmux reads {FOCUS_EVENTS} as off: \
-                         the file it points at does not turn it on, or a later line turns it \
-                         off, and pane-focus-in then never sees the terminal regain focus."
+                        "the config sources our snippet, but {} does not turn {FOCUS_EVENTS} \
+                         on, so pane-focus-in never sees the terminal regain focus.",
+                        snippet.display()
                     )),
                 }
             }
@@ -1460,7 +1466,9 @@ impl TmuxPlan {
             parses: not_empty,
             creating: !seen.exists,
             notes,
-            verify: self.verification(Landed::Hooks),
+            verify: self.verification(Landed::Hooks {
+                snippet: sourced.path.clone(),
+            }),
             path: seen.resolved,
             announced: false,
         }))
@@ -1490,7 +1498,9 @@ impl TmuxPlan {
                 true => Vec::new(),
                 false => vec![FOCUS_EVENTS_NOTE.to_owned()],
             },
-            verify: self.verification(Landed::Hooks),
+            verify: self.verification(Landed::Hooks {
+                snippet: snippet.to_path_buf(),
+            }),
             path: seen.resolved,
             announced: false,
         }))
