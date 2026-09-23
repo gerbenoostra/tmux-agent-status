@@ -88,3 +88,80 @@ fn set_option_statements(text: &str) -> Vec<&str> {
     }
     found
 }
+
+/// Every docs link this tool prints has to land on a heading that exists.
+///
+/// A message that answers "what should this file contain?" with a URL is only
+/// an answer while the URL resolves; a renamed heading turns it into a link to
+/// the top of a page the reader then has to search. The docs are in this repo,
+/// so the check is exact rather than a network request: the file is read and
+/// its headings are slugified the way GitHub slugifies them.
+#[test]
+fn every_docs_link_in_the_sources_names_a_heading_that_exists() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut checked = 0;
+    for path in rust_sources(&root.join("src")) {
+        let text = fs::read_to_string(&path).expect("a source file this crate owns");
+        for (doc, anchor) in docs_links(&text) {
+            let page = root.join(&doc);
+            let markdown = fs::read_to_string(&page).unwrap_or_else(|_| {
+                panic!("{}: links to {doc}, which is not there", path.display())
+            });
+            let headings: Vec<String> = markdown
+                .lines()
+                .filter_map(|line| line.trim_start().strip_prefix('#'))
+                .map(|line| slug(line.trim_start_matches('#').trim()))
+                .collect();
+            assert!(
+                headings.contains(&anchor),
+                "{}: links to {doc}#{anchor}, which has no such heading; it has {headings:?}",
+                path.display()
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no docs link was found to check");
+}
+
+/// The `docs/<page>.md#<anchor>` pairs a source file links to on this repo.
+///
+/// A URL too long for one line is written as a Rust string continued across
+/// several, so the source text is put back together the way the compiler puts
+/// it together - drop each continuation's backslash, newline and the leading
+/// whitespace of the line below - before anything is looked for in it.
+fn docs_links(text: &str) -> Vec<(String, String)> {
+    const PREFIX: &str = "https://github.com/gerbenoostra/tmux-agent-status/blob/main/";
+    let joined = text
+        .lines()
+        .map(str::trim_start)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace("\\\n", "");
+    let mut found = Vec::new();
+    let mut rest = joined.as_str();
+    while let Some(at) = rest.find(PREFIX) {
+        let tail = &rest[at + PREFIX.len()..];
+        let link: String = tail
+            .chars()
+            .take_while(|c| !c.is_whitespace() && *c != '"' && *c != '\\')
+            .collect();
+        if let Some((doc, anchor)) = link.split_once('#') {
+            found.push((doc.to_owned(), anchor.to_owned()));
+        }
+        rest = &rest[at + PREFIX.len()..];
+    }
+    found
+}
+
+/// A heading as GitHub spells it in a fragment: lowercased, punctuation
+/// dropped, spaces hyphenated.
+fn slug(heading: &str) -> String {
+    heading
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some('-'),
+            c if c.is_alphanumeric() || c == '-' => Some(c.to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect()
+}
