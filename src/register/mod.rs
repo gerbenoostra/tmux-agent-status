@@ -1283,8 +1283,11 @@ impl TmuxPlan {
             .contents()
             .and_then(|text| tmux_conf::sourced_snippet(&text, &options.home));
         let snippet = match &installed {
-            Some(sourced) => tmux_conf::Choice::Existing(sourced.path.clone()),
-            None => tmux_conf::discover_snippet(
+            Some(Ok(sourced)) => tmux_conf::Choice::Existing(sourced.path.clone()),
+            // The line is there either way, so the source-file step only has
+            // to see that it is; the file it names is the snippet step's
+            // question.
+            Some(Err(_)) | None => tmux_conf::discover_snippet(
                 options.snippet.as_deref(),
                 options.exe.as_deref(),
                 self.config.path(),
@@ -1303,10 +1306,21 @@ impl TmuxPlan {
         // The snippet first: a source-file line pointing at nothing is worse
         // than no line at all.
         match &installed {
-            Some(sourced) => planned.push(Planned {
+            Some(Ok(sourced)) => planned.push(Planned {
                 step: Step::TmuxHook,
                 what: "the tmux snippet".to_owned(),
                 action: self.plan_installed_snippet(sourced, options.snippet.as_deref()),
+            }),
+            Some(Err(argument)) => planned.push(Planned {
+                step: Step::TmuxHook,
+                what: "the tmux snippet".to_owned(),
+                action: Action::Manual(indented(&format!(
+                    "the source-file line in {} names {argument}, and a variable in it has no \
+                     value here, so the file tmux reads is not known to this run.\n\
+                     tmux expands it from the environment its server started with. Check that \
+                     file is this version's snippet, or spell the path out and run this again.",
+                    self.config.path().display()
+                ))),
             }),
             None => {
                 if let tmux_conf::Choice::Create(path) = &snippet {

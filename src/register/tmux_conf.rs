@@ -173,7 +173,7 @@ fn beside(config: &Path, home: &Home) -> PathBuf {
 /// path: the location is the user's business, and a second source line is a
 /// second set of hooks.
 pub fn sources_snippet(text: &str) -> bool {
-    sourced_argument(text).is_some()
+    sourcing_line(text).is_some()
 }
 
 /// Whether a snippet's text turns `focus-events` on, the way the shipped one
@@ -199,28 +199,52 @@ pub fn turns_on_focus_events(text: &str) -> bool {
 /// The last such line wins: the snippet only sets hooks and one option, and the
 /// last assignment of those is the one in force.
 ///
+/// Variables are expanded the way tmux expands them, `$HOME` and
+/// `$XDG_CONFIG_HOME` from the `Home` this run was given and any other from
+/// this process's environment. `Err` carries the argument as written when one
+/// of them has no value here: the file tmux reads is then not knowable, and
+/// writing to a guess would create a file nobody sources.
+///
 /// `~/` and a relative argument resolve against the `Home` this run was given
 /// rather than against the environment, for the reason `search_path` takes one:
 /// a path that reaches for `$HOME` itself is a path a test cannot steer. What
 /// tmux would have done with a relative one is a separate question, and
 /// `Sourced::relative` is where it is answered.
-pub fn sourced_snippet(text: &str, home: &Home) -> Option<Sourced> {
-    let argument = sourced_argument(text)?;
-    Some(Sourced {
+pub fn sourced_snippet(text: &str, home: &Home) -> Option<Result<Sourced, String>> {
+    let (line, written) = sourcing_line(text)?;
+    let lookup = |name: &str| match name {
+        "HOME" => Some(home.home.to_string_lossy().into_owned()),
+        "XDG_CONFIG_HOME" => home
+            .xdg_config
+            .as_ref()
+            .map(|dir| dir.to_string_lossy().into_owned()),
+        _ => std::env::var(name).ok(),
+    };
+    let Some(argument) = format::expanded_words(&line, &lookup)
+        .as_deref()
+        .and_then(path_word)
+    else {
+        return Some(Err(written));
+    };
+    Some(Ok(Sourced {
         // `join` with an absolute path discards the base, so `~/x`, `x` and
         // `/x` are all this one line.
         path: home.join(argument.strip_prefix("~/").unwrap_or(&argument)),
         relative: is_relative(&argument),
-    })
+    }))
 }
 
-/// The last `source`/`source-file` argument naming our snippet, as written.
-fn sourced_argument(text: &str) -> Option<String> {
+/// The last `source`/`source-file` line naming our snippet, and its argument,
+/// both as written.
+fn sourcing_line(text: &str) -> Option<(String, String)> {
     format::logical_lines(text)
-        .iter()
+        .into_iter()
         .rev()
-        .filter_map(|line| source_argument(&line.text))
-        .find(|path| Path::new(path).file_name() == Some(SNIPPET_NAME.as_ref()))
+        .find_map(|line| {
+            let argument = source_argument(&line.text)?;
+            (Path::new(&argument).file_name() == Some(SNIPPET_NAME.as_ref()))
+                .then_some((line.text, argument))
+        })
 }
 
 /// The snippet a config sources, and how certain the path is.
@@ -238,7 +262,12 @@ pub struct Sourced {
 
 /// The path a `source`/`source-file` line names, if it is one.
 fn source_argument(line: &str) -> Option<String> {
-    match format::words(line)?.as_slice() {
+    path_word(&format::words(line)?)
+}
+
+/// The path among a `source`/`source-file` line's words, if it is one.
+fn path_word(words: &[String]) -> Option<String> {
+    match words {
         [command, rest @ ..] if matches!(command.as_str(), "source" | "source-file") => {
             // tmux's own flags here take no values, so the path is simply the
             // last word that is not one.
@@ -609,7 +638,9 @@ mod tests {
         let text = "source-file /first/tmux-agent-status.conf\n\
                     source-file ~/.tmux/tmux-agent-status.conf\n";
         // The last one wins, for the same reason the last assignment does.
-        let last = sourced_snippet(text, &home).expect("a sourced snippet");
+        let last = sourced_snippet(text, &home)
+            .expect("a sourced snippet")
+            .expect("a resolvable path");
         assert_eq!(
             last.path,
             PathBuf::from("/home/u/.tmux/tmux-agent-status.conf")
@@ -617,14 +648,16 @@ mod tests {
         assert!(!last.relative);
 
         let absolute = sourced_snippet("source-file /x/tmux-agent-status.conf\n", &home)
-            .expect("a sourced snippet");
+            .expect("a sourced snippet")
+            .expect("a resolvable path");
         assert_eq!(absolute.path, PathBuf::from("/x/tmux-agent-status.conf"));
         assert!(!absolute.relative);
 
         // Resolved against the home we were given, and reported as a guess:
         // tmux resolves it against wherever its server was started.
         let guessed = sourced_snippet("source-file tmux-agent-status.conf\n", &home)
-            .expect("a sourced snippet");
+            .expect("a sourced snippet")
+            .expect("a resolvable path");
         assert_eq!(
             guessed.path,
             PathBuf::from("/home/u/tmux-agent-status.conf")
@@ -632,6 +665,46 @@ mod tests {
         assert!(guessed.relative);
 
         assert_eq!(sourced_snippet("set -g status on\n", &home), None);
+    }
+
+    #[test]
+    fn a_sourced_snippet_named_through_a_variable_is_expanded() {
+        let home = Home {
+            home: PathBuf::from("/home/u"),
+            xdg_config: Some(PathBuf::from("/xdg")),
+        };
+        let through_home =
+            sourced_snippet("source-file ${HOME}/.tmux/tmux-agent-status.conf\n", &home)
+                .expect("a sourced snippet")
+                .expect("a resolvable path");
+        assert_eq!(
+            through_home.path,
+            PathBuf::from("/home/u/.tmux/tmux-agent-status.conf")
+        );
+        assert!(!through_home.relative);
+
+        let through_xdg = sourced_snippet(
+            "source-file \"$XDG_CONFIG_HOME/tmux/tmux-agent-status.conf\"\n",
+            &home,
+        )
+        .expect("a sourced snippet")
+        .expect("a resolvable path");
+        assert_eq!(
+            through_xdg.path,
+            PathBuf::from("/xdg/tmux/tmux-agent-status.conf")
+        );
+
+        // A variable with no value here is handed back as written, rather than
+        // resolved to a file nobody sources.
+        assert_eq!(
+            sourced_snippet(
+                "source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/tmux-agent-status.conf\n",
+                &home
+            ),
+            Some(Err(
+                "$TMUX_AGENT_STATUS_UNSET_FOR_TEST/tmux-agent-status.conf".to_owned()
+            ))
+        );
     }
 
     #[test]

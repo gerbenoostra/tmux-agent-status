@@ -208,12 +208,32 @@ pub fn assignment(option: &str, value: &str) -> Option<String> {
 /// quoting this module will not read - the same tokenizer that reads a format
 /// line, so the two never disagree about where a word ends.
 pub fn words(line: &str) -> Option<Vec<String>> {
+    Some(read(line)?.into_iter().map(|token| token.text).collect())
+}
+
+/// The words of one logical config line as tmux reads them: unquoted, and with
+/// `$NAME` and `${NAME}` replaced by what `lookup` gives for the name.
+///
+/// tmux expands a variable in a bare or double-quoted word and leaves one in
+/// single quotes alone, and `\$` is a literal dollar (verified on 3.6a).
+/// `None` wherever [`words`] is, and for a variable `lookup` has no value for
+/// or one not spelled as a name: tmux reads an unset one as empty, which names
+/// a different file from the one the line means.
+pub fn expanded_words(line: &str, lookup: &dyn Fn(&str) -> Option<String>) -> Option<Vec<String>> {
+    read(line)?
+        .iter()
+        .map(|token| expand(&line[token.inner.clone()], token.quoting, lookup))
+        .collect()
+}
+
+/// The tokens of a line that holds one command this module can read.
+fn read(line: &str) -> Option<Vec<Token>> {
     let trimmed = line.trim_start();
     if trimmed.is_empty() || trimmed.starts_with('#') {
         return None;
     }
     match tokenize(line) {
-        (tokens, Stop::End) => Some(tokens.into_iter().map(|token| token.text).collect()),
+        (tokens, Stop::End) => Some(tokens),
         _ => None,
     }
 }
@@ -465,6 +485,41 @@ fn unquote(inner: &str, quoting: Quoting) -> String {
             out
         }
     }
+}
+
+/// A word's contents with its escapes resolved and its variables expanded.
+fn expand(
+    inner: &str,
+    quoting: Quoting,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if quoting == Quoting::Single {
+        return Some(inner.to_owned());
+    }
+    let is_name = |c: &char| c.is_ascii_alphanumeric() || *c == '_';
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            '$' => {
+                let name: String = match chars.next_if_eq(&'{') {
+                    Some(_) => {
+                        let name: String = std::iter::from_fn(|| chars.next_if(is_name)).collect();
+                        chars.next_if_eq(&'}')?;
+                        name
+                    }
+                    None => std::iter::from_fn(|| chars.next_if(is_name)).collect(),
+                };
+                if name.is_empty() {
+                    return None;
+                }
+                out.push_str(&lookup(&name)?);
+            }
+            c => out.push(c),
+        }
+    }
+    Some(out)
 }
 
 fn is_flag(word: &Token) -> bool {
@@ -744,6 +799,34 @@ mod tests {
         assert_eq!(words("   "), None);
         assert_eq!(words("source-file x; source-file y"), None);
         assert_eq!(words("source-file 'unterminated"), None);
+    }
+
+    #[test]
+    fn variables_expand_the_way_tmux_expands_them() {
+        let lookup = |name: &str| (name == "HOME").then(|| "/home/u".to_owned());
+        let expanded = |line: &str| expanded_words(line, &lookup);
+        assert_eq!(
+            expanded("source-file $HOME/a.conf"),
+            Some(vec!["source-file".to_owned(), "/home/u/a.conf".to_owned()])
+        );
+        assert_eq!(
+            expanded("source-file ${HOME}x/a.conf").unwrap()[1],
+            "/home/ux/a.conf"
+        );
+        assert_eq!(
+            expanded("source-file \"$HOME/a b\"").unwrap()[1],
+            "/home/u/a b"
+        );
+        // Nothing is a variable inside single quotes, and an escaped dollar is
+        // a dollar.
+        assert_eq!(expanded("source-file '$HOME/a'").unwrap()[1], "$HOME/a");
+        assert_eq!(expanded("source-file \\$HOME/a").unwrap()[1], "$HOME/a");
+        // An unset variable, an empty name and an unclosed brace name no file
+        // the line meant.
+        assert_eq!(expanded("source-file $UNSET/a"), None);
+        assert_eq!(expanded("source-file $/a"), None);
+        assert_eq!(expanded("source-file ${HOME/a"), None);
+        assert_eq!(expanded("# source-file $HOME/a"), None);
     }
 
     #[test]

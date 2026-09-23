@@ -737,3 +737,41 @@ fn a_declined_focus_events_does_not_stop_an_older_snippet_being_replaced() {
         include_str!("../share/tmux/tmux-agent-status.conf")
     );
 }
+
+// tmux expands `$NAME` and `${NAME}` in a source-file argument (verified on
+// 3.6a), so a config that names its snippet through `$HOME` sources the real
+// file. The upgrade has to replace that file, not create one under a
+// directory literally called `$HOME`.
+#[test]
+fn a_snippet_sourced_through_a_variable_is_the_one_replaced() {
+    if !support::tmux_or_skip() {
+        return;
+    }
+    let home = TempDir::new("e2e-variable-source");
+    let snippet = home.write(
+        ".config/tmux/tmux-agent-status.conf",
+        "set-hook -g 'session-window-changed[50]' 'run-shell -b \"tmux-agent-status clear-window #{pane_id}\"'\n",
+    );
+    let config = home.write(
+        ".config/tmux/tmux.conf",
+        "source-file ${HOME}/.config/tmux/tmux-agent-status.conf\n",
+    );
+
+    let out = register(
+        &home,
+        &[
+            "-y",
+            "--tmux-hook",
+            "--tmux-config",
+            &config.display().to_string(),
+        ],
+    );
+
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("relative path"), "{}", stdout(&out));
+    assert_eq!(
+        fs::read_to_string(&snippet).expect("the snippet"),
+        include_str!("../share/tmux/tmux-agent-status.conf")
+    );
+    assert!(!home.join("${HOME}").exists());
+}

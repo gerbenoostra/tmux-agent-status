@@ -1213,6 +1213,46 @@ fn a_declined_snippet_replacement_changes_nothing() {
     assert_eq!(fs::read_to_string(&snippet).expect("the snippet"), was);
 }
 
+// A variable with no value here leaves the file tmux reads unknown, so nothing
+// is written anywhere - above all not a file under a directory literally named
+// after the variable - and the line already in the config stands.
+//
+// Without the probe, because tmux expanding the same variable to nothing would
+// refuse the config first, which is the right refusal but not this one.
+#[test]
+fn a_sourced_snippet_behind_an_unset_variable_is_handed_back() {
+    let dir = TempDir::new("run-snippet-unset-variable");
+    dir.write(
+        ".config/tmux/tmux.conf",
+        "source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/tmux-agent-status.conf\n",
+    );
+    let script = Script::saying_yes();
+
+    let report = register::run(
+        &Options {
+            probe: false,
+            ..options(
+                &dir,
+                register::select(&[Step::TmuxHook], &[]).expect("valid"),
+            )
+        },
+        &script,
+    );
+
+    assert_eq!(report.exit_code(), 0);
+    let output = script.output();
+    assert!(
+        output.contains("the tmux snippet - not registered"),
+        "{output}"
+    );
+    assert!(output.contains("has no value here"), "{output}");
+    assert!(
+        output.contains("the tmux source-file line - already registered"),
+        "{output}"
+    );
+    assert!(!dir.join("$TMUX_AGENT_STATUS_UNSET_FOR_TEST").exists());
+}
+
 // Nothing is written to a snippet that already exists, so the step that adds
 // the source-file line is where the option is said, and it is said once.
 #[test]
