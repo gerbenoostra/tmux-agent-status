@@ -19,6 +19,12 @@ check (`pr-title`) fails PRs whose title isn't. The check matches types case-sen
 Dependabot's default `Build(deps): …` fails; `commit-message` in `.github/dependabot.yml` makes it
 `build(deps): …`.
 
+The squash body is the PR description (repository setting), not the PR's commit subjects:
+release-please reads every paragraph of a squash commit that starts with a conventional type as a
+change of its own, so don't start a description paragraph with one. To correct a merged PR's
+changelog entry, add a `BEGIN_COMMIT_OVERRIDE` … `END_COMMIT_OVERRIDE` block to its description
+([release-please docs](https://github.com/googleapis/release-please#how-can-i-fix-release-notes)).
+
 | Title                    | Effect while 0.x |
 | ------------------------ | ---------------- |
 | `feat`                   | minor            |
