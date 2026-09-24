@@ -15,15 +15,16 @@ just check-plugin    # validate the Claude Code plugin manifests (needs the `cla
 ## PR titles
 
 The PR title becomes the squash subject on merge and must be a conventional commit; a required
-check (`pr-title`) fails PRs whose title isn't. Dependabot's own titles are already conventional
-(`build(deps): …`).
+check (`pr-title`) fails PRs whose title isn't. The check matches types case-sensitively, so
+Dependabot's default `Build(deps): …` fails; `commit-message` in `.github/dependabot.yml` makes it
+`build(deps): …`.
 
-| Title                     | Effect while 0.x |
-| -------------------------- | ---------------- |
-| `feat`                     | minor            |
-| `fix`                      | patch            |
-| `!` or `BREAKING CHANGE`   | minor            |
-| any other type             | no release alone |
+| Title                    | Effect while 0.x |
+| ------------------------ | ---------------- |
+| `feat`                   | minor            |
+| `fix`                    | patch            |
+| `!` or `BREAKING CHANGE` | minor            |
+| any other type           | no release alone |
 
 ## Design rules that are easy to break
 
