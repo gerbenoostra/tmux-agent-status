@@ -1,6 +1,6 @@
 [package]
 name = "tmux-agent-status"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Agent lifecycle events as one glyph on the tmux window entry"
