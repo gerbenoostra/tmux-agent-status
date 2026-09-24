@@ -201,15 +201,24 @@ pin examples in `docs/install.md` and `install.sh` change version - never bump t
 never tag or publish a release by hand. Merging it tags `vX.Y.Z`, builds the release binaries, and
 publishes the GitHub release once every platform archive is attached.
 
-release-please pushes its release PR and its tag through a GitHub App installed on this repo (not
-the default `GITHUB_TOKEN`), so the PR gets real CI runs and the push triggers the release workflow.
+release-please opens its release PR and creates its tag with a GitHub App token, not the default
+`GITHUB_TOKEN`: CI doesn't run on a PR that `GITHUB_TOKEN` opens or updates, and the PR's required
+checks would never report. The App needs read and write access to Contents, Pull requests and
+Issues on this repository only; store its client ID and private key as the repository secrets
+`APP_CLIENT_ID` and `APP_PRIVATE_KEY`.
 
-Before merging a release PR, verify the release build end to end on a supported system without
-relying on the development symlink:
+The release stays a draft, so `releases/latest` keeps pointing at the previous release, until
+every archive is attached. If a build or the publish step fails, re-run the release workflow's
+failed jobs instead of tagging or uploading by hand.
+
+Before merging a release PR, verify the build end to end on a supported system without relying on
+the development symlink:
 
 1. Run `just check`, `just check-plugin` and `just nix-build` on the release PR's branch.
-2. Install the resulting package or release binary using one of the documented installation routes.
-3. Confirm `tmux-agent-status --version` resolves to that installed binary.
+2. Install the branch's build: the Nix package below or `cargo install --path .`. No release
+   binary exists before the merge; the documented binary routes install the previous release.
+3. Confirm `tmux-agent-status --version` resolves to that installed binary and prints the new
+   version.
 4. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
 5. Confirm each state reaches `@agent_status` and that focusing its pane clears non-sticky states.
 
