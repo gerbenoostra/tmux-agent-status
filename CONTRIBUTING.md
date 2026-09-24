@@ -26,6 +26,12 @@ Dependabot's default `Build(deps): …` fails; `commit-message` in `.github/depe
 | `!` or `BREAKING CHANGE` | minor            |
 | any other type           | no release alone |
 
+The squash body is the PR description (repository setting), not the PR's commit subjects:
+release-please reads every paragraph of a squash commit that starts with a conventional type as a
+change of its own, so don't start a description paragraph with one. To correct a merged PR's
+changelog entry, add a `BEGIN_COMMIT_OVERRIDE` … `END_COMMIT_OVERRIDE` block to its description
+([release-please docs](https://github.com/googleapis/release-please#how-can-i-fix-release-notes)).
+
 ## Design rules that are easy to break
 
 These were each verified against a real tmux server and each has been the
@@ -186,18 +192,36 @@ nix run . -- --version
 just nix-build
 ```
 
-## Last check before tagging
+## Releases
 
-Verify the release build end to end on a supported system without relying on the development
-symlink:
+[release-please](https://github.com/googleapis/release-please) turns conventional commits on `main`
+(see [PR titles](#pr-titles)) into a standing PR titled `chore(main): release X.Y.Z`. That PR is the
+only place `Cargo.toml`, `Cargo.lock`, `plugins/tmux-agent-status/.claude-plugin/plugin.json` and the
+pin examples in `docs/install.md` and `install.sh` change version - never bump them by hand, and
+never tag or publish a release by hand. Merging it tags `vX.Y.Z`, builds the release binaries, and
+publishes the GitHub release once every platform archive is attached.
 
-1. Bump `version` in `Cargo.toml` **and** in `plugins/tmux-agent-status/.claude-plugin/plugin.json`;
-   `just test` fails if only one of them moves.
-2. Run `just check`, `just check-plugin` and `just nix-build`.
-3. Install the resulting package or release binary using one of the documented installation routes.
-4. Confirm `tmux-agent-status --version` resolves to that installed binary.
-5. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
-6. Confirm each state reaches `@agent_status` and that focusing its pane clears non-sticky states.
+release-please opens its release PR and creates its tag with a GitHub App token, not the default
+`GITHUB_TOKEN`: CI doesn't run on a PR that `GITHUB_TOKEN` opens or updates, and the PR's required
+checks would never report. The App needs read and write access to Contents, Pull requests and
+Issues on this repository only; store its client ID and private key as the repository secrets
+`APP_CLIENT_ID` and `APP_PRIVATE_KEY`.
+
+The release stays a draft, so `releases/latest` keeps pointing at the previous release, until
+every archive is attached. If a build or the publish step fails, re-run the release workflow's
+failed jobs instead of tagging or uploading by hand.
+
+Before merging a release PR, verify the build end to end on a supported system without relying on
+the development symlink:
+
+1. Run `just check`, `just check-plugin` and `just nix-build` on the release PR's branch.
+2. Put the branch's build on the `PATH` your agent hooks use: `cargo install --path .`, or the
+   checkout as a flake input (below); `nix build` alone installs nothing. No release binary exists
+   before the merge; the documented binary routes install the previous release.
+3. Confirm `tmux-agent-status --version` resolves to that installed binary and prints the new
+   version.
+4. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
+5. Confirm each state reaches `@agent_status` and that focusing its pane clears non-sticky states.
 
 For Nix, the checkout itself can be tested without changing another configuration:
 

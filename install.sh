@@ -2,10 +2,12 @@
 # tmux-agent-status installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
 #
+# x-release-please-start-version
 # Environment variables:
 #   TMUX_AGENT_STATUS_VERSION       - pin a specific release (e.g. v0.0.1)
 #   TMUX_AGENT_STATUS_INSTALL_DIR   - override install directory (default: $HOME/.local/bin)
 #   TMUX_AGENT_STATUS_SKIP_CHECKSUM - set to 1 to skip checksum verification (not recommended)
+# x-release-please-end
 #
 # This script must be executed, not sourced:
 #   sh install.sh          (correct)
@@ -33,6 +35,7 @@ error() {
     exit 1
 }
 
+# x-release-please-start-version
 usage() {
     cat <<'EOF'
 tmux-agent-status installer
@@ -45,6 +48,7 @@ Environment variables:
   TMUX_AGENT_STATUS_SKIP_CHECKSUM set to 1 to skip checksum verification
 EOF
 }
+# x-release-please-end
 
 fetch() {
     # fetch <url> <output-file>

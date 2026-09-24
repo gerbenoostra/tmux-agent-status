@@ -20,10 +20,12 @@ tmux 3.0 or newer, because the per-pane state is a pane option (`set-option -p`)
 curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
 ```
 
+<!-- x-release-please-start-version -->
 Detects your platform, downloads the matching release tarball, verifies its checksum, and installs
 the binary to `~/.local/bin` (override with `TMUX_AGENT_STATUS_INSTALL_DIR`). Pin a version with
 `TMUX_AGENT_STATUS_VERSION=v0.0.1`. See `install.sh` in the repository root for the full set of
 environment variables.
+<!-- x-release-please-end -->
 
 ## Nix profile
 
@@ -72,6 +74,7 @@ Home Manager configuration.
 The one-line installer above wraps this; use these steps directly if you want to inspect each one.
 Every tagged release publishes a tarball per platform with a `.sha256` checksum beside it:
 
+<!-- x-release-please-start-version -->
 ```sh
 tag=v0.0.1
 target=aarch64-apple-darwin      # or x86_64-apple-darwin, {x86_64,aarch64}-unknown-linux-gnu
@@ -84,6 +87,7 @@ mkdir -p "$HOME/.local/bin"
 cp "tmux-agent-status-$tag-$target/tmux-agent-status" "$HOME/.local/bin/tmux-agent-status"
 chmod 755 "$HOME/.local/bin/tmux-agent-status"
 ```
+<!-- x-release-please-end -->
 
 Ensure `~/.local/bin` is on the `PATH` inherited by your agent hooks, then run
 `tmux-agent-status register`.
