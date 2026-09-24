@@ -19,12 +19,12 @@ check (`pr-title`) fails PRs whose title isn't. The check matches types case-sen
 Dependabot's default `Build(deps): …` fails; `commit-message` in `.github/dependabot.yml` makes it
 `build(deps): …`.
 
-| Title                    | Effect while 0.x |
-| ------------------------ | ---------------- |
-| `feat`                   | minor            |
-| `fix`                    | patch            |
-| `!` or `BREAKING CHANGE` | minor            |
-| any other type           | no release alone |
+| Title                     | Effect while 0.x |
+| ------------------------- | ---------------- |
+| `feat`                    | minor            |
+| `fix`, `perf` or `revert` | patch            |
+| `!` or `BREAKING CHANGE`  | minor            |
+| any other type            | no release alone |
 
 The squash body is the PR description (repository setting), not the PR's commit subjects:
 release-please reads every paragraph of a squash commit that starts with a conventional type as a
