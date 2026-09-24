@@ -186,18 +186,26 @@ nix run . -- --version
 just nix-build
 ```
 
-## Last check before tagging
+## Releases
 
-Verify the release build end to end on a supported system without relying on the development
-symlink:
+[release-please](https://github.com/googleapis/release-please) turns conventional commits on `main`
+(see [PR titles](#pr-titles)) into a standing PR titled `chore(main): release X.Y.Z`. That PR is the
+only place `Cargo.toml`, `Cargo.lock`, `plugins/tmux-agent-status/.claude-plugin/plugin.json` and the
+pin examples in `docs/install.md` and `install.sh` change version - never bump them by hand, and
+never tag or publish a release by hand. Merging it tags `vX.Y.Z`, builds the release binaries, and
+publishes the GitHub release once every platform archive is attached.
 
-1. Bump `version` in `Cargo.toml` **and** in `plugins/tmux-agent-status/.claude-plugin/plugin.json`;
-   `just test` fails if only one of them moves.
-2. Run `just check`, `just check-plugin` and `just nix-build`.
-3. Install the resulting package or release binary using one of the documented installation routes.
-4. Confirm `tmux-agent-status --version` resolves to that installed binary.
-5. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
-6. Confirm each state reaches `@agent_status` and that focusing its pane clears non-sticky states.
+release-please pushes its release PR and its tag through a GitHub App installed on this repo (not
+the default `GITHUB_TOKEN`), so the PR gets real CI runs and the push triggers the release workflow.
+
+Before merging a release PR, verify the release build end to end on a supported system without
+relying on the development symlink:
+
+1. Run `just check`, `just check-plugin` and `just nix-build` on the release PR's branch.
+2. Install the resulting package or release binary using one of the documented installation routes.
+3. Confirm `tmux-agent-status --version` resolves to that installed binary.
+4. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
+5. Confirm each state reaches `@agent_status` and that focusing its pane clears non-sticky states.
 
 For Nix, the checkout itself can be tested without changing another configuration:
 
