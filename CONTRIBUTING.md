@@ -19,18 +19,18 @@ check (`pr-title`) fails PRs whose title isn't. The check matches types case-sen
 Dependabot's default `Build(deps): …` fails; `commit-message` in `.github/dependabot.yml` makes it
 `build(deps): …`.
 
-The squash body is the PR description (repository setting), not the PR's commit subjects:
-release-please reads every paragraph of a squash commit that starts with a conventional type as a
-change of its own, so don't start a description paragraph with one. To correct a merged PR's
-changelog entry, add a `BEGIN_COMMIT_OVERRIDE` … `END_COMMIT_OVERRIDE` block to its description
-([release-please docs](https://github.com/googleapis/release-please#how-can-i-fix-release-notes)).
-
 | Title                    | Effect while 0.x |
 | ------------------------ | ---------------- |
 | `feat`                   | minor            |
 | `fix`                    | patch            |
 | `!` or `BREAKING CHANGE` | minor            |
 | any other type           | no release alone |
+
+The squash body is the PR description (repository setting), not the PR's commit subjects:
+release-please reads every paragraph of a squash commit that starts with a conventional type as a
+change of its own, so don't start a description paragraph with one. To correct a merged PR's
+changelog entry, add a `BEGIN_COMMIT_OVERRIDE` … `END_COMMIT_OVERRIDE` block to its description
+([release-please docs](https://github.com/googleapis/release-please#how-can-i-fix-release-notes)).
 
 ## Design rules that are easy to break
 
@@ -215,8 +215,9 @@ Before merging a release PR, verify the build end to end on a supported system w
 the development symlink:
 
 1. Run `just check`, `just check-plugin` and `just nix-build` on the release PR's branch.
-2. Install the branch's build: the Nix package below or `cargo install --path .`. No release
-   binary exists before the merge; the documented binary routes install the previous release.
+2. Put the branch's build on the `PATH` your agent hooks use: `cargo install --path .`, or the
+   checkout as a flake input (below); `nix build` alone installs nothing. No release binary exists
+   before the merge; the documented binary routes install the previous release.
 3. Confirm `tmux-agent-status --version` resolves to that installed binary and prints the new
    version.
 4. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
