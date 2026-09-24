@@ -18,9 +18,9 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      # GITHUB_TOKEN can't open pull requests in this repo (required review
-      # depth), and its pushes and PRs don't start the required CI checks
-      # (Actions doesn't trigger further workflow runs from its own token).
+      # GITHUB_TOKEN can't open pull requests here (the repository doesn't
+      # allow Actions to create them), and a PR it opens or updates starts no
+      # workflow runs, so the release PR's required checks would never report.
       # The App token does both.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
@@ -91,8 +91,8 @@ jobs:
           path: dist
           merge-multiple: true
       # Re-runnable: --clobber tolerates a retry re-uploading the same assets,
-      # and the release stays a draft (so releases/latest can't resolve to it,
-      # D3) until every asset is up and this step un-drafts it.
+      # and the release stays a draft (so releases/latest can't resolve to it)
+      # until every asset is up and this step un-drafts it.
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
