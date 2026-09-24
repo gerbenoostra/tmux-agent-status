@@ -12,6 +12,19 @@ just check-plugin    # validate the Claude Code plugin manifests (needs the `cla
 
 `just check` is what CI runs. `just harness` starts a throwaway tmux server that displays all four states so you can inspect the glyphs.
 
+## PR titles
+
+The PR title becomes the squash subject on merge and must be a conventional commit; a required
+check (`pr-title`) fails PRs whose title isn't. Dependabot's own titles are already conventional
+(`build(deps): …`).
+
+| Title                     | Effect while 0.x |
+| -------------------------- | ---------------- |
+| `feat`                     | minor            |
+| `fix`                      | patch            |
+| `!` or `BREAKING CHANGE`   | minor            |
+| any other type             | no release alone |
+
 ## Design rules that are easy to break
 
 These were each verified against a real tmux server and each has been the
