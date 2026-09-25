@@ -654,9 +654,10 @@ fn system_wide_note(listed: Option<&str>, exists: impl Fn(&Path) -> bool) -> Str
 ///
 /// Which assignment of an option wins is decided by the order tmux executes
 /// them in, and a relative `source-file` is resolved against the working
-/// directory of whatever started the server. We follow it from `$HOME`, which
-/// is where the probe puts its own cwd, so the walk and the check that marks
-/// its homework agree - but a server started from somewhere else read a
+/// directory of whatever started the server. We follow it from the `Home` we
+/// were given, which in production is the one `Home::from_env()` read of the
+/// same `$HOME` the probe puts its own cwd in, so the walk and the check that
+/// marks its homework agree - but a server started from somewhere else read a
 /// different file, and may have a different winner. Reported, because the one
 /// moment the user can act on that is while reading the plan.
 ///
