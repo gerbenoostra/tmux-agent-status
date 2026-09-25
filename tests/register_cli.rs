@@ -1111,6 +1111,21 @@ fn a_source_named_through_an_unset_variable_is_warned_about_not_guessed() {
     );
     assert!(text.contains("variable"), "{text}");
     assert!(!text.contains("relative path"), "{text}");
+
+    // A rerun still warns after both format assignments already carry the
+    // term: the unresolved source can change which assignment tmux honours,
+    // independently of whether this run has an edit to make.
+    let rerun = command(&home, &["-y", "--tmux-format", "--no-tmux-probe"])
+        .env_remove("TMUX_AGENT_STATUS_UNSET_FOR_TEST")
+        .output()
+        .expect("the binary runs");
+    assert_eq!(code(&rerun), 0, "{}\n{}", stdout(&rerun), stderr(&rerun));
+    let text = stdout(&rerun);
+    assert!(text.contains("variable"), "{text}");
+    assert!(
+        text.contains("$TMUX_AGENT_STATUS_UNSET_FOR_TEST/fragment.conf"),
+        "{text}"
+    );
 }
 
 // A dry run that cannot plan a step still exits 0. Nothing ran, so nothing

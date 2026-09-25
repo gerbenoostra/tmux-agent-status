@@ -1560,7 +1560,9 @@ impl TmuxPlan {
                     .rfind(|found| found.option() == Some(option))
             })
             .collect();
-        let ordering = ordering_notes(&found.relative_sources, &found.unresolved_sources);
+        for note in ordering_notes(&found.relative_sources, &found.unresolved_sources) {
+            prompt.say(&format!("  {note}"));
+        }
 
         // Neither is assigned: the user is on tmux's compiled-in default, and
         // one marked block sets both.
@@ -1568,7 +1570,7 @@ impl TmuxPlan {
             return vec![Planned {
                 step: Step::TmuxFormat,
                 what: Step::TmuxFormat.title().to_owned(),
-                action: self.plan_new_pair(options, &ordering),
+                action: self.plan_new_pair(options),
             }];
         }
 
@@ -1579,10 +1581,10 @@ impl TmuxPlan {
                 step: Step::TmuxFormat,
                 what: format!("the term in {option}"),
                 action: match winner {
-                    Some(winner) => self.plan_splice(option, winner, prompt, &ordering),
+                    Some(winner) => self.plan_splice(option, winner, prompt),
                     // One is assigned and the other is not, so the bare one
                     // gets a line of its own spliced from tmux's default.
-                    None => self.plan_one_line(option, options, &ordering),
+                    None => self.plan_one_line(option, options),
                 },
             })
             .collect()
@@ -1610,7 +1612,7 @@ impl TmuxPlan {
     }
 
     /// Append a line for an option nothing assigns.
-    fn plan_one_line(&self, option: &str, options: &Options, ordering: &[String]) -> Action {
+    fn plan_one_line(&self, option: &str, options: &Options) -> Action {
         let Some(line) = self.spliced_default(options, option) else {
             return self.manual_term("    this tmux's default format cannot be quoted safely");
         };
@@ -1627,12 +1629,10 @@ impl TmuxPlan {
             },
             parses: not_empty,
             creating: !seen.exists,
-            notes: {
-                let mut notes = vec![format!("nothing assigns {option}, so a line is added")];
-                notes.push(format!("  {}", line.trim_end()));
-                notes.extend(ordering.iter().cloned());
-                notes
-            },
+            notes: vec![
+                format!("nothing assigns {option}, so a line is added"),
+                format!("  {}", line.trim_end()),
+            ],
             verify: self.verification(TmuxPlan::term_in(option)),
             path: seen.resolved,
             announced: false,
@@ -1649,7 +1649,6 @@ impl TmuxPlan {
         option: &str,
         last: &tmux_conf::Assignment,
         prompt: &dyn prompt::Interaction,
-        ordering: &[String],
     ) -> Action {
         let Some(line) = last.candidate.clone().line() else {
             let why = last
@@ -1695,9 +1694,6 @@ impl TmuxPlan {
         ));
         prompt.say(&format!("      before: {}", last.line.text));
         prompt.say(&format!("      after:  {rewritten}"));
-        for note in ordering {
-            prompt.say(&format!("    {note}"));
-        }
         let proposed = rewritten;
         let rewritten = self.offer_edit(proposed.clone(), prompt);
         if rewritten != proposed {
@@ -1735,7 +1731,7 @@ impl TmuxPlan {
     }
 
     /// No format line at all: the user is on tmux's compiled-in default.
-    fn plan_new_pair(&self, options: &Options, ordering: &[String]) -> Action {
+    fn plan_new_pair(&self, options: &Options) -> Action {
         // Asked rather than remembered: the default has changed between tmux
         // versions and the one in *this* tmux is the only one that is right.
         let block: Option<String> = format::OPTIONS
@@ -1761,7 +1757,6 @@ impl TmuxPlan {
                         .to_owned(),
                 ];
                 notes.extend(block.lines().map(|line| format!("  {line}")));
-                notes.extend(ordering.iter().cloned());
                 notes
             },
             verify: self.verification(Landed::Term(
