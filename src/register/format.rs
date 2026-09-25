@@ -828,6 +828,7 @@ mod tests {
         // An unset variable, an empty brace and an unclosed brace name no
         // file the line meant.
         assert_eq!(word("source-file $UNSET/a"), None);
+        assert_eq!(word("source-file ${UNSET}/a"), None);
         assert_eq!(word("source-file ${}/a"), None);
         assert_eq!(word("source-file ${HOME/a"), None);
         // A `$` no name follows is a literal dollar: tmux reads `$/a` as the
