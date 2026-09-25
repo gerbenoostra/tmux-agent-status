@@ -499,6 +499,30 @@ fn a_single_quoted_variable_is_a_literal_relative_path() {
     assert!(found.assignments.is_empty(), "{:?}", found.assignments);
 }
 
+// A `$` no name follows is a literal dollar, not a variable (probed: tmux
+// reads `source-file frag$.conf` as the file `frag$.conf`), so the word keeps
+// it - the file is followed, and its relativeness is reported the way any
+// written relative argument is.
+#[test]
+fn a_dollar_that_names_no_variable_is_a_literal_in_the_path() {
+    let dir = TempDir::new("order-literal-dollar");
+    dir.write(
+        "frag$.conf",
+        "set -g window-status-format 'through a literal dollar'\n",
+    );
+    let entry = dir.write("tmux.conf", "source-file frag$.conf\n");
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["through a literal dollar"]);
+    assert_eq!(found.relative_sources, ["frag$.conf"]);
+    assert!(
+        found.unresolved_sources.is_empty(),
+        "{:?}",
+        found.unresolved_sources
+    );
+}
+
 // `~` resolves against the `Home` the walk was given, not the process's real
 // `$HOME`: a fragment that exists only in the given one is still found.
 #[test]

@@ -217,9 +217,10 @@ pub fn words(line: &str) -> Option<Vec<String>> {
 /// tmux expands a variable in a bare or double-quoted word and leaves one in
 /// single quotes alone, and `\$` is a literal dollar (verified on 3.6a).
 /// `None` wherever [`words`] is `None`, where the line has no word `at`, or
-/// where a variable in that word has no value for `lookup` or is not spelled
-/// as a name - a variable in any other word cannot make it `None`, which is
-/// why a caller that follows one word asks for that word alone.
+/// where a variable in that word has no value for `lookup` or a `${` is never
+/// closed - a lone `$` is a literal dollar, not a variable. A variable in any
+/// other word cannot make it `None`, which is why a caller that follows one
+/// word asks for that word alone.
 pub fn expanded_word(
     line: &str,
     at: usize,
@@ -505,20 +506,26 @@ fn expand(
     while let Some(c) = chars.next() {
         match c {
             '\\' => out.extend(chars.next()),
-            '$' => {
-                let name: String = match chars.next_if_eq(&'{') {
-                    Some(_) => {
-                        let name: String = std::iter::from_fn(|| chars.next_if(is_name)).collect();
-                        chars.next_if_eq(&'}')?;
-                        name
+            '$' => match chars.next_if_eq(&'{') {
+                // `${NAME}`: the name must close, and `${}` names nothing.
+                Some(_) => {
+                    let name: String = std::iter::from_fn(|| chars.next_if(is_name)).collect();
+                    chars.next_if_eq(&'}')?;
+                    if name.is_empty() {
+                        return None;
                     }
-                    None => std::iter::from_fn(|| chars.next_if(is_name)).collect(),
-                };
-                if name.is_empty() {
-                    return None;
+                    out.push_str(&lookup(&name)?);
                 }
-                out.push_str(&lookup(&name)?);
-            }
+                // `$NAME`, or a literal dollar when no name follows one -
+                // verified: `source-file x$.conf` reads the file `x$.conf`.
+                None => {
+                    let name: String = std::iter::from_fn(|| chars.next_if(is_name)).collect();
+                    match name.is_empty() {
+                        true => out.push('$'),
+                        false => out.push_str(&lookup(&name)?),
+                    }
+                }
+            },
             c => out.push(c),
         }
     }
@@ -818,11 +825,15 @@ mod tests {
         // a dollar.
         assert_eq!(word("source-file '$HOME/a'").unwrap(), "$HOME/a");
         assert_eq!(word("source-file \\$HOME/a").unwrap(), "$HOME/a");
-        // An unset variable, an empty name and an unclosed brace name no file
-        // the line meant.
+        // An unset variable, an empty brace and an unclosed brace name no
+        // file the line meant.
         assert_eq!(word("source-file $UNSET/a"), None);
-        assert_eq!(word("source-file $/a"), None);
+        assert_eq!(word("source-file ${}/a"), None);
         assert_eq!(word("source-file ${HOME/a"), None);
+        // A `$` no name follows is a literal dollar: tmux reads `$/a` as the
+        // file `$/a`, so the word keeps it.
+        assert_eq!(word("source-file $/a").unwrap(), "$/a");
+        assert_eq!(word("source-file a$.conf").unwrap(), "a$.conf");
         assert_eq!(word("# source-file $HOME/a"), None);
         // A variable in another word cannot fail this one, whichever side of
         // it they stand on, and a word that is not there is `None` too.
