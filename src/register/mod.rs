@@ -1721,8 +1721,8 @@ impl TmuxPlan {
             },
             parses: not_empty,
             creating: false,
-            // Nothing left for `confirm` to say: the header, before/after and
-            // ordering hint were all said above, next to the edit question.
+            // Nothing left for `confirm` to say: the header and before/after
+            // were already said above, next to the edit question.
             notes: Vec::new(),
             verify: self.verification(TmuxPlan::term_in(option)),
             path: seen.resolved,
