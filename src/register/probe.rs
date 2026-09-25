@@ -297,8 +297,10 @@ fn run_here(args: &[&str]) -> Option<String> {
 /// `$TMUX` is cleared so a probe started from inside tmux cannot reach the
 /// server it is running in, and the working directory is `$HOME` because tmux
 /// resolves a relative `source-file` against the process's cwd rather than the
-/// config's - verified. The walk in `tmux_conf` resolves one the same way, so
-/// the two read the same files, and reports that it had to guess.
+/// config's - verified. The walk in `tmux_conf` resolves one against the
+/// `Home` it is given, which in production is the one `Home::from_env()` read
+/// of this same `$HOME`, so the two read the same files, and reports that it
+/// had to guess.
 fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, String, String)> {
     // The test-only switch, shared with the rest of `register`: a tmux that
     // stops answering partway through a sequence is a thing that happens and

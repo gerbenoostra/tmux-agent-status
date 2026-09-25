@@ -1046,6 +1046,88 @@ fn a_relative_source_is_followed_from_home_and_the_guess_is_reported() {
     );
 }
 
+// tmux expands `$NAME`/`${NAME}` in a `source-file` argument outside single
+// quotes before resolving it (probed on 3.6a), so a fragment reached only
+// through `$HOME/...` is a file the format step must find - and once expanded
+// the argument is absolute, so there is no cwd guess to disclose.
+#[test]
+fn a_source_named_through_home_is_followed_and_reports_no_guess() {
+    let home = TempDir::new("cli-home-var-source");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    fs::write(
+        &config,
+        "set -g window-status-format '#I:#W'\n\
+         set -g window-status-current-format '#I:#W'\n\
+         source-file $HOME/fragment.conf\n",
+    )
+    .expect("the config");
+    let fragment = home.join("fragment.conf");
+    fs::write(&fragment, "set -g window-status-format '#I:#W-frag'\n").expect("the fragment");
+
+    let out = register(&home, &["-y", "--tmux-format"]);
+
+    assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
+    assert!(!stdout(&out).contains("relative path"), "{}", stdout(&out));
+    // The winning assignment lives in the fragment the variable names, and it
+    // is the one that gained the term.
+    let edited = fs::read_to_string(&fragment).expect("the fragment");
+    assert!(
+        edited.contains("#{?@agent_status, #{@agent_status},}"),
+        "the fragment $HOME names was not the one edited:\n{edited}"
+    );
+}
+
+// A `source-file` argument whose variable has no value here names a file the
+// walk can neither follow nor guess at: warned about on its own wording,
+// because "resolved against a working directory" is not what went wrong.
+// The probe is off: tmux expands an unset variable to empty, and a live probe
+// would refuse the config as unparseable before the walk ever reported on it.
+#[test]
+fn a_source_named_through_an_unset_variable_is_warned_about_not_guessed() {
+    let home = TempDir::new("cli-unset-var-source");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    fs::write(
+        &config,
+        "set -g window-status-format '#I:#W'\n\
+         set -g window-status-current-format '#I:#W'\n\
+         source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/fragment.conf\n",
+    )
+    .expect("the config");
+
+    let out = command(&home, &["-y", "--tmux-format", "--no-tmux-probe"])
+        .env_remove("TMUX_AGENT_STATUS_UNSET_FOR_TEST")
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
+    let text = stdout(&out);
+    // The written argument is named, and the wording is about the variable -
+    // not about a working-directory resolution, which is not what happened.
+    assert!(
+        text.contains("$TMUX_AGENT_STATUS_UNSET_FOR_TEST/fragment.conf"),
+        "{text}"
+    );
+    assert!(text.contains("variable"), "{text}");
+    assert!(!text.contains("relative path"), "{text}");
+
+    // A rerun still warns after both format assignments already carry the
+    // term: the unresolved source can change which assignment tmux honours,
+    // independently of whether this run has an edit to make.
+    let rerun = command(&home, &["-y", "--tmux-format", "--no-tmux-probe"])
+        .env_remove("TMUX_AGENT_STATUS_UNSET_FOR_TEST")
+        .output()
+        .expect("the binary runs");
+    assert_eq!(code(&rerun), 0, "{}\n{}", stdout(&rerun), stderr(&rerun));
+    let text = stdout(&rerun);
+    assert!(text.contains("variable"), "{text}");
+    assert!(
+        text.contains("$TMUX_AGENT_STATUS_UNSET_FOR_TEST/fragment.conf"),
+        "{text}"
+    );
+}
+
 // A dry run that cannot plan a step still exits 0. Nothing ran, so nothing
 // failed, and exit 1 told a caller that a file had been touched and put back -
 // the one thing a dry run certainly did not do.

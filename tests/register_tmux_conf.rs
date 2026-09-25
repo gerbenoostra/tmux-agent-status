@@ -24,8 +24,8 @@ fn home_in(dir: &TempDir) -> Home {
 }
 
 /// The values assigned by every format line the walk found, in order.
-fn values(entry: &Path) -> Vec<String> {
-    tmux_conf::walk(entry)
+fn values(entry: &Path, home: &Home) -> Vec<String> {
+    tmux_conf::walk(entry, home)
         .assignments
         .into_iter()
         .filter_map(|found| found.candidate.line())
@@ -164,10 +164,11 @@ set -g window-status-format 'still read'
 ",
     );
 
-    // The `~` resolves against the real $HOME, where that file does not exist;
-    // what matters is that it is not looked for in a directory called `~`.
+    // The `~` resolves against the `Home` the walk was given, where that file
+    // does not exist; what matters is that it is not looked for in a
+    // directory called `~`.
     assert!(!dir.join("~").exists());
-    assert_eq!(values(&entry), ["still read"]);
+    assert_eq!(values(&entry, &home_in(&dir)), ["still read"]);
 }
 
 #[test]
@@ -181,7 +182,7 @@ set -g window-status-format 'still read'\n",
             dir.path().display()
         ),
     );
-    assert_eq!(values(&entry), ["still read"]);
+    assert_eq!(values(&entry, &home_in(&dir)), ["still read"]);
 }
 
 // 5. Config-order resolution: the defect a draft of this plan had, in both
@@ -201,7 +202,10 @@ fn the_last_assignment_in_tmuxs_own_order_is_the_one_found_last() {
         ),
     );
 
-    assert_eq!(values(&entry), ["from the main file", "from the fragment"]);
+    assert_eq!(
+        values(&entry, &home_in(&dir)),
+        ["from the main file", "from the fragment"]
+    );
 }
 
 #[test]
@@ -219,7 +223,10 @@ fn reversing_the_two_reverses_the_winner() {
         ),
     );
 
-    assert_eq!(values(&entry), ["from the fragment", "from the main file"]);
+    assert_eq!(
+        values(&entry, &home_in(&dir)),
+        ["from the fragment", "from the main file"]
+    );
 }
 
 #[test]
@@ -230,7 +237,7 @@ fn a_refused_line_is_still_reported_so_it_can_be_handed_back() {
         "set -g window-status-format 'a' ; set -g status on\n",
     );
 
-    let found = tmux_conf::walk(&entry).assignments;
+    let found = tmux_conf::walk(&entry, &home_in(&dir)).assignments;
     assert_eq!(found.len(), 1);
     assert!(matches!(&found[0].candidate, Candidate::Refused { .. }));
     assert_eq!(found[0].option(), Some("window-status-format"));
@@ -260,7 +267,7 @@ fn a_cycle_of_sourced_files_terminates() {
     )
     .expect("b.conf");
 
-    assert_eq!(values(&a), ["b", "a"]);
+    assert_eq!(values(&a, &home_in(&dir)), ["b", "a"]);
 }
 
 #[test]
@@ -283,7 +290,7 @@ fn a_glob_is_expanded_and_sorted() {
         &format!("source-file {}/conf.d/*.conf\n", dir.path().display()),
     );
 
-    assert_eq!(values(&entry), ["earlier", "later"]);
+    assert_eq!(values(&entry, &home_in(&dir)), ["earlier", "later"]);
 }
 
 #[test]
@@ -292,16 +299,20 @@ fn a_relative_source_is_reported_and_never_read_from_beside_the_config() {
     // was started in, not against the config file's own. Reading it from
     // beside the config is the one answer that is wrong for every layout but
     // `~/.tmux.conf`, and it is wrong silently: the walk picks a winner out of
-    // a file tmux never read. So it is resolved from `$HOME`, which is where
-    // the probe puts its cwd, and the guess is reported.
+    // a file tmux never read. So it is resolved against the `Home` the walk
+    // was given - in production `$HOME`, which is where the probe puts its
+    // cwd - and the guess is reported. The `Home` here is a second, empty
+    // directory: pointing it at the config's own would resolve the fragment
+    // beside the config and prove nothing.
     let dir = TempDir::new("order-relative");
+    let elsewhere = TempDir::new("order-relative-home");
     dir.write(
         "order-relative-fragment.conf",
         "set -g window-status-format 'beside the config'\n",
     );
     let entry = dir.write("tmux.conf", "source-file order-relative-fragment.conf\n");
 
-    let found = tmux_conf::walk(&entry);
+    let found = tmux_conf::walk(&entry, &home_in(&elsewhere));
     assert!(
         found.assignments.is_empty(),
         "the fragment beside the config was read: {:?}",
@@ -319,13 +330,232 @@ fn an_absolute_or_tilde_source_is_not_reported_as_a_guess() {
         &format!("source-file {}\n", fragment.display()),
     );
 
-    let found = tmux_conf::walk(&entry);
-    assert_eq!(values(&entry), ["absolute"]);
+    let home = home_in(&dir);
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["absolute"]);
     assert!(
         found.relative_sources.is_empty(),
         "{:?}",
         found.relative_sources
     );
+}
+
+// tmux expands `$NAME`/`${NAME}` in a `source-file` argument outside single
+// quotes before resolving it (probed on 3.6a), so a fragment reached only
+// through a variable is a file the walk must find.
+#[test]
+fn a_source_named_through_home_is_descended_into() {
+    let dir = TempDir::new("order-home-var");
+    dir.write(
+        "fragment.conf",
+        "set -g window-status-format 'through a variable'\n",
+    );
+    let entry = dir.write("tmux.conf", "source-file $HOME/fragment.conf\n");
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["through a variable"]);
+    // Expanded it is an absolute path, so there is no cwd guess to report.
+    assert!(
+        found.relative_sources.is_empty(),
+        "{:?}",
+        found.relative_sources
+    );
+    assert!(
+        found.unresolved_sources.is_empty(),
+        "{:?}",
+        found.unresolved_sources
+    );
+}
+
+#[test]
+fn a_source_named_through_xdg_config_home_is_descended_into() {
+    let dir = TempDir::new("order-xdg-var");
+    dir.write(
+        "elsewhere/tmux/fragment.conf",
+        "set -g window-status-format 'through xdg'\n",
+    );
+    let entry = dir.write(
+        "tmux.conf",
+        "source-file ${XDG_CONFIG_HOME}/tmux/fragment.conf\n",
+    );
+    let home = Home {
+        home: dir.path().to_path_buf(),
+        xdg_config: Some(dir.join("elsewhere")),
+    };
+
+    assert_eq!(values(&entry, &home), ["through xdg"]);
+}
+
+// A variable with no value here leaves nothing to follow: the argument is
+// neither descended into nor reported as a relative-path guess, which is a
+// different thing that did not happen. It is reported on its own, because the
+// file it names may hold the winning assignment. The line is there twice: the
+// report deduplicates the way `relative_sources` does.
+#[test]
+fn a_source_named_through_an_unset_variable_is_reported_not_followed() {
+    let dir = TempDir::new("order-unset-var");
+    // The fragment is there; what stops the descent is the variable, not the file.
+    dir.write(
+        "fragment.conf",
+        "set -g window-status-format 'never read'\n",
+    );
+    let entry = dir.write(
+        "tmux.conf",
+        "source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/fragment.conf\n\
+         source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/fragment.conf\n\
+         set -g window-status-format 'still read'\n",
+    );
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["still read"]);
+    assert!(
+        found.relative_sources.is_empty(),
+        "{:?}",
+        found.relative_sources
+    );
+    assert_eq!(
+        found.unresolved_sources,
+        ["$TMUX_AGENT_STATUS_UNSET_FOR_TEST/fragment.conf"]
+    );
+}
+
+// Only the word the walk follows decides which file tmux reads: a variable
+// anywhere else on the line is tmux's own concern. A second path argument
+// that cannot be resolved does not stop the first being followed - or being
+// reported as the relative-path guess it is - because this is a config walk,
+// not a config validator.
+#[test]
+fn an_unresolvable_word_elsewhere_on_the_line_does_not_hide_the_path() {
+    let dir = TempDir::new("order-other-arg-var");
+    dir.write(
+        "fragment.conf",
+        "set -g window-status-format 'still followed'\n",
+    );
+    let entry = dir.write(
+        "tmux.conf",
+        "source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/x.conf fragment.conf\n",
+    );
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["still followed"]);
+    assert_eq!(found.relative_sources, ["fragment.conf"]);
+    assert!(
+        found.unresolved_sources.is_empty(),
+        "{:?}",
+        found.unresolved_sources
+    );
+}
+
+// And when it is the followed word that cannot be resolved, it is the one
+// named in `unresolved_sources` - the report is about the word the walk acted
+// on, whatever else the line carries. The earlier path tmux would also read
+// is a single-path limitation the walk does not pretend away.
+#[test]
+fn the_unresolvable_report_names_the_path_the_walk_followed() {
+    let dir = TempDir::new("order-last-arg-var");
+    dir.write(
+        "fragment.conf",
+        "set -g window-status-format 'tmux reads this, the walk does not'\n",
+    );
+    let entry = dir.write(
+        "tmux.conf",
+        "source-file fragment.conf $TMUX_AGENT_STATUS_UNSET_FOR_TEST/x.conf\n",
+    );
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(
+        found.unresolved_sources,
+        ["$TMUX_AGENT_STATUS_UNSET_FOR_TEST/x.conf"]
+    );
+    assert!(
+        found.relative_sources.is_empty(),
+        "{:?}",
+        found.relative_sources
+    );
+    assert!(found.assignments.is_empty(), "{:?}", found.assignments);
+}
+
+// Inside single quotes tmux expands nothing (probed on 3.6a), so a quoted
+// `$HOME` is a literal, relative, path - reported as the relative-source
+// guess it is, not as a variable that failed to resolve. The two reports
+// answer different questions and must not share a bucket.
+#[test]
+fn a_single_quoted_variable_is_a_literal_relative_path() {
+    let dir = TempDir::new("order-quoted-var");
+    let entry = dir.write("tmux.conf", "source-file '$HOME/x.conf'\n");
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(found.relative_sources, ["$HOME/x.conf"]);
+    assert!(
+        found.unresolved_sources.is_empty(),
+        "{:?}",
+        found.unresolved_sources
+    );
+    assert!(found.assignments.is_empty(), "{:?}", found.assignments);
+}
+
+// A `$` no name follows is a literal dollar, not a variable (probed: tmux
+// reads `source-file frag$.conf` as the file `frag$.conf`), so the word keeps
+// it - the file is followed, and its relativeness is reported the way any
+// written relative argument is.
+#[test]
+fn a_dollar_that_names_no_variable_is_a_literal_in_the_path() {
+    let dir = TempDir::new("order-literal-dollar");
+    dir.write(
+        "frag$.conf",
+        "set -g window-status-format 'through a literal dollar'\n",
+    );
+    let entry = dir.write("tmux.conf", "source-file frag$.conf\n");
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["through a literal dollar"]);
+    assert_eq!(found.relative_sources, ["frag$.conf"]);
+    assert!(
+        found.unresolved_sources.is_empty(),
+        "{:?}",
+        found.unresolved_sources
+    );
+}
+
+// `~` resolves against the `Home` the walk was given, not the process's real
+// `$HOME`: a fragment that exists only in the given one is still found.
+#[test]
+fn a_tilde_source_is_resolved_against_the_home_the_walk_was_given() {
+    let dir = TempDir::new("order-tilde-home");
+    dir.write(
+        "tmux-agent-status-tilde-fragment.conf",
+        "set -g window-status-format 'from the fragment'\n",
+    );
+    let entry = dir.write(
+        "tmux.conf",
+        "source-file ~/tmux-agent-status-tilde-fragment.conf\n",
+    );
+
+    assert_eq!(values(&entry, &home_in(&dir)), ["from the fragment"]);
+}
+
+// A glob under `~` resolves against the same `Home`, and still sorts the way
+// tmux sorts it.
+#[test]
+fn a_glob_under_home_is_expanded_against_the_home_the_walk_was_given() {
+    let dir = TempDir::new("order-tilde-glob");
+    dir.write(
+        "frag.d/20-later.conf",
+        "set -g window-status-format 'later'\n",
+    );
+    dir.write(
+        "frag.d/10-earlier.conf",
+        "set -g window-status-format 'earlier'\n",
+    );
+    let entry = dir.write("tmux.conf", "source-file ~/frag.d/*.conf\n");
+
+    assert_eq!(values(&entry, &home_in(&dir)), ["earlier", "later"]);
 }
 
 #[test]
@@ -336,13 +566,17 @@ fn a_source_of_something_that_is_not_there_is_not_an_error() {
         "source-file /nowhere/at/all.conf\nsource-file /nowhere/*.conf\nset -g window-status-format 'still read'\n",
     );
 
-    assert_eq!(values(&entry), ["still read"]);
+    assert_eq!(values(&entry, &home_in(&dir)), ["still read"]);
 }
 
 #[test]
 fn a_config_that_is_not_there_at_all_yields_nothing() {
+    let home = Home {
+        home: PathBuf::from("/nowhere"),
+        xdg_config: None,
+    };
     assert!(
-        tmux_conf::walk(Path::new("/nowhere/at/all.conf"))
+        tmux_conf::walk(Path::new("/nowhere/at/all.conf"), &home)
             .assignments
             .is_empty()
     );
@@ -352,7 +586,11 @@ fn a_config_that_is_not_there_at_all_yields_nothing() {
 fn a_config_that_assigns_nothing_yields_nothing() {
     let dir = TempDir::new("order-empty");
     let entry = dir.write("tmux.conf", "set -g status on\n# a comment\n\n");
-    assert!(tmux_conf::walk(&entry).assignments.is_empty());
+    assert!(
+        tmux_conf::walk(&entry, &home_in(&dir))
+            .assignments
+            .is_empty()
+    );
 }
 
 #[test]
@@ -370,7 +608,7 @@ fn a_chain_deeper_than_the_limit_stops_rather_than_running_away() {
             ),
         );
     }
-    let found = values(&dir.join("0.conf"));
+    let found = values(&dir.join("0.conf"), &home_in(&dir));
     assert!(!found.is_empty(), "nothing was read at all");
     assert!(found.len() < 20, "the depth limit did not hold: {found:?}");
 }
@@ -407,7 +645,7 @@ fn a_sourced_snippet_is_recognised_through_the_walk_as_well() {
     assert!(tmux_conf::sources_snippet(&text));
     // The shipped snippet sets hooks and no format, so the walk finds nothing
     // to edit in it: the two steps really are independent.
-    assert!(values(&entry).is_empty());
+    assert!(values(&entry, &home_in(&dir)).is_empty());
 }
 
 #[test]

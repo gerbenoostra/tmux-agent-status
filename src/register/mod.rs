@@ -649,25 +649,40 @@ fn system_wide_note(listed: Option<&str>, exists: impl Fn(&Path) -> bool) -> Str
         .collect()
 }
 
-/// What to say about a config that sources a relative path.
+/// What to say about `source-file` arguments the walk could not take at face
+/// value.
 ///
 /// Which assignment of an option wins is decided by the order tmux executes
 /// them in, and a relative `source-file` is resolved against the working
-/// directory of whatever started the server. We follow it from `$HOME`, which
-/// is where the probe puts its own cwd, so the walk and the check that marks
-/// its homework agree - but a server started from somewhere else read a
+/// directory of whatever started the server. We follow it from the `Home` we
+/// were given, which in production is the one `Home::from_env()` read of the
+/// same `$HOME` the probe puts its own cwd in, so the walk and the check that
+/// marks its homework agree - but a server started from somewhere else read a
 /// different file, and may have a different winner. Reported, because the one
 /// moment the user can act on that is while reading the plan.
-fn ordering_notes(relative: &[String]) -> Vec<String> {
-    match relative.is_empty() {
-        true => Vec::new(),
-        false => vec![format!(
+///
+/// An argument whose variable has no value here is the same class of risk
+/// through a different cause - the file it names was not read at all - so it
+/// gets a note of its own rather than sharing the relative-path wording.
+fn ordering_notes(relative: &[String], unresolved: &[String]) -> Vec<String> {
+    let mut notes = Vec::new();
+    if !relative.is_empty() {
+        notes.push(format!(
             "this config sources {} by a relative path, which tmux resolves against the \
              directory the server was started in; it is read here from $HOME, so which \
              assignment wins can differ if yours was started elsewhere",
             relative.join(", ")
-        )],
+        ));
     }
+    if !unresolved.is_empty() {
+        notes.push(format!(
+            "this config sources {} through a variable that has no value here, so the \
+             file it names was not read at all; which assignment wins can differ from \
+             what tmux ran",
+            unresolved.join(", ")
+        ));
+    }
+    notes
 }
 
 /// A message indented under the step it belongs to, continuation lines included.
@@ -1536,7 +1551,7 @@ impl TmuxPlan {
                 action: refusal,
             }];
         }
-        let found = tmux_conf::walk(self.config.path());
+        let found = tmux_conf::walk(self.config.path(), &options.home);
         let winners: Vec<Option<&tmux_conf::Assignment>> = format::OPTIONS
             .iter()
             .map(|option| {
@@ -1546,7 +1561,9 @@ impl TmuxPlan {
                     .rfind(|found| found.option() == Some(option))
             })
             .collect();
-        let ordering = ordering_notes(&found.relative_sources);
+        for note in ordering_notes(&found.relative_sources, &found.unresolved_sources) {
+            prompt.say(&format!("  {note}"));
+        }
 
         // Neither is assigned: the user is on tmux's compiled-in default, and
         // one marked block sets both.
@@ -1554,7 +1571,7 @@ impl TmuxPlan {
             return vec![Planned {
                 step: Step::TmuxFormat,
                 what: Step::TmuxFormat.title().to_owned(),
-                action: self.plan_new_pair(options, &ordering),
+                action: self.plan_new_pair(options),
             }];
         }
 
@@ -1565,10 +1582,10 @@ impl TmuxPlan {
                 step: Step::TmuxFormat,
                 what: format!("the term in {option}"),
                 action: match winner {
-                    Some(winner) => self.plan_splice(option, winner, prompt, &ordering),
+                    Some(winner) => self.plan_splice(option, winner, prompt),
                     // One is assigned and the other is not, so the bare one
                     // gets a line of its own spliced from tmux's default.
-                    None => self.plan_one_line(option, options, &ordering),
+                    None => self.plan_one_line(option, options),
                 },
             })
             .collect()
@@ -1596,7 +1613,7 @@ impl TmuxPlan {
     }
 
     /// Append a line for an option nothing assigns.
-    fn plan_one_line(&self, option: &str, options: &Options, ordering: &[String]) -> Action {
+    fn plan_one_line(&self, option: &str, options: &Options) -> Action {
         let Some(line) = self.spliced_default(options, option) else {
             return self.manual_term("    this tmux's default format cannot be quoted safely");
         };
@@ -1613,12 +1630,10 @@ impl TmuxPlan {
             },
             parses: not_empty,
             creating: !seen.exists,
-            notes: {
-                let mut notes = vec![format!("nothing assigns {option}, so a line is added")];
-                notes.push(format!("  {}", line.trim_end()));
-                notes.extend(ordering.iter().cloned());
-                notes
-            },
+            notes: vec![
+                format!("nothing assigns {option}, so a line is added"),
+                format!("  {}", line.trim_end()),
+            ],
             verify: self.verification(TmuxPlan::term_in(option)),
             path: seen.resolved,
             announced: false,
@@ -1635,7 +1650,6 @@ impl TmuxPlan {
         option: &str,
         last: &tmux_conf::Assignment,
         prompt: &dyn prompt::Interaction,
-        ordering: &[String],
     ) -> Action {
         let Some(line) = last.candidate.clone().line() else {
             let why = last
@@ -1681,9 +1695,6 @@ impl TmuxPlan {
         ));
         prompt.say(&format!("      before: {}", last.line.text));
         prompt.say(&format!("      after:  {rewritten}"));
-        for note in ordering {
-            prompt.say(&format!("    {note}"));
-        }
         let proposed = rewritten;
         let rewritten = self.offer_edit(proposed.clone(), prompt);
         if rewritten != proposed {
@@ -1711,8 +1722,8 @@ impl TmuxPlan {
             },
             parses: not_empty,
             creating: false,
-            // Nothing left for `confirm` to say: the header, before/after and
-            // ordering hint were all said above, next to the edit question.
+            // Nothing left for `confirm` to say: the header and before/after
+            // were already said above, next to the edit question.
             notes: Vec::new(),
             verify: self.verification(TmuxPlan::term_in(option)),
             path: seen.resolved,
@@ -1721,7 +1732,7 @@ impl TmuxPlan {
     }
 
     /// No format line at all: the user is on tmux's compiled-in default.
-    fn plan_new_pair(&self, options: &Options, ordering: &[String]) -> Action {
+    fn plan_new_pair(&self, options: &Options) -> Action {
         // Asked rather than remembered: the default has changed between tmux
         // versions and the one in *this* tmux is the only one that is right.
         let block: Option<String> = format::OPTIONS
@@ -1747,7 +1758,6 @@ impl TmuxPlan {
                         .to_owned(),
                 ];
                 notes.extend(block.lines().map(|line| format!("  {line}")));
-                notes.extend(ordering.iter().cloned());
                 notes
             },
             verify: self.verification(Landed::Term(

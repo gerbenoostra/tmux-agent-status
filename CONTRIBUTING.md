@@ -84,6 +84,21 @@ subject of a bug. Read this section before changing behaviour.
   and `reset`.
 - **`#W` does not expand inside a format modifier** such as
   `#{=/25/…:#W}` (observed on tmux 3.6); use `#{window_name}` there.
+- **tmux expands `$NAME`/`${NAME}` in `source-file` arguments outside single
+  quotes, in one pass, before the path resolves** (verified on 3.6a). A lone
+  `$` is a literal filename character (`x$.conf` is read as-is) and an
+  unclosed `${` reads nothing. The format step's config walk expands the
+  argument the same way (`format::expanded_word`) before deciding where it
+  points, so a fragment reached only through `$HOME/...` is still found, and
+  an argument whose variable resolves to nothing here is reported, never
+  silently dropped.
+- **The config walk takes the `Home` it is given; the probe takes the real
+  process environment.** They agree in production because `Home::from_env()`
+  reads the same `$HOME` the probe puts its cwd in - in a test they diverge
+  on purpose, which is what makes the walk steerable. Never thread a
+  synthetic `Home` into `probe`: it exists to ask a real tmux server what it
+  does, and a faked environment makes its answers stop corresponding to
+  reality.
 
 ## The `register` write contract
 

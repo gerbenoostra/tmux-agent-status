@@ -201,9 +201,9 @@ pub fn turns_on_focus_events(text: &str) -> bool {
 ///
 /// Variables are expanded the way tmux expands them, `$HOME` and
 /// `$XDG_CONFIG_HOME` from the `Home` this run was given and any other from
-/// this process's environment. `Err` carries the argument as written when one
-/// of them has no value here: the file tmux reads is then not knowable, and
-/// writing to a guess would create a file nobody sources.
+/// this process's environment. `Err` carries the argument as written when a
+/// variable in it has no value here: the file tmux reads is then not
+/// knowable, and writing to a guess would create a file nobody sources.
 ///
 /// `~/` and a relative argument resolve against the `Home` this run was given
 /// rather than against the environment, for the reason `search_path` takes one:
@@ -211,19 +211,8 @@ pub fn turns_on_focus_events(text: &str) -> bool {
 /// tmux would have done with a relative one is a separate question, and
 /// `Sourced::relative` is where it is answered.
 pub fn sourced_snippet(text: &str, home: &Home) -> Option<Result<Sourced, String>> {
-    let (line, written) = sourcing_line(text)?;
-    let lookup = |name: &str| match name {
-        "HOME" => Some(home.home.to_string_lossy().into_owned()),
-        "XDG_CONFIG_HOME" => home
-            .xdg_config
-            .as_ref()
-            .map(|dir| dir.to_string_lossy().into_owned()),
-        _ => std::env::var(name).ok(),
-    };
-    let Some(argument) = format::expanded_words(&line, &lookup)
-        .as_deref()
-        .and_then(path_word)
-    else {
+    let (line, written, at) = sourcing_line(text)?;
+    let Some(argument) = format::expanded_word(&line, at, &variable_lookup(home)) else {
         return Some(Err(written));
     };
     Some(Ok(Sourced {
@@ -234,16 +223,34 @@ pub fn sourced_snippet(text: &str, home: &Home) -> Option<Result<Sourced, String
     }))
 }
 
-/// The last `source`/`source-file` line naming our snippet, and its argument,
-/// both as written.
-fn sourcing_line(text: &str) -> Option<(String, String)> {
+/// The lookup tmux's `$NAME`/`${NAME}` expansion asks, answered from the
+/// `Home` this run was given.
+///
+/// `HOME` and `XDG_CONFIG_HOME` come from `Home` - the same values `~` and a
+/// relative path resolve against, so the two can never disagree - and every
+/// other name falls back to this process's environment, which is where tmux
+/// would have read it.
+fn variable_lookup(home: &Home) -> impl Fn(&str) -> Option<String> + '_ {
+    move |name: &str| match name {
+        "HOME" => Some(home.home.to_string_lossy().into_owned()),
+        "XDG_CONFIG_HOME" => home
+            .xdg_config
+            .as_ref()
+            .map(|dir| dir.to_string_lossy().into_owned()),
+        _ => std::env::var(name).ok(),
+    }
+}
+
+/// The last `source`/`source-file` line naming our snippet, and its argument:
+/// the word as written, and where among the line's words it sits.
+fn sourcing_line(text: &str) -> Option<(String, String, usize)> {
     format::logical_lines(text)
         .into_iter()
         .rev()
         .find_map(|line| {
-            let argument = source_argument(&line.text)?;
+            let (at, argument) = source_argument(&line.text)?;
             (Path::new(&argument).file_name() == Some(SNIPPET_NAME.as_ref()))
-                .then_some((line.text, argument))
+                .then_some((line.text, argument, at))
         })
 }
 
@@ -260,21 +267,24 @@ pub struct Sourced {
     pub relative: bool,
 }
 
-/// The path a `source`/`source-file` line names, if it is one.
-fn source_argument(line: &str) -> Option<String> {
-    path_word(&format::words(line)?)
+/// The path a `source`/`source-file` line names, if it is one: its index
+/// among the line's words, so the same word can be read expanded, and the
+/// word as written.
+fn source_argument(line: &str) -> Option<(usize, String)> {
+    let words = format::words(line)?;
+    path_word(&words).map(|at| (at, words[at].clone()))
 }
 
 /// The path among a `source`/`source-file` line's words, if it is one.
-fn path_word(words: &[String]) -> Option<String> {
+fn path_word(words: &[String]) -> Option<usize> {
     match words {
         [command, rest @ ..] if matches!(command.as_str(), "source" | "source-file") => {
-            // tmux's own flags here take no values, so the path is simply the
-            // last word that is not one.
+            // The last word that is not a flag is the path the walk follows.
+            // tmux's `-t` takes a value and several paths are allowed -
+            // neither is modelled, and what is reported is the word acted on.
             rest.iter()
-                .rev()
-                .find(|word| !word.starts_with('-'))
-                .cloned()
+                .rposition(|word| !word.starts_with('-'))
+                .map(|at| at + 1)
         }
         _ => None,
     }
@@ -378,28 +388,42 @@ pub struct Walked {
     /// them. The last one for a given option is the one that wins, and so the
     /// one to edit.
     pub assignments: Vec<Assignment>,
-    /// The relative `source-file` arguments met on the way.
+    /// The relative `source-file` arguments met on the way, as written.
     ///
     /// tmux resolves these against the working directory of whatever started
     /// the server, which is not knowable from here. They are followed from
-    /// `$HOME`, which is where the probe puts its own cwd so that the walk and
-    /// the check that marks its homework agree - and they are reported,
-    /// because a server started from somewhere else read different files and
-    /// may have a different winner.
+    /// the `Home` the walk was given - in production the one
+    /// `Home::from_env()` read, which is the same `$HOME` the probe puts its
+    /// own cwd in, so the walk and the check that marks its homework agree -
+    /// and they are reported, because a server started from somewhere else
+    /// read different files and may have a different winner.
     pub relative_sources: Vec<String>,
+    /// The `source-file` arguments whose variables could not be resolved, as
+    /// written.
+    ///
+    /// tmux expands `$NAME`/`${NAME}` in the argument before resolving it; a
+    /// variable with no value here leaves nothing to follow, so the file it
+    /// would have named was never read - and it may have held the winning
+    /// assignment. Reported rather than dropped, for the same reason
+    /// `relative_sources` is.
+    pub unresolved_sources: Vec<String>,
 }
 
 /// Walk a config the way tmux executes it.
 ///
+/// A `source`/`source-file` argument gets the variable expansion tmux gives
+/// it - `$NAME`/`${NAME}` outside single quotes, resolved through `home` -
+/// before the walk decides where it points; one whose variable has no value
+/// here is reported in `Walked::unresolved_sources` rather than followed.
 /// Globs are expanded and sorted; a cycle is caught by the visited set.
-pub fn walk(entry: &Path) -> Walked {
+pub fn walk(entry: &Path, home: &Home) -> Walked {
     let mut found = Walked::default();
     let mut visited = Vec::new();
-    descend(entry, 0, &mut visited, &mut found);
+    descend(entry, 0, &mut visited, &mut found, home);
     found
 }
 
-fn descend(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Walked) {
+fn descend(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Walked, home: &Home) {
     if depth > MAX_DEPTH {
         return;
     }
@@ -411,15 +435,33 @@ fn descend(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Wa
     let Ok(text) = fs::read_to_string(&resolved) else {
         return;
     };
+    let lookup = variable_lookup(home);
     for line in format::logical_lines(&text) {
         // Descend at the point the `source-file` appears, because that is when
         // tmux runs it, and a fragment sourced early loses to a line below it.
-        if let Some(argument) = source_argument(&line.text) {
-            if is_relative(&argument) && !found.relative_sources.contains(&argument) {
-                found.relative_sources.push(argument.clone());
-            }
-            for sourced in expand(&argument) {
-                descend(&sourced, depth + 1, visited, found);
+        if let Some((at, written)) = source_argument(&line.text) {
+            // `source_argument` answers "is this a source line" from syntax
+            // alone; only the word it picked as the path is expanded - a
+            // variable anywhere else on the line is tmux's own concern, not a
+            // reason to lose the file this word names.
+            match format::expanded_word(&line.text, at, &lookup) {
+                Some(expanded) => {
+                    // Relativeness is judged on the expanded path - a
+                    // `$HOME/...` argument is absolute once tmux reads it -
+                    // while the guess is reported as written, which is the
+                    // spelling the user can find in their own file.
+                    if is_relative(&expanded) && !found.relative_sources.contains(&written) {
+                        found.relative_sources.push(written);
+                    }
+                    for sourced in expand(&expanded, home) {
+                        descend(&sourced, depth + 1, visited, found, home);
+                    }
+                }
+                None => {
+                    if !found.unresolved_sources.contains(&written) {
+                        found.unresolved_sources.push(written);
+                    }
+                }
             }
             continue;
         }
@@ -445,23 +487,19 @@ fn is_relative(argument: &str) -> bool {
 /// `~` is expanded and a trailing-component glob is expanded by reading the
 /// directory and sorting, the way tmux sorts it.
 ///
-/// A relative path is resolved against `$HOME`. Verified: tmux resolves it
-/// against the working directory of the process that started the server, not
-/// against the config file's own directory, so the config's directory would be
-/// wrong for every layout but `~/.tmux.conf`. `$HOME` is both the common case
-/// for a server started from a login shell and the cwd the probe runs with, so
-/// the walk and the check that marks its homework read the same files. The
-/// guess is reported either way; see `Walked::relative_sources`.
-fn expand(argument: &str) -> Vec<PathBuf> {
-    let path = match std::env::var_os("HOME") {
-        // `join` with an absolute path discards the base, so an absolute
-        // argument needs no arm of its own: `~/x`, `x` and `/x` are all this
-        // one line.
-        Some(home) => PathBuf::from(home).join(argument.strip_prefix("~/").unwrap_or(argument)),
-        // A process with no `$HOME` has nothing to resolve against, so the
-        // path stands as the config wrote it.
-        None => PathBuf::from(argument),
-    };
+/// A relative path is resolved against the `Home` the walk was given.
+/// Verified: tmux resolves it against the working directory of the process
+/// that started the server, not against the config file's own directory, so
+/// the config's directory would be wrong for every layout but `~/.tmux.conf`.
+/// In production that `Home` is the one `Home::from_env()` read, which is both
+/// the common case for a server started from a login shell and the cwd the
+/// probe runs with, so the walk and the check that marks its homework read
+/// the same files. The guess is reported either way; see
+/// `Walked::relative_sources`.
+fn expand(argument: &str, home: &Home) -> Vec<PathBuf> {
+    // `join` with an absolute path discards the base, so an absolute argument
+    // needs no arm of its own: `~/x`, `x` and `/x` are all this one line.
+    let path = home.join(argument.strip_prefix("~/").unwrap_or(argument));
     let Some(pattern) = glob_pattern(&path) else {
         return vec![path];
     };

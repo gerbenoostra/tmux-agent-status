@@ -48,6 +48,11 @@ test:
 # is a terminal, and exercising it means driving a pty, which would prove that
 # `dialoguer` works rather than that we do. Everything worth asserting about a
 # run's decisions lives in the modules it feeds, which hold the bar.
+#
+# An incremental instrumented build can reuse a codegen unit's old line info and
+# report a region against lines the sources no longer have there - including a
+# phantom miss beside a `// coverage: off` marker. `cargo llvm-cov clean` and
+# rerun before believing one.
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail

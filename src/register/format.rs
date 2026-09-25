@@ -211,19 +211,23 @@ pub fn words(line: &str) -> Option<Vec<String>> {
     Some(read(line)?.into_iter().map(|token| token.text).collect())
 }
 
-/// The words of one logical config line as tmux reads them: unquoted, and with
+/// The word [`words`] numbers `at` as tmux reads it: unquoted, and with
 /// `$NAME` and `${NAME}` replaced by what `lookup` gives for the name.
 ///
 /// tmux expands a variable in a bare or double-quoted word and leaves one in
 /// single quotes alone, and `\$` is a literal dollar (verified on 3.6a).
-/// `None` wherever [`words`] is, and for a variable `lookup` has no value for
-/// or one not spelled as a name: tmux reads an unset one as empty, which names
-/// a different file from the one the line means.
-pub fn expanded_words(line: &str, lookup: &dyn Fn(&str) -> Option<String>) -> Option<Vec<String>> {
-    read(line)?
-        .iter()
-        .map(|token| expand(&line[token.inner.clone()], token.quoting, lookup))
-        .collect()
+/// `None` wherever [`words`] is `None`, where the line has no word `at`, or
+/// where a variable in that word has no value for `lookup` or a `${` is never
+/// closed - a lone `$` is a literal dollar, not a variable. A variable in any
+/// other word cannot make it `None`, which is why a caller that follows one
+/// word asks for that word alone.
+pub fn expanded_word(
+    line: &str,
+    at: usize,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    let token = read(line)?.into_iter().nth(at)?;
+    expand(&line[token.inner.clone()], token.quoting, lookup)
 }
 
 /// The tokens of a line that holds one command this module can read.
@@ -502,20 +506,26 @@ fn expand(
     while let Some(c) = chars.next() {
         match c {
             '\\' => out.extend(chars.next()),
-            '$' => {
-                let name: String = match chars.next_if_eq(&'{') {
-                    Some(_) => {
-                        let name: String = std::iter::from_fn(|| chars.next_if(is_name)).collect();
-                        chars.next_if_eq(&'}')?;
-                        name
+            '$' => match chars.next_if_eq(&'{') {
+                // `${NAME}`: the name must close, and `${}` names nothing.
+                Some(_) => {
+                    let name: String = std::iter::from_fn(|| chars.next_if(is_name)).collect();
+                    chars.next_if_eq(&'}')?;
+                    if name.is_empty() {
+                        return None;
                     }
-                    None => std::iter::from_fn(|| chars.next_if(is_name)).collect(),
-                };
-                if name.is_empty() {
-                    return None;
+                    out.push_str(&lookup(&name)?);
                 }
-                out.push_str(&lookup(&name)?);
-            }
+                // `$NAME`, or a literal dollar when no name follows one -
+                // verified: `source-file x$.conf` reads the file `x$.conf`.
+                None => {
+                    let name: String = std::iter::from_fn(|| chars.next_if(is_name)).collect();
+                    match name.is_empty() {
+                        true => out.push('$'),
+                        false => out.push_str(&lookup(&name)?),
+                    }
+                }
+            },
             c => out.push(c),
         }
     }
@@ -804,29 +814,35 @@ mod tests {
     #[test]
     fn variables_expand_the_way_tmux_expands_them() {
         let lookup = |name: &str| (name == "HOME").then(|| "/home/u".to_owned());
-        let expanded = |line: &str| expanded_words(line, &lookup);
+        let word = |line: &str| expanded_word(line, 1, &lookup);
+        assert_eq!(word("source-file $HOME/a.conf").unwrap(), "/home/u/a.conf");
         assert_eq!(
-            expanded("source-file $HOME/a.conf"),
-            Some(vec!["source-file".to_owned(), "/home/u/a.conf".to_owned()])
-        );
-        assert_eq!(
-            expanded("source-file ${HOME}x/a.conf").unwrap()[1],
+            word("source-file ${HOME}x/a.conf").unwrap(),
             "/home/ux/a.conf"
         );
-        assert_eq!(
-            expanded("source-file \"$HOME/a b\"").unwrap()[1],
-            "/home/u/a b"
-        );
+        assert_eq!(word("source-file \"$HOME/a b\"").unwrap(), "/home/u/a b");
         // Nothing is a variable inside single quotes, and an escaped dollar is
         // a dollar.
-        assert_eq!(expanded("source-file '$HOME/a'").unwrap()[1], "$HOME/a");
-        assert_eq!(expanded("source-file \\$HOME/a").unwrap()[1], "$HOME/a");
-        // An unset variable, an empty name and an unclosed brace name no file
-        // the line meant.
-        assert_eq!(expanded("source-file $UNSET/a"), None);
-        assert_eq!(expanded("source-file $/a"), None);
-        assert_eq!(expanded("source-file ${HOME/a"), None);
-        assert_eq!(expanded("# source-file $HOME/a"), None);
+        assert_eq!(word("source-file '$HOME/a'").unwrap(), "$HOME/a");
+        assert_eq!(word("source-file \\$HOME/a").unwrap(), "$HOME/a");
+        // An unset variable, an empty brace and an unclosed brace name no
+        // file the line meant.
+        assert_eq!(word("source-file $UNSET/a"), None);
+        assert_eq!(word("source-file ${UNSET}/a"), None);
+        assert_eq!(word("source-file ${}/a"), None);
+        assert_eq!(word("source-file ${HOME/a"), None);
+        // A `$` no name follows is a literal dollar: tmux reads `$/a` as the
+        // file `$/a`, so the word keeps it.
+        assert_eq!(word("source-file $/a").unwrap(), "$/a");
+        assert_eq!(word("source-file a$.conf").unwrap(), "a$.conf");
+        assert_eq!(word("# source-file $HOME/a"), None);
+        // A variable in another word cannot fail this one, whichever side of
+        // it they stand on, and a word that is not there is `None` too.
+        assert_eq!(
+            expanded_word("source-file $UNSET/a $HOME/b.conf", 2, &lookup).unwrap(),
+            "/home/u/b.conf"
+        );
+        assert_eq!(expanded_word("source-file a.conf", 2, &lookup), None);
     }
 
     #[test]
