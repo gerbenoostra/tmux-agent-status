@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "tmux-agent-status",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent lifecycle events as one glyph on the tmux window entry",
   "author": {
     "name": "Gerben Oostra"
