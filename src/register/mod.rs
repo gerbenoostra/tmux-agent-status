@@ -649,7 +649,8 @@ fn system_wide_note(listed: Option<&str>, exists: impl Fn(&Path) -> bool) -> Str
         .collect()
 }
 
-/// What to say about a config that sources a relative path.
+/// What to say about `source-file` arguments the walk could not take at face
+/// value.
 ///
 /// Which assignment of an option wins is decided by the order tmux executes
 /// them in, and a relative `source-file` is resolved against the working
@@ -658,16 +659,29 @@ fn system_wide_note(listed: Option<&str>, exists: impl Fn(&Path) -> bool) -> Str
 /// its homework agree - but a server started from somewhere else read a
 /// different file, and may have a different winner. Reported, because the one
 /// moment the user can act on that is while reading the plan.
-fn ordering_notes(relative: &[String]) -> Vec<String> {
-    match relative.is_empty() {
-        true => Vec::new(),
-        false => vec![format!(
+///
+/// An argument whose variable has no value here is the same class of risk
+/// through a different cause - the file it names was not read at all - so it
+/// gets a note of its own rather than sharing the relative-path wording.
+fn ordering_notes(relative: &[String], unresolved: &[String]) -> Vec<String> {
+    let mut notes = Vec::new();
+    if !relative.is_empty() {
+        notes.push(format!(
             "this config sources {} by a relative path, which tmux resolves against the \
              directory the server was started in; it is read here from $HOME, so which \
              assignment wins can differ if yours was started elsewhere",
             relative.join(", ")
-        )],
+        ));
     }
+    if !unresolved.is_empty() {
+        notes.push(format!(
+            "this config sources {} through a variable that has no value here, so the \
+             file it names was not read at all; which assignment wins can differ from \
+             what tmux ran",
+            unresolved.join(", ")
+        ));
+    }
+    notes
 }
 
 /// A message indented under the step it belongs to, continuation lines included.
@@ -1536,7 +1550,7 @@ impl TmuxPlan {
                 action: refusal,
             }];
         }
-        let found = tmux_conf::walk(self.config.path());
+        let found = tmux_conf::walk(self.config.path(), &options.home);
         let winners: Vec<Option<&tmux_conf::Assignment>> = format::OPTIONS
             .iter()
             .map(|option| {
@@ -1546,7 +1560,7 @@ impl TmuxPlan {
                     .rfind(|found| found.option() == Some(option))
             })
             .collect();
-        let ordering = ordering_notes(&found.relative_sources);
+        let ordering = ordering_notes(&found.relative_sources, &found.unresolved_sources);
 
         // Neither is assigned: the user is on tmux's compiled-in default, and
         // one marked block sets both.
