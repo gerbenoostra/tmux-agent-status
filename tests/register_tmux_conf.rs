@@ -421,6 +421,64 @@ fn a_source_named_through_an_unset_variable_is_reported_not_followed() {
     );
 }
 
+// Only the word the walk follows decides which file tmux reads: a variable
+// anywhere else on the line is tmux's own concern. A second path argument
+// that cannot be resolved does not stop the first being followed - or being
+// reported as the relative-path guess it is - because this is a config walk,
+// not a config validator.
+#[test]
+fn an_unresolvable_word_elsewhere_on_the_line_does_not_hide_the_path() {
+    let dir = TempDir::new("order-other-arg-var");
+    dir.write(
+        "fragment.conf",
+        "set -g window-status-format 'still followed'\n",
+    );
+    let entry = dir.write(
+        "tmux.conf",
+        "source-file $TMUX_AGENT_STATUS_UNSET_FOR_TEST/x.conf fragment.conf\n",
+    );
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["still followed"]);
+    assert_eq!(found.relative_sources, ["fragment.conf"]);
+    assert!(
+        found.unresolved_sources.is_empty(),
+        "{:?}",
+        found.unresolved_sources
+    );
+}
+
+// And when it is the followed word that cannot be resolved, it is the one
+// named in `unresolved_sources` - the report is about the word the walk acted
+// on, whatever else the line carries. The earlier path tmux would also read
+// is a single-path limitation the walk does not pretend away.
+#[test]
+fn the_unresolvable_report_names_the_path_the_walk_followed() {
+    let dir = TempDir::new("order-last-arg-var");
+    dir.write(
+        "fragment.conf",
+        "set -g window-status-format 'tmux reads this, the walk does not'\n",
+    );
+    let entry = dir.write(
+        "tmux.conf",
+        "source-file fragment.conf $TMUX_AGENT_STATUS_UNSET_FOR_TEST/x.conf\n",
+    );
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(
+        found.unresolved_sources,
+        ["$TMUX_AGENT_STATUS_UNSET_FOR_TEST/x.conf"]
+    );
+    assert!(
+        found.relative_sources.is_empty(),
+        "{:?}",
+        found.relative_sources
+    );
+    assert!(found.assignments.is_empty(), "{:?}", found.assignments);
+}
+
 // Inside single quotes tmux expands nothing (probed on 3.6a), so a quoted
 // `$HOME` is a literal, relative, path - reported as the relative-source
 // guess it is, not as a variable that failed to resolve. The two reports

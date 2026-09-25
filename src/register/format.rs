@@ -226,6 +226,22 @@ pub fn expanded_words(line: &str, lookup: &dyn Fn(&str) -> Option<String>) -> Op
         .collect()
 }
 
+/// The word [`words`] numbers `at`, expanded the way [`expanded_words`]
+/// expands it.
+///
+/// `None` wherever [`words`] is `None`, where the line has no word `at`, or
+/// where a variable in that word has no value for `lookup` or is not spelled
+/// as a name - a variable in any other word cannot make it `None`, which is
+/// why a caller that follows one word asks for that word alone.
+pub fn expanded_word(
+    line: &str,
+    at: usize,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    let token = read(line)?.into_iter().nth(at)?;
+    expand(&line[token.inner.clone()], token.quoting, lookup)
+}
+
 /// The tokens of a line that holds one command this module can read.
 fn read(line: &str) -> Option<Vec<Token>> {
     let trimmed = line.trim_start();
@@ -827,6 +843,31 @@ mod tests {
         assert_eq!(expanded("source-file $/a"), None);
         assert_eq!(expanded("source-file ${HOME/a"), None);
         assert_eq!(expanded("# source-file $HOME/a"), None);
+    }
+
+    #[test]
+    fn a_single_word_expands_on_its_own() {
+        let lookup = |name: &str| (name == "HOME").then(|| "/home/u".to_owned());
+        let word = |line: &str, at: usize| expanded_word(line, at, &lookup);
+        assert_eq!(
+            word("source-file $HOME/a.conf", 1),
+            Some("/home/u/a.conf".to_owned())
+        );
+        assert_eq!(
+            word("source-file '$HOME/a.conf'", 1),
+            Some("$HOME/a.conf".to_owned())
+        );
+        // The point of expanding one word: a variable in another cannot fail
+        // this one, whichever side of it they stand on.
+        assert_eq!(
+            word("source-file $UNSET/a $HOME/b.conf", 2),
+            Some("/home/u/b.conf".to_owned())
+        );
+        assert_eq!(word("source-file $HOME/a.conf $UNSET/b", 2), None);
+        // A word that is not there, and a line that is not a command, are the
+        // same `None` `words` gives.
+        assert_eq!(word("source-file a.conf", 2), None);
+        assert_eq!(word("# source-file $HOME/a", 1), None);
     }
 
     #[test]

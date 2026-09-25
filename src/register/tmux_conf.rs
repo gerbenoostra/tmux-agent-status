@@ -201,9 +201,9 @@ pub fn turns_on_focus_events(text: &str) -> bool {
 ///
 /// Variables are expanded the way tmux expands them, `$HOME` and
 /// `$XDG_CONFIG_HOME` from the `Home` this run was given and any other from
-/// this process's environment. `Err` carries the argument as written when one
-/// of them has no value here: the file tmux reads is then not knowable, and
-/// writing to a guess would create a file nobody sources.
+/// this process's environment. `Err` carries the argument as written when a
+/// variable in it has no value here: the file tmux reads is then not
+/// knowable, and writing to a guess would create a file nobody sources.
 ///
 /// `~/` and a relative argument resolve against the `Home` this run was given
 /// rather than against the environment, for the reason `search_path` takes one:
@@ -211,11 +211,8 @@ pub fn turns_on_focus_events(text: &str) -> bool {
 /// tmux would have done with a relative one is a separate question, and
 /// `Sourced::relative` is where it is answered.
 pub fn sourced_snippet(text: &str, home: &Home) -> Option<Result<Sourced, String>> {
-    let (line, written) = sourcing_line(text)?;
-    let Some(argument) = format::expanded_words(&line, &variable_lookup(home))
-        .as_deref()
-        .and_then(path_word)
-    else {
+    let (line, written, at) = sourcing_line(text)?;
+    let Some(argument) = format::expanded_word(&line, at, &variable_lookup(home)) else {
         return Some(Err(written));
     };
     Some(Ok(Sourced {
@@ -244,16 +241,16 @@ fn variable_lookup(home: &Home) -> impl Fn(&str) -> Option<String> + '_ {
     }
 }
 
-/// The last `source`/`source-file` line naming our snippet, and its argument,
-/// both as written.
-fn sourcing_line(text: &str) -> Option<(String, String)> {
+/// The last `source`/`source-file` line naming our snippet, and its argument:
+/// the word as written, and where among the line's words it sits.
+fn sourcing_line(text: &str) -> Option<(String, String, usize)> {
     format::logical_lines(text)
         .into_iter()
         .rev()
         .find_map(|line| {
-            let argument = source_argument(&line.text)?;
+            let (at, argument) = source_argument(&line.text)?;
             (Path::new(&argument).file_name() == Some(SNIPPET_NAME.as_ref()))
-                .then_some((line.text, argument))
+                .then_some((line.text, argument, at))
         })
 }
 
@@ -270,21 +267,24 @@ pub struct Sourced {
     pub relative: bool,
 }
 
-/// The path a `source`/`source-file` line names, if it is one.
-fn source_argument(line: &str) -> Option<String> {
-    path_word(&format::words(line)?)
+/// The path a `source`/`source-file` line names, if it is one: its index
+/// among the line's words, so the same word can be read expanded, and the
+/// word as written.
+fn source_argument(line: &str) -> Option<(usize, String)> {
+    let words = format::words(line)?;
+    path_word(&words).map(|at| (at, words[at].clone()))
 }
 
 /// The path among a `source`/`source-file` line's words, if it is one.
-fn path_word(words: &[String]) -> Option<String> {
+fn path_word(words: &[String]) -> Option<usize> {
     match words {
         [command, rest @ ..] if matches!(command.as_str(), "source" | "source-file") => {
-            // tmux's own flags here take no values, so the path is simply the
-            // last word that is not one.
+            // The last word that is not a flag is the path the walk follows.
+            // tmux's `-t` takes a value and several paths are allowed -
+            // neither is modelled, and what is reported is the word acted on.
             rest.iter()
-                .rev()
-                .find(|word| !word.starts_with('-'))
-                .cloned()
+                .rposition(|word| !word.starts_with('-'))
+                .map(|at| at + 1)
         }
         _ => None,
     }
@@ -439,14 +439,12 @@ fn descend(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Wa
     for line in format::logical_lines(&text) {
         // Descend at the point the `source-file` appears, because that is when
         // tmux runs it, and a fragment sourced early loses to a line below it.
-        if let Some(written) = source_argument(&line.text) {
+        if let Some((at, written)) = source_argument(&line.text) {
             // `source_argument` answers "is this a source line" from syntax
-            // alone; what its argument expands to is a separate question, and
-            // a variable with no value here is one answer of its own.
-            match format::expanded_words(&line.text, &lookup)
-                .as_deref()
-                .and_then(path_word)
-            {
+            // alone; only the word it picked as the path is expanded - a
+            // variable anywhere else on the line is tmux's own concern, not a
+            // reason to lose the file this word names.
+            match format::expanded_word(&line.text, at, &lookup) {
                 Some(expanded) => {
                     // Relativeness is judged on the expanded path - a
                     // `$HOME/...` argument is absolute once tmux reads it -
