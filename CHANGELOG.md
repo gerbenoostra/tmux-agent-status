@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/gerbenoostra/tmux-agent-status/compare/v0.1.0...v0.1.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* expand variables while walking source files ([#21](https://github.com/gerbenoostra/tmux-agent-status/issues/21)) ([09466a9](https://github.com/gerbenoostra/tmux-agent-status/commit/09466a99f8f9f1abf5885ba3cdd70c8bde04d938))
+* follow every path argument of a source-file line ([#23](https://github.com/gerbenoostra/tmux-agent-status/issues/23)) ([6723002](https://github.com/gerbenoostra/tmux-agent-status/commit/6723002179979a22aaeb713c6137ab29f960c9b3))
+
 ## [0.1.0](https://github.com/gerbenoostra/tmux-agent-status/compare/v0.0.1...v0.1.0) (2026-09-24)
 
 

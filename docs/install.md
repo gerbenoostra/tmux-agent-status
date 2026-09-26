@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main
 <!-- x-release-please-start-version -->
 Detects your platform, downloads the matching release tarball, verifies its checksum, and installs
 the binary to `~/.local/bin` (override with `TMUX_AGENT_STATUS_INSTALL_DIR`). Pin a version with
-`TMUX_AGENT_STATUS_VERSION=v0.1.0`. See `install.sh` in the repository root for the full set of
+`TMUX_AGENT_STATUS_VERSION=v0.1.1`. See `install.sh` in the repository root for the full set of
 environment variables.
 <!-- x-release-please-end -->
 
@@ -76,7 +76,7 @@ Every tagged release publishes a tarball per platform with a `.sha256` checksum 
 
 <!-- x-release-please-start-version -->
 ```sh
-tag=v0.1.0
+tag=v0.1.1
 target=aarch64-apple-darwin      # or x86_64-apple-darwin, {x86_64,aarch64}-unknown-linux-gnu
 base="https://github.com/gerbenoostra/tmux-agent-status/releases/download/$tag"
 curl -fsSLO "$base/tmux-agent-status-$tag-$target.tar.gz"
