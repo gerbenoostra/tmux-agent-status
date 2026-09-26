@@ -169,8 +169,8 @@ fn beside(config: &Path, home: &Home) -> PathBuf {
 
 /// Whether this config already sources our snippet.
 ///
-/// Any `source` or `source-file` whose last argument has our basename, at any
-/// path: the location is the user's business, and a second source line is a
+/// Any `source` or `source-file` naming our basename at any path position:
+/// the location is the user's business, and a second source line is a
 /// second set of hooks.
 pub fn sources_snippet(text: &str) -> bool {
     sourcing_line(text).is_some()
@@ -196,8 +196,9 @@ pub fn turns_on_focus_events(text: &str) -> bool {
 /// config sources a copy of its own, which is what every install route but a
 /// package manager leaves behind.
 ///
-/// The last such line wins: the snippet only sets hooks and one option, and the
-/// last assignment of those is the one in force.
+/// The last occurrence wins - the last matching path position on the last
+/// sourcing line: the snippet only sets hooks and one option, and the last
+/// assignment of those is the one in force.
 ///
 /// Variables are expanded the way tmux expands them, `$HOME` and
 /// `$XDG_CONFIG_HOME` from the `Home` this run was given and any other from
@@ -241,16 +242,25 @@ fn variable_lookup(home: &Home) -> impl Fn(&str) -> Option<String> + '_ {
     }
 }
 
-/// The last `source`/`source-file` line naming our snippet, and its argument:
-/// the word as written, and where among the line's words it sits.
+/// The last `source`/`source-file` line naming our snippet, and its
+/// argument: the word as written, and where among the line's words it sits.
+///
+/// Our basename is matched at every path position, not only the last word,
+/// because tmux sources every path argument of the line; the last occurrence
+/// in execution order - the last matching path on the last matching line -
+/// wins, the way the last assignment does.
 fn sourcing_line(text: &str) -> Option<(String, String, usize)> {
     format::logical_lines(text)
         .into_iter()
         .rev()
         .find_map(|line| {
-            let (at, argument) = source_argument(&line.text)?;
-            (Path::new(&argument).file_name() == Some(SNIPPET_NAME.as_ref()))
-                .then_some((line.text, argument, at))
+            source_arguments(&line.text)?
+                .into_iter()
+                .rev()
+                .find(|(_, argument)| {
+                    Path::new(argument).file_name() == Some(SNIPPET_NAME.as_ref())
+                })
+                .map(|(at, argument)| (line.text, argument, at))
         })
 }
 
@@ -267,26 +277,87 @@ pub struct Sourced {
     pub relative: bool,
 }
 
-/// The path a `source`/`source-file` line names, if it is one: its index
-/// among the line's words, so the same word can be read expanded, and the
-/// word as written.
-fn source_argument(line: &str) -> Option<(usize, String)> {
+/// Every path argument of a `source`/`source-file` line, if it is one: each
+/// word's index among the line's words, so the same word can be read
+/// expanded, and the word as written.
+fn source_arguments(line: &str) -> Option<Vec<(usize, String)>> {
     let words = format::words(line)?;
-    path_word(&words).map(|at| (at, words[at].clone()))
+    path_words(&words).map(|paths| {
+        paths
+            .into_iter()
+            .map(|at| (at, words[at].clone()))
+            .collect()
+    })
 }
 
-/// The path among a `source`/`source-file` line's words, if it is one.
-fn path_word(words: &[String]) -> Option<usize> {
-    match words {
-        [command, rest @ ..] if matches!(command.as_str(), "source" | "source-file") => {
-            // The last word that is not a flag is the path the walk follows.
-            // tmux's `-t` takes a value and several paths are allowed -
-            // neither is modelled, and what is reported is the word acted on.
-            rest.iter()
-                .rposition(|word| !word.starts_with('-'))
-                .map(|at| at + 1)
+/// The path arguments among a `source`/`source-file` line's words, in the
+/// argument order tmux executes them in.
+///
+/// tmux's command is `source-file [-Fnqv] [-t target-pane] path ...`: several
+/// path arguments are allowed and each is executed, so the words are scanned
+/// the way tmux's argument parser walks them. A word exactly `--` ends flag
+/// parsing and every later word is a path. A word starting with `-` and
+/// longer than one character - a lone `-` is a path like any other - is a
+/// flag cluster whose letters are read left to right: `t` ends the
+/// cluster, because it takes a value, attached when letters follow it and
+/// the next word when it is the cluster's last letter; `n` marks the line;
+/// every other letter is ignored. A `-t` value is never a path, whatever
+/// it looks like.
+///
+/// A `-n` line yields no paths at all, wherever the flag sits: tmux parses
+/// its files but never executes them, so nothing on such a line was ever
+/// read - an assignment inside it would look like the winner it is not, and
+/// a `-n` line naming our snippet registers nothing.
+///
+/// `None` for a line that is not `source`/`source-file` at all. What this
+/// deliberately does not model is tmux's unknown-flag rejection: a flag the
+/// installed tmux does not know fails argument parsing and abandons the
+/// whole config file, but the walk locates the config - it does not validate
+/// the line, here as everywhere else.
+fn path_words(words: &[String]) -> Option<Vec<usize>> {
+    if !matches!(
+        words.first().map(String::as_str),
+        Some("source" | "source-file")
+    ) {
+        return None;
+    }
+    let rest = &words[1..];
+    let mut paths = Vec::new();
+    let mut no_execute = false;
+    let mut flags_done = false;
+    let mut at = 0;
+    while let Some(word) = rest.get(at) {
+        at += 1;
+        if flags_done {
+            paths.push(at);
+            continue;
         }
-        _ => None,
+        if word == "--" {
+            flags_done = true;
+            continue;
+        }
+        if word.starts_with('-') && word.len() > 1 {
+            for (offset, flag) in word[1..].char_indices() {
+                match flag {
+                    'n' => no_execute = true,
+                    't' => {
+                        // Letters after `t` are its attached value; when it
+                        // is the cluster's last letter the next word is.
+                        if offset == word.len() - 2 {
+                            at += 1;
+                        }
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        paths.push(at);
+    }
+    match no_execute {
+        true => Some(Vec::new()),
+        false => Some(paths),
     }
 }
 
@@ -439,27 +510,30 @@ fn descend(file: &Path, depth: usize, visited: &mut Vec<PathBuf>, found: &mut Wa
     for line in format::logical_lines(&text) {
         // Descend at the point the `source-file` appears, because that is when
         // tmux runs it, and a fragment sourced early loses to a line below it.
-        if let Some((at, written)) = source_argument(&line.text) {
-            // `source_argument` answers "is this a source line" from syntax
-            // alone; only the word it picked as the path is expanded - a
+        if let Some(paths) = source_arguments(&line.text) {
+            // `source_arguments` answers "is this a source line" from syntax
+            // alone; only the words it picked as paths are expanded - a
             // variable anywhere else on the line is tmux's own concern, not a
-            // reason to lose the file this word names.
-            match format::expanded_word(&line.text, at, &lookup) {
-                Some(expanded) => {
-                    // Relativeness is judged on the expanded path - a
-                    // `$HOME/...` argument is absolute once tmux reads it -
-                    // while the guess is reported as written, which is the
-                    // spelling the user can find in their own file.
-                    if is_relative(&expanded) && !found.relative_sources.contains(&written) {
-                        found.relative_sources.push(written);
+            // reason to lose the files these words name.
+            for (at, written) in paths {
+                match format::expanded_word(&line.text, at, &lookup) {
+                    Some(expanded) => {
+                        // Relativeness is judged on the expanded path - a
+                        // `$HOME/...` argument is absolute once tmux reads
+                        // it - while the guess is reported as written, which
+                        // is the spelling the user can find in their own
+                        // file.
+                        if is_relative(&expanded) && !found.relative_sources.contains(&written) {
+                            found.relative_sources.push(written);
+                        }
+                        for sourced in expand(&expanded, home) {
+                            descend(&sourced, depth + 1, visited, found, home);
+                        }
                     }
-                    for sourced in expand(&expanded, home) {
-                        descend(&sourced, depth + 1, visited, found, home);
-                    }
-                }
-                None => {
-                    if !found.unresolved_sources.contains(&written) {
-                        found.unresolved_sources.push(written);
+                    None => {
+                        if !found.unresolved_sources.contains(&written) {
+                            found.unresolved_sources.push(written);
+                        }
                     }
                 }
             }
@@ -639,6 +713,11 @@ mod tests {
             "source ~/.config/tmux/tmux-agent-status.conf",
             "source-file -q '/opt/odd path/tmux-agent-status.conf'",
             "source-file \"/x/tmux-agent-status.conf\"",
+            // tmux sources every path argument, so ours does not have to be
+            // the line's last word.
+            "source-file /x/tmux-agent-status.conf /x/other.conf",
+            // A `-t` value is not a path and does not hide the one beside it.
+            "source-file -t %1 /x/tmux-agent-status.conf",
         ] {
             assert!(sources_snippet(line), "line {line:?}");
         }
@@ -653,6 +732,10 @@ mod tests {
             "run-shell tmux-agent-status.conf",
             "source-file",
             "source-file -q",
+            // A `-n` line's files are parsed but never executed, so it
+            // registers nothing - even when it names our snippet.
+            "source-file -n ~/.tmux/tmux-agent-status.conf",
+            "source-file -qn /x/tmux-agent-status.conf",
         ] {
             assert!(!sources_snippet(line), "line {line:?}");
         }
@@ -701,6 +784,38 @@ mod tests {
             PathBuf::from("/home/u/tmux-agent-status.conf")
         );
         assert!(guessed.relative);
+
+        // The basename can sit at any of a line's path positions, and it is
+        // the matched word that is resolved, not a neighbouring path.
+        let first_position = sourced_snippet(
+            "source-file /x/tmux-agent-status.conf /x/other.conf\n",
+            &home,
+        )
+        .expect("a sourced snippet")
+        .expect("a resolvable path");
+        assert_eq!(
+            first_position.path,
+            PathBuf::from("/x/tmux-agent-status.conf")
+        );
+
+        // Of two occurrences the last in execution order wins, for the same
+        // reason the last line does.
+        let last_position = sourced_snippet(
+            "source-file /first/tmux-agent-status.conf /second/tmux-agent-status.conf\n",
+            &home,
+        )
+        .expect("a sourced snippet")
+        .expect("a resolvable path");
+        assert_eq!(
+            last_position.path,
+            PathBuf::from("/second/tmux-agent-status.conf")
+        );
+
+        // A `-n` line parses but never executes, so it sources nothing.
+        assert_eq!(
+            sourced_snippet("source-file -n /x/tmux-agent-status.conf\n", &home),
+            None
+        );
 
         assert_eq!(sourced_snippet("set -g status on\n", &home), None);
     }

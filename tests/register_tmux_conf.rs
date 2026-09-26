@@ -421,9 +421,9 @@ fn a_source_named_through_an_unset_variable_is_reported_not_followed() {
     );
 }
 
-// Only the word the walk follows decides which file tmux reads: a variable
-// anywhere else on the line is tmux's own concern. A second path argument
-// that cannot be resolved does not stop the first being followed - or being
+// Every path argument is a candidate the walk follows, and each is reported
+// on its own: one whose variable has no value here lands in
+// `unresolved_sources` while its resolvable sibling is still followed - and
 // reported as the relative-path guess it is - because this is a config walk,
 // not a config validator.
 #[test]
@@ -442,23 +442,21 @@ fn an_unresolvable_word_elsewhere_on_the_line_does_not_hide_the_path() {
     let found = tmux_conf::walk(&entry, &home);
     assert_eq!(values(&entry, &home), ["still followed"]);
     assert_eq!(found.relative_sources, ["fragment.conf"]);
-    assert!(
-        found.unresolved_sources.is_empty(),
-        "{:?}",
-        found.unresolved_sources
+    assert_eq!(
+        found.unresolved_sources,
+        ["$TMUX_AGENT_STATUS_UNSET_FOR_TEST/x.conf"]
     );
 }
 
-// And when it is the followed word that cannot be resolved, it is the one
-// named in `unresolved_sources` - the report is about the word the walk acted
-// on, whatever else the line carries. The earlier path tmux would also read
-// is a single-path limitation the walk does not pretend away.
+// And an unresolvable path is named as written, wherever on the line it
+// sits: it hides nothing - the sibling path tmux also reads is followed and
+// reported like any other.
 #[test]
 fn the_unresolvable_report_names_the_path_the_walk_followed() {
     let dir = TempDir::new("order-last-arg-var");
     dir.write(
         "fragment.conf",
-        "set -g window-status-format 'tmux reads this, the walk does not'\n",
+        "set -g window-status-format 'read through the sibling'\n",
     );
     let entry = dir.write(
         "tmux.conf",
@@ -467,16 +465,144 @@ fn the_unresolvable_report_names_the_path_the_walk_followed() {
     let home = home_in(&dir);
 
     let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["read through the sibling"]);
+    assert_eq!(found.relative_sources, ["fragment.conf"]);
     assert_eq!(
         found.unresolved_sources,
         ["$TMUX_AGENT_STATUS_UNSET_FOR_TEST/x.conf"]
     );
+}
+
+// tmux's `source-file` takes several paths and executes each in argument
+// order, so the walk meets them the same way: an assignment in the first
+// file is found exactly the way one in the last is, and the later file wins
+// when both set the option.
+#[test]
+fn every_path_argument_is_followed_in_argument_order() {
+    let dir = TempDir::new("order-several-paths");
+    dir.write("a.conf", "set -g window-status-format 'from a'\n");
+    dir.write("b.conf", "set -g window-status-format 'from b'\n");
+    let entry = dir.write("tmux.conf", "source-file a.conf b.conf\n");
+    let home = home_in(&dir);
+
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["from a", "from b"]);
+    assert_eq!(found.relative_sources, ["a.conf", "b.conf"]);
+}
+
+// `-t` takes a value: attached as `-t%1`, or the next word when the cluster
+// ends on it. The value is a target pane, never a path, so it is neither
+// followed nor reported - and a trailing `-t` with no value is tolerated the
+// way tmux tolerates it.
+#[test]
+fn a_dash_t_value_is_never_a_path() {
+    for (line, expected) in [
+        ("source-file a.conf -t %1", vec!["from a"]),
+        ("source-file -t%1 a.conf", vec!["from a"]),
+        ("source-file -qt %1 a.conf", vec!["from a"]),
+        ("source-file -qt%1 a.conf", vec!["from a"]),
+        ("source-file a.conf -t %1 b.conf", vec!["from a", "from b"]),
+        ("source-file a.conf -t", vec!["from a"]),
+    ] {
+        let dir = TempDir::new("order-t-value");
+        dir.write("a.conf", "set -g window-status-format 'from a'\n");
+        dir.write("b.conf", "set -g window-status-format 'from b'\n");
+        let entry = dir.write("tmux.conf", &format!("{line}\n"));
+        let home = home_in(&dir);
+
+        let found = tmux_conf::walk(&entry, &home);
+        assert_eq!(values(&entry, &home), expected, "{line}");
+        // `%1` lands in neither report: it was never treated as a path.
+        assert!(
+            !found
+                .relative_sources
+                .iter()
+                .chain(&found.unresolved_sources)
+                .any(|source| source.contains('%')),
+            "{line}: {:?}",
+            found.relative_sources
+        );
+    }
+}
+
+// `--` ends flag parsing: a dash-leading word after it is a path tmux reads
+// literally (probed on 3.6a with a file named exactly that). Without `--`
+// the same word is a flag cluster, and `-dash.conf`'s letters include an
+// `n`, which marks the whole line `-n`.
+#[test]
+fn a_double_dash_makes_a_dash_leading_word_a_path() {
+    let dir = TempDir::new("order-double-dash");
+    dir.write(
+        "-dash.conf",
+        "set -g window-status-format 'from the dash file'\n",
+    );
+    dir.write("a.conf", "set -g window-status-format 'from a'\n");
+    let home = home_in(&dir);
+
+    let entry = dir.write("tmux.conf", "source-file -- -dash.conf\n");
+    let found = tmux_conf::walk(&entry, &home);
+    assert_eq!(values(&entry, &home), ["from the dash file"]);
+    assert_eq!(found.relative_sources, ["-dash.conf"]);
+
+    // The same word without `--` is a flag cluster whose `n` makes the whole
+    // line a no-execute line: nothing is followed, not even `a.conf`.
+    let without = dir.write("flags.conf", "source-file -dash.conf a.conf\n");
+    let found = tmux_conf::walk(&without, &home);
+    assert!(found.assignments.is_empty(), "{:?}", found.assignments);
     assert!(
         found.relative_sources.is_empty(),
         "{:?}",
         found.relative_sources
     );
-    assert!(found.assignments.is_empty(), "{:?}", found.assignments);
+
+    // A dash word holding no flag the scan knows is simply ignored - the
+    // walk locates the config, it does not validate the flags.
+    let cluster = dir.write("cluster.conf", "source-file -x.cf a.conf\n");
+    let found = tmux_conf::walk(&cluster, &home);
+    assert_eq!(values(&cluster, &home), ["from a"]);
+    assert_eq!(found.relative_sources, ["a.conf"]);
+
+    // And a lone `-` is no flag at all but a path like any other.
+    dir.write("-", "set -g window-status-format 'from the lone dash'\n");
+    let lone = dir.write("lone.conf", "source-file -\n");
+    let found = tmux_conf::walk(&lone, &home);
+    assert_eq!(values(&lone, &home), ["from the lone dash"]);
+    assert_eq!(found.relative_sources, ["-"]);
+}
+
+// `-n` applies to the whole command, not to one path: tmux parses the files
+// but executes none of them (probed on 3.6a), wherever on the line the flag
+// sits. Nothing is descended into, nothing is reported, and a later
+// assignment in the same config still wins.
+#[test]
+fn a_dash_n_line_sources_nothing() {
+    for line in [
+        "source-file -n a.conf",
+        "source-file -n a.conf b.conf",
+        "source-file a.conf -n b.conf",
+    ] {
+        let dir = TempDir::new("order-no-exec");
+        dir.write("a.conf", "set -g window-status-format 'from a'\n");
+        dir.write("b.conf", "set -g window-status-format 'from b'\n");
+        let entry = dir.write(
+            "tmux.conf",
+            &format!("{line}\nset -g window-status-format 'still read'\n"),
+        );
+        let home = home_in(&dir);
+
+        let found = tmux_conf::walk(&entry, &home);
+        assert_eq!(values(&entry, &home), ["still read"], "{line}");
+        assert!(
+            found.relative_sources.is_empty(),
+            "{line}: {:?}",
+            found.relative_sources
+        );
+        assert!(
+            found.unresolved_sources.is_empty(),
+            "{line}: {:?}",
+            found.unresolved_sources
+        );
+    }
 }
 
 // Inside single quotes tmux expands nothing (probed on 3.6a), so a quoted

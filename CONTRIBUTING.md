@@ -92,6 +92,25 @@ subject of a bug. Read this section before changing behaviour.
   points, so a fragment reached only through `$HOME/...` is still found, and
   an argument whose variable resolves to nothing here is reported, never
   silently dropped.
+- **`source-file` takes several paths and executes each in argument order**
+  (verified on 3.6a): `source-file a.conf b.conf` reads both, the later
+  file's assignment winning. `-t` consumes a value - attached as `-t%1`, or
+  the next word when `t` ends its cluster, so `-tn` means `-t n` - and a
+  trailing `-t` with no value is tolerated. `--` ends flag parsing: a
+  dash-leading word after it is a literal path tmux opens. `-n` applies to
+  the whole command, not one path: tmux parses the files but executes none
+  of them, so the walk yields no paths for such a line - reporting or
+  descending them would claim tmux met files it never executed, and a `-n`
+  line naming our snippet registers nothing. `-F` expands each path as a
+  format against live pane state, which the walk cannot reproduce; those
+  words are followed as written rather than skipped, because unlike `-n`
+  their files do execute. Still unmodelled is unknown-flag rejection: a flag
+  the installed tmux does not know fails argument parsing and abandons the
+  whole config file. Because every path argument runs, `register` counts a
+  line as sourcing our snippet when any path position names its basename,
+  not only the last word - last-word matching would read
+  `source-file tmux-agent-status.conf other.conf` as unregistered and append
+  a duplicate source line.
 - **The config walk takes the `Home` it is given; the probe takes the real
   process environment.** They agree in production because `Home::from_env()`
   reads the same `$HOME` the probe puts its cwd in - in a test they diverge

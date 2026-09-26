@@ -1046,6 +1046,45 @@ fn a_relative_source_is_followed_from_home_and_the_guess_is_reported() {
     );
 }
 
+// `source-file` executes every path argument in order (probed on 3.6a), not
+// just the last word of the line: the assignment in `frag.conf` is the
+// winner register must edit, and a walk that followed only `other.conf`
+// would never have seen it.
+#[test]
+fn an_assignment_behind_an_earlier_path_argument_is_the_one_edited() {
+    let home = TempDir::new("cli-several-paths");
+    fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
+    let config = home.join(".config/tmux/tmux.conf");
+    fs::write(
+        &config,
+        "set -g window-status-format '#I:#W'\n\
+         set -g window-status-current-format '#I:#W'\n\
+         source-file frag.conf other.conf\n",
+    )
+    .expect("the config");
+    let fragment = home.join("frag.conf");
+    fs::write(&fragment, "set -g window-status-format '#I:#W-frag'\n").expect("the fragment");
+    fs::write(home.join("other.conf"), "set -g status-left 'theirs'\n")
+        .expect("the other fragment");
+
+    let out = register(&home, &["-y", "--tmux-format"]);
+
+    assert_eq!(code(&out), 0, "{}\n{}", stdout(&out), stderr(&out));
+    // The winning `window-status-format` lives in the earlier path argument:
+    // it is the one the term was spliced into.
+    let edited = fs::read_to_string(&fragment).expect("the fragment");
+    assert!(
+        edited.contains("#{?@agent_status, #{@agent_status},}"),
+        "the earlier path argument was not followed:\n{edited}"
+    );
+    // And the option only the config assigns was still spliced there.
+    let main = fs::read_to_string(&config).expect("the config");
+    assert!(
+        main.contains("#{?@agent_status, #{@agent_status},}"),
+        "window-status-current-format got no term:\n{main}"
+    );
+}
+
 // tmux expands `$NAME`/`${NAME}` in a `source-file` argument outside single
 // quotes before resolving it (probed on 3.6a), so a fragment reached only
 // through `$HOME/...` is a file the format step must find - and once expanded
