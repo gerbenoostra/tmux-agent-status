@@ -297,11 +297,12 @@ fn source_arguments(line: &str) -> Option<Vec<(usize, String)>> {
 /// path arguments are allowed and each is executed, so the words are scanned
 /// the way tmux's argument parser walks them. A word exactly `--` ends flag
 /// parsing and every later word is a path. A word starting with `-` and
-/// longer than it - a lone `-` is a path like any other - is a flag cluster
-/// whose letters are read left to right: `t` ends the cluster, because it
-/// takes a value, attached when letters follow it and the next word when it
-/// is the cluster's last letter; `n` marks the line; every other letter is
-/// ignored. A `-t` value is never a path, whatever it looks like.
+/// longer than one character - a lone `-` is a path like any other - is a
+/// flag cluster whose letters are read left to right: `t` ends the
+/// cluster, because it takes a value, attached when letters follow it and
+/// the next word when it is the cluster's last letter; `n` marks the line;
+/// every other letter is ignored. A `-t` value is never a path, whatever
+/// it looks like.
 ///
 /// A `-n` line yields no paths at all, wherever the flag sits: tmux parses
 /// its files but never executes them, so nothing on such a line was ever
