@@ -18,17 +18,21 @@ use support::tempdir::TempDir;
 /// A tmux server on a socket of its own, started on a given config.
 struct Server {
     socket: String,
+    /// Captured once the server is up, so the socket file can be removed in
+    /// `Drop`. tmux never unlinks its own socket (probed on 3.6a).
+    socket_path: Option<String>,
 }
 
 impl Server {
     fn start_on(config: &Path) -> Server {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let server = Server {
+        let mut server = Server {
             socket: format!(
                 "tmux-agent-status-register-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ),
+            socket_path: None,
         };
         server.run(&[
             "-f",
@@ -43,6 +47,7 @@ impl Server {
             "20",
             "sleep 300",
         ]);
+        server.socket_path = Some(server.option(&["display-message", "-p", "#{socket_path}"]));
         server
     }
 
@@ -71,7 +76,9 @@ impl Server {
     }
 
     fn socket_path(&self) -> String {
-        self.option(&["display-message", "-p", "#{socket_path}"])
+        self.socket_path
+            .clone()
+            .unwrap_or_else(|| self.option(&["display-message", "-p", "#{socket_path}"]))
     }
 }
 
@@ -83,6 +90,11 @@ impl Drop for Server {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+        // tmux never unlinks its own socket, so whoever names a server must
+        // remove the file. Do not assert: the server may not have started.
+        if let Some(ref path) = self.socket_path {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 

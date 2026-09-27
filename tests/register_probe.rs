@@ -150,33 +150,6 @@ fn a_config_that_was_already_broken_shows_it_in_the_baseline() {
     assert!(text.contains("status-left"), "the fixture sets something");
 }
 
-// 26. The probe cleans up: no server on the probe socket afterwards.
-#[test]
-fn the_probe_leaves_no_server_behind() {
-    if !tmux_or_skip() {
-        return;
-    }
-    let dir = TempDir::new("probe-cleanup");
-    let config = dir.write("tmux.conf", "set -g status-left 'LEFT'\n");
-    let _ = dump(&config);
-    let _ = probe::compiled_in_default();
-
-    let mine = format!("tmux-agent-status-probe-{}-", std::process::id());
-    assert_eq!(probe_sockets(&mine), 0, "a probe server was left running");
-}
-
-/// How many probe sockets this process still has out there.
-fn probe_sockets(prefix: &str) -> usize {
-    fs::read_dir(probe::socket_dir())
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
-                .count()
-        })
-        .unwrap_or(0)
-}
-
 // 27. A relative `source-file` in the config: the probe runs with cwd `$HOME`,
 // which is where tmux itself would resolve it from.
 #[test]
@@ -219,7 +192,7 @@ fn a_config_that_is_not_there_reads_back_as_tmuxs_defaults() {
 
 // A config that blocks must not block the `register` run.
 #[test]
-fn a_config_that_blocks_is_given_up_on_and_leaves_nothing_running() {
+fn a_config_that_blocks_is_given_up_on() {
     if !tmux_or_skip() {
         return;
     }
@@ -227,7 +200,6 @@ fn a_config_that_blocks_is_given_up_on_and_leaves_nothing_running() {
     // Verified on 3.6a: `run-shell` without `-b` holds up `new-session -d` for
     // as long as the command takes.
     let config = dir.write("tmux.conf", "run-shell 'sleep 3'\n");
-    let mine = format!("tmux-agent-status-probe-{}-", std::process::id());
 
     let started = std::time::Instant::now();
     let found = probe::dump_within(&config, std::time::Duration::from_millis(500));
@@ -238,15 +210,8 @@ fn a_config_that_blocks_is_given_up_on_and_leaves_nothing_running() {
         waited < std::time::Duration::from_secs(2),
         "the register run was held up for {waited:?}"
     );
-
-    // The server is wedged in its own config and cannot answer `kill-server`
-    // until it finishes, so the kill was spawned rather than waited on. It
-    // still goes, a moment later.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while probe_sockets(&mine) > 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    assert_eq!(probe_sockets(&mine), 0, "a probe server was left running");
+    // Residue cleanup (the private dir and its socket) is asserted by
+    // register_probe_residue.rs, which runs the stuck case too.
 }
 
 #[test]
@@ -290,4 +255,31 @@ fn the_running_server_can_be_asked_what_it_loaded() {
     // Outside tmux there is usually no server, and every one of these is
     // optional by design: `None` is an answer, not a failure.
     let _ = probe::config_files();
+}
+
+// A `run-shell` in the probed config sees the probe's private dir as its
+// `TMUX_TMPDIR`, not the test's own (F10). The dump is unaffected; a
+// config's own `tmux -L other` calls now land in the private dir (removed
+// with it) instead of the user's socket dir.
+#[test]
+fn the_probed_config_sees_the_private_dir_as_its_tmux_tmpdir() {
+    if !tmux_or_skip() {
+        return;
+    }
+    let dir = TempDir::new("probe-env");
+    let witness = dir.join("tmpdir-witness.txt");
+    let config = dir.write(
+        "tmux.conf",
+        &format!(
+            "run-shell 'printf %s \"$TMUX_TMPDIR\" > {witness}'\n",
+            witness = witness.display()
+        ),
+    );
+    let _ = probe::dump(&config);
+    let captured = fs::read_to_string(&witness).expect("the witness file was written");
+    assert!(
+        captured.starts_with(&format!("/tmp/{}", probe::PRIVATE_PREFIX)),
+        "TMUX_TMPDIR visible to the probed config does not start with the \
+         private-dir prefix: {captured}"
+    );
 }
