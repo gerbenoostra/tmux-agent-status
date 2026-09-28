@@ -278,7 +278,12 @@ fn the_probed_config_sees_the_private_dir_as_its_tmux_tmpdir() {
     let _ = probe::dump(&config);
     let captured = fs::read_to_string(&witness).expect("the witness file was written");
     assert!(
-        captured.starts_with(&format!("/tmp/{}", probe::PRIVATE_PREFIX)),
+        captured.starts_with(
+            &probe::private_root()
+                .join(probe::PRIVATE_PREFIX)
+                .display()
+                .to_string()
+        ),
         "TMUX_TMPDIR visible to the probed config does not start with the \
          private-dir prefix: {captured}"
     );

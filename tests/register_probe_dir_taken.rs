@@ -25,14 +25,16 @@ fn exhausted_slots_return_none_and_the_next_probe_succeeds() {
     // at 0 for this binary, so the first 16 attempts collide.
     let mut pre_created = Vec::new();
     for n in 0..16 {
-        let name = format!("/tmp/{}-{}-{}", probe::PRIVATE_PREFIX, pid, n);
-        fs::create_dir_all(&name).unwrap_or_else(|e| panic!("create {name}: {e}"));
-        pre_created.push(name);
+        let name = format!("{}-{}-{}", probe::PRIVATE_PREFIX, pid, n);
+        let path = probe::private_root().join(&name);
+        fs::create_dir_all(&path).unwrap_or_else(|e| panic!("create {}: {e}", path.display()));
+        pre_created.push(path);
     }
 
-    let config_dir = format!("/tmp/tmux-agent-status-dir-taken-test-{}", pid);
+    let config_dir =
+        probe::private_root().join(format!("tmux-agent-status-dir-taken-test-{}", pid));
     fs::create_dir_all(&config_dir).expect("scratch dir");
-    let config = std::path::PathBuf::from(&config_dir).join("tmux.conf");
+    let config = config_dir.join("tmux.conf");
     fs::write(&config, "set -g status-left 'LEFT'\n").expect("write config");
 
     let result = probe::dump(&config);
@@ -44,8 +46,9 @@ fn exhausted_slots_return_none_and_the_next_probe_succeeds() {
     // The pre-created dirs were not touched by the probe.
     for dir in &pre_created {
         assert!(
-            std::path::Path::new(dir).is_dir(),
-            "the probe removed a pre-created dir: {dir}"
+            dir.is_dir(),
+            "the probe removed a pre-created dir: {}",
+            dir.display()
         );
     }
 
@@ -61,5 +64,5 @@ fn exhausted_slots_return_none_and_the_next_probe_succeeds() {
     for dir in &pre_created {
         let _ = fs::remove_dir_all(dir);
     }
-    let _ = fs::remove_dir_all(&config_dir);
+    let _ = fs::remove_dir_all(config_dir);
 }

@@ -32,11 +32,20 @@ use super::format;
 /// this is the bound on it.
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The prefix of the private directories the probe creates under `/tmp`.
+/// The prefix of the private directories the probe creates under `private_root()`.
 ///
 /// Exposed for tests that assert no dir with this prefix remains after the
 /// probes finish.
 pub const PRIVATE_PREFIX: &str = "tmux-agent-status-probe";
+
+/// The directory under which probe private directories are created.
+///
+/// `/tmp` is used directly because `std::env::temp_dir()` on macOS resolves to
+/// a long `/var/folders/.../T/` path; once tmux appends `tmux-<uid>/<socket>`
+/// the result can exceed `sun_path` (F6).
+pub fn private_root() -> &'static Path {
+    Path::new("/tmp")
+}
 
 /// What the running server says it would load: candidates, never a decision.
 pub fn config_files() -> Option<String> {
@@ -229,8 +238,8 @@ const PRIVATE_DIR_ATTEMPTS: usize = 16;
 /// A throwaway tmux server in a private directory, cleaned up on every exit
 /// path.
 ///
-/// Each server creates `/tmp/<PRIVATE_PREFIX>-<pid>-<n>` with mode `0700` and
-/// runs as `-L probe` inside it. tmux never unlinks its own socket, so whoever
+/// Each server creates a `<PRIVATE_PREFIX>-<pid>-<n>` directory under `private_root()`
+/// and runs as `-L probe` inside it. tmux never unlinks its own socket, so whoever
 /// names a server must remove it. The private directory keeps the socket out
 /// of the user's tmux socket dir entirely, and `Drop` or the background reaper
 /// removes the directory with the server.
@@ -254,7 +263,7 @@ impl Server {
             let mut attempts = 0;
             loop {
                 let n = NEXT.fetch_add(1, Ordering::Relaxed);
-                let dir = PathBuf::from(format!("/tmp/{PRIVATE_PREFIX}-{pid}-{n}"));
+                let dir = private_root().join(format!("{PRIVATE_PREFIX}-{pid}-{n}"));
                 match fs::DirBuilder::new().mode(0o700).create(&dir) {
                     Ok(()) => break dir,
                     Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {

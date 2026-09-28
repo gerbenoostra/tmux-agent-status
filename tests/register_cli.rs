@@ -137,15 +137,14 @@ fn a_dry_run_of_the_tmux_steps_leaves_no_probe_socket_behind() {
 
     // A short scratch dir under `/tmp` (not TempDir, which uses
     // `std::env::temp_dir()` and can exceed sun_path on macOS).
-    let scratch = format!(
-        "/tmp/tmux-agent-status-cli-dry-run-{}-0",
+    let scratch = probe::private_root().join(format!(
+        "tmux-agent-status-cli-dry-run-{}-0",
         std::process::id()
-    );
-    let scratch = std::path::Path::new(&scratch);
-    fs::create_dir_all(scratch).expect("scratch dir");
+    ));
+    fs::create_dir_all(&scratch).expect("scratch dir");
 
     let mut child = command(&home, &["--dry-run", "--no-agents"])
-        .env("TMUX_TMPDIR", scratch)
+        .env("TMUX_TMPDIR", &scratch)
         .spawn()
         .expect("the binary starts");
     let child_pid = child.id();
@@ -165,9 +164,9 @@ fn a_dry_run_of_the_tmux_steps_leaves_no_probe_socket_behind() {
         "a probe created something in the socket dir"
     );
 
-    // AC1: no private dir for the child pid remains under `/tmp`.
+    // AC1: no private dir for the child pid remains under the probe private root.
     let prefix = format!("{}-{}-", probe::PRIVATE_PREFIX, child_pid);
-    let private_dirs: Vec<String> = fs::read_dir("/tmp")
+    let private_dirs: Vec<String> = fs::read_dir(probe::private_root())
         .map(|entries| {
             entries
                 .flatten()

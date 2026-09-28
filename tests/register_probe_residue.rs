@@ -23,10 +23,10 @@ fn socket_dir_has_entries(scratch: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-/// How many private dirs this process still has under `/tmp`.
+/// How many private dirs this process still has under the probe private root.
 fn private_dirs_for_pid(pid: u32) -> Vec<String> {
     let prefix = format!("{}-{}-", probe::PRIVATE_PREFIX, pid);
-    fs::read_dir("/tmp")
+    fs::read_dir(probe::private_root())
         .map(|entries| {
             entries
                 .flatten()
@@ -42,16 +42,15 @@ fn probes_leave_no_residue_in_the_socket_dir_or_under_tmp() {
     if !tmux_or_skip() {
         return;
     }
-    let scratch = format!(
-        "/tmp/tmux-agent-status-residue-test-{}-{}",
+    let scratch = probe::private_root().join(format!(
+        "tmux-agent-status-residue-test-{}-{}",
         std::process::id(),
         0
-    );
-    let scratch = std::path::Path::new(&scratch);
-    fs::create_dir_all(scratch).expect("scratch dir");
+    ));
+    fs::create_dir_all(&scratch).expect("scratch dir");
 
     // SAFETY: this binary holds one test, so nothing else is running.
-    unsafe { std::env::set_var("TMUX_TMPDIR", scratch) };
+    unsafe { std::env::set_var("TMUX_TMPDIR", &scratch) };
 
     // A normal dump.
     let config = scratch.join("tmux.conf");
@@ -78,7 +77,7 @@ fn probes_leave_no_residue_in_the_socket_dir_or_under_tmp() {
 
     // AC2: the user's tmux socket dir holds no entry the probes created.
     assert!(
-        !socket_dir_has_entries(scratch),
+        !socket_dir_has_entries(&scratch),
         "a probe created something in the socket dir"
     );
 
