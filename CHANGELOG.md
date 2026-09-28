@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/gerbenoostra/tmux-agent-status/compare/v0.1.1...v0.1.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* prevent probe servers from leaking tmux sockets ([#24](https://github.com/gerbenoostra/tmux-agent-status/issues/24)) ([7aa68df](https://github.com/gerbenoostra/tmux-agent-status/commit/7aa68df7733197cac46677858078d6e846db24b9))
+
 ## [0.1.1](https://github.com/gerbenoostra/tmux-agent-status/compare/v0.1.0...v0.1.1) (2026-09-26)
 
 
