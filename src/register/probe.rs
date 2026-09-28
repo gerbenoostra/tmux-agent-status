@@ -42,7 +42,7 @@ pub const PRIVATE_PREFIX: &str = "tmux-agent-status-probe";
 ///
 /// `/tmp` is used directly because `std::env::temp_dir()` on macOS resolves to
 /// a long `/var/folders/.../T/` path; once tmux appends `tmux-<uid>/<socket>`
-/// the result can exceed `sun_path` (F6).
+/// the result can exceed `sun_path`.
 pub fn private_root() -> &'static Path {
     Path::new("/tmp")
 }
@@ -232,7 +232,7 @@ pub fn reload(config: &Path) -> io::Result<()> {
     }
 }
 
-/// Maximum number of attempts to create a private directory (D1).
+/// Maximum number of attempts to create a private directory.
 const PRIVATE_DIR_ATTEMPTS: usize = 16;
 
 /// A throwaway tmux server in a private directory, cleaned up on every exit
@@ -257,8 +257,8 @@ impl Server {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let pid = std::process::id();
 
-        // D1: create a private dir under /tmp. On AlreadyExists, take the next
-        // slot. At most PRIVATE_DIR_ATTEMPTS attempts (D4).
+        // Create a private dir under /tmp. On AlreadyExists, take the next
+        // slot, up to PRIVATE_DIR_ATTEMPTS attempts.
         let private_dir = {
             let mut attempts = 0;
             loop {
@@ -313,7 +313,7 @@ impl Drop for Server {
     fn drop(&mut self) {
         // Once the reaped flag is set, a background reaper owns both the kill
         // and the directory removal: a second kill would wait out the timeout
-        // again on a server still wedged in its config (F11).
+        // again on a server still wedged in its config.
         if self.reaped.get() {
             return;
         }

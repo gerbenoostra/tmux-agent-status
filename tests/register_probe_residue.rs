@@ -72,16 +72,16 @@ fn probes_leave_no_residue_in_the_socket_dir_or_under_tmp() {
     assert_eq!(found, None, "a stuck config must not produce a dump");
     assert!(
         waited < Duration::from_millis(900),
-        "Drop waited a second time: {waited:?} (D2 violation)"
+        "Drop waited a second time after handing cleanup to the reaper: {waited:?}"
     );
 
-    // AC2: the user's tmux socket dir holds no entry the probes created.
+    // The user's tmux socket dir holds no entry the probes created.
     assert!(
         !socket_dir_has_entries(&scratch),
         "a probe created something in the socket dir"
     );
 
-    // AC1, AC3: wait for the reaper to finish (bounded).
+    // Wait for the timed-out server's reaper to finish, with a bound.
     let pid = std::process::id();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {

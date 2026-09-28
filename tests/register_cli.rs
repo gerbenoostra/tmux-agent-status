@@ -153,7 +153,7 @@ fn a_dry_run_of_the_tmux_steps_leaves_no_probe_socket_behind() {
 
     assert!(residue(home.path()).is_empty());
 
-    // AC2: the child's probes must not have created anything in the scratch
+    // The child's probes must not have created anything in the scratch
     // dir's tmux-<uid>/ subdirectory.
     let uid_dir = scratch.join(format!("tmux-{}", unsafe { libc::getuid() }));
     let socket_entries: usize = fs::read_dir(&uid_dir)
@@ -164,7 +164,7 @@ fn a_dry_run_of_the_tmux_steps_leaves_no_probe_socket_behind() {
         "a probe created something in the socket dir"
     );
 
-    // AC1: no private dir for the child pid remains under the probe private root.
+    // No private dir for the child pid remains under the probe private root.
     let prefix = format!("{}-{}-", probe::PRIVATE_PREFIX, child_pid);
     let private_dirs: Vec<String> = fs::read_dir(probe::private_root())
         .map(|entries| {

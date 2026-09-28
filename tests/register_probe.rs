@@ -258,7 +258,7 @@ fn the_running_server_can_be_asked_what_it_loaded() {
 }
 
 // A `run-shell` in the probed config sees the probe's private dir as its
-// `TMUX_TMPDIR`, not the test's own (F10). The dump is unaffected; a
+// `TMUX_TMPDIR`, not the test's own. The dump is unaffected; a
 // config's own `tmux -L other` calls now land in the private dir (removed
 // with it) instead of the user's socket dir.
 #[test]

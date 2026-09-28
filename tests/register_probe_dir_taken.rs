@@ -1,8 +1,8 @@
-//! When all 16 private-dir slots are taken, the probe returns `None` (D4);
+//! When all 16 private-dir slots are taken, the probe returns `None`;
 //! the next probe succeeds on the slot that opened (the counter moved past
 //! the pre-created range).
 //!
-//! A test binary of its own (D7): it pre-creates dirs under `/tmp` keyed on
+//! This is a test binary of its own: it pre-creates dirs under `/tmp` keyed on
 //! this pid and checks the probe's interaction with them, which is a pid-wide
 //! concern.
 
