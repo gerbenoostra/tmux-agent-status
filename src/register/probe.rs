@@ -269,7 +269,7 @@ impl Server {
                     Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                         attempts += 1;
                         if attempts >= PRIVATE_DIR_ATTEMPTS {
-                            return None; // coverage: off - needs 16 pre-placed dirs; staged by register_probe_dir_taken.rs
+                            return None;
                         }
                         continue;
                     }
