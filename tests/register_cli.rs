@@ -125,6 +125,8 @@ fn a_dry_run_prints_a_plan_and_touches_nothing() {
 
 #[test]
 fn a_dry_run_of_the_tmux_steps_leaves_no_probe_socket_behind() {
+    use tmux_agent_status::register::probe;
+
     let home = TempDir::new("cli-dry-run-tmux");
     fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
     fs::write(
@@ -133,27 +135,52 @@ fn a_dry_run_of_the_tmux_steps_leaves_no_probe_socket_behind() {
     )
     .expect("the config");
 
-    let out = register(&home, &["--dry-run", "--no-agents"]);
+    // A short scratch dir under `/tmp` (not TempDir, which uses
+    // `std::env::temp_dir()` and can exceed sun_path on macOS).
+    let scratch = probe::private_root().join(format!(
+        "tmux-agent-status-cli-dry-run-{}-0",
+        std::process::id()
+    ));
+    fs::create_dir_all(&scratch).expect("scratch dir");
 
-    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let mut child = command(&home, &["--dry-run", "--no-agents"])
+        .env("TMUX_TMPDIR", &scratch)
+        .spawn()
+        .expect("the binary starts");
+    let child_pid = child.id();
+    let status = child.wait().expect("the binary finishes");
+    assert!(status.success(), "exit {status}");
+
     assert!(residue(home.path()).is_empty());
 
-    // The probe server's socket is the one thing a dry run does create, and it
-    // is created and killed inside the call.
-    let mine = "tmux-agent-status-probe-";
-    let left = fs::read_dir(
-        std::env::var_os("TMUX_TMPDIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp")),
-    )
-    .map(|entries| {
-        entries
-            .flatten()
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with(mine))
-            .count()
-    })
-    .unwrap_or(0);
-    assert_eq!(left, 0, "a probe server was left running");
+    // The child's probes must not have created anything in the scratch
+    // dir's tmux-<uid>/ subdirectory.
+    let uid_dir = scratch.join(format!("tmux-{}", unsafe { libc::getuid() }));
+    let socket_entries: usize = fs::read_dir(&uid_dir)
+        .map(|entries| entries.flatten().count())
+        .unwrap_or(0);
+    assert_eq!(
+        socket_entries, 0,
+        "a probe created something in the socket dir"
+    );
+
+    // No private dir for the child pid remains under the probe private root.
+    let prefix = format!("{}-{}-", probe::PRIVATE_PREFIX, child_pid);
+    let private_dirs: Vec<String> = fs::read_dir(probe::private_root())
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        private_dirs.is_empty(),
+        "private dirs remain: {private_dirs:?}"
+    );
+
+    let _ = fs::remove_dir_all(scratch);
 }
 
 #[test]
@@ -512,9 +539,9 @@ fn the_probe_can_be_turned_off_and_the_edit_still_lands() {
     let home = TempDir::new("cli-no-probe");
     fs::create_dir_all(home.join(".config/tmux")).expect("the directory");
     fs::write(home.join(".config/tmux/tmux.conf"), "set -g status on\n").expect("the config");
-    // Every throwaway probe server runs on a socket named with this prefix
-    // (see `Server::start_on`); a stub that logs its own invocations lets the
-    // test tell "no probe ran" from "no tmux is installed to probe with".
+    // The probe server runs as `-L probe` inside a private directory; a stub
+    // that logs its own invocations lets the test tell "no probe ran" from
+    // "no tmux is installed to probe with".
     let log = home.join("tmux-invocations.log");
     stub(&home, "tmux", &format!("echo \"$@\" >> {}", log.display()));
 
@@ -535,7 +562,7 @@ fn the_probe_can_be_turned_off_and_the_edit_still_lands() {
         "the stub was not exercised, so the assertion below would pass vacuously:\n{invocations}"
     );
     assert!(
-        !invocations.contains("tmux-agent-status-probe-"),
+        !invocations.contains("-L probe"),
         "--no-tmux-probe did not stop a throwaway server from starting:\n{invocations}"
     );
     // The edit still lands, from the documented default rather than a probed

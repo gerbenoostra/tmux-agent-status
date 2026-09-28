@@ -14,7 +14,10 @@
 //! `show-options -gwv window-status-format` perfectly happily. It just answers
 //! with the default.
 
+use std::cell::Cell;
+use std::fs;
 use std::io;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,6 +32,21 @@ use super::format;
 /// this is the bound on it.
 const TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The prefix of the private directories the probe creates under `private_root()`.
+///
+/// Exposed for tests that assert no dir with this prefix remains after the
+/// probes finish.
+pub const PRIVATE_PREFIX: &str = "tmux-agent-status-probe";
+
+/// The directory under which probe private directories are created.
+///
+/// `/tmp` is used directly because `std::env::temp_dir()` on macOS resolves to
+/// a long `/var/folders/.../T/` path; once tmux appends `tmux-<uid>/<socket>`
+/// the result can exceed `sun_path`.
+pub fn private_root() -> &'static Path {
+    Path::new("/tmp")
+}
+
 /// What the running server says it would load: candidates, never a decision.
 pub fn config_files() -> Option<String> {
     run_here(&["display-message", "-p", "#{config_files}"])
@@ -39,7 +57,7 @@ pub fn config_files() -> Option<String> {
 /// Asked rather than remembered: the default has changed between tmux versions
 /// and the one in *this* tmux is the only one that is right. `-f /dev/null`
 /// means the user's config is not loaded, so the probe server has no side
-/// effects beyond its own socket, which is killed on the way out.
+/// effects: it lives in a private directory removed with it.
 pub fn compiled_in_default() -> Option<String> {
     let server = Server::start_on(Path::new("/dev/null"), TIMEOUT)?;
     server
@@ -214,26 +232,56 @@ pub fn reload(config: &Path) -> io::Result<()> {
     }
 }
 
-/// A throwaway tmux server on a socket of its own, killed on every exit path.
+/// Maximum number of attempts to create a private directory.
+const PRIVATE_DIR_ATTEMPTS: usize = 16;
+
+/// A throwaway tmux server in a private directory, cleaned up on every exit
+/// path.
 ///
-/// A leaked tmux server is exactly the kind of residue this tool promises not
-/// to leave, so the kill is in `Drop`: a panic or an interrupt unwinds through
-/// it the same way a return does.
+/// Each server creates a `<PRIVATE_PREFIX>-<pid>-<n>` directory under `private_root()`
+/// and runs as `-L probe` inside it. tmux never unlinks its own socket, so whoever
+/// names a server must remove it. The private directory keeps the socket out
+/// of the user's tmux socket dir entirely, and `Drop` or the background reaper
+/// removes the directory with the server.
 struct Server {
-    socket: String,
+    /// The private directory holding this server's socket.
+    private_dir: PathBuf,
     timeout: Duration,
+    /// Set by `run_probe` on timeout: the background reaper owns the kill and
+    /// the directory removal, so `Drop` must not attempt either.
+    reaped: Cell<bool>,
 }
 
 impl Server {
     fn start_on(config: &Path, timeout: Duration) -> Option<Server> {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let pid = std::process::id();
+
+        // Create a private dir under /tmp. On AlreadyExists, take the next
+        // slot, up to PRIVATE_DIR_ATTEMPTS attempts.
+        let private_dir = {
+            let mut attempts = 0;
+            loop {
+                let n = NEXT.fetch_add(1, Ordering::Relaxed);
+                let dir = private_root().join(format!("{PRIVATE_PREFIX}-{pid}-{n}"));
+                match fs::DirBuilder::new().mode(0o700).create(&dir) {
+                    Ok(()) => break dir,
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                        attempts += 1;
+                        if attempts >= PRIVATE_DIR_ATTEMPTS {
+                            return None;
+                        }
+                        continue;
+                    }
+                    Err(_) => return None, // coverage: off - cannot be staged without breaking /tmp
+                }
+            }
+        };
+
         let server = Server {
-            socket: format!(
-                "tmux-agent-status-probe-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ),
+            private_dir,
             timeout,
+            reaped: Cell::new(false),
         };
         server.ask(&[
             "-f",
@@ -255,23 +303,32 @@ impl Server {
 
     /// The same, but keeping what tmux had to say when it refused.
     fn attempt(&self, args: &[&str]) -> Option<(bool, String, String)> {
-        let mut all = vec!["-L", self.socket.as_str()];
+        let mut all = vec!["-L", "probe"];
         all.extend_from_slice(args);
-        run_probe(&all, &self.socket, self.timeout)
+        run_probe(&all, &self.private_dir, self.timeout, &self.reaped)
     }
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
-        // Killed on every exit path, a panic included: a leaked tmux server is
-        // exactly the kind of residue this tool promises not to leave. Bounded
-        // by the same timeout as everything else, because a server still busy
-        // executing its config does not answer `kill-server` either.
+        // Once the reaped flag is set, a background reaper owns both the kill
+        // and the directory removal: a second kill would wait out the timeout
+        // again on a server still wedged in its config.
+        if self.reaped.get() {
+            return;
+        }
+        // Kill the server, then remove the private directory.
         let _ = run_probe(
-            &["-L", &self.socket, "kill-server"],
-            &self.socket,
+            &["-L", "probe", "kill-server"],
+            &self.private_dir,
             self.timeout,
+            &self.reaped,
         );
+        // If the kill itself timed out and set the reaped flag, the reaper now
+        // owns the directory.
+        if !self.reaped.get() {
+            let _ = fs::remove_dir_all(&self.private_dir);
+        } // coverage: off - reached by integration tests; the lib-test compilation never creates a Server
     }
 }
 
@@ -294,14 +351,20 @@ fn run_here(args: &[&str]) -> Option<String> {
 
 /// Run a tmux that belongs to us, bounded, in the environment a probe needs.
 ///
-/// `$TMUX` is cleared so a probe started from inside tmux cannot reach the
-/// server it is running in, and the working directory is `$HOME` because tmux
-/// resolves a relative `source-file` against the process's cwd rather than the
-/// config's - verified. The walk in `tmux_conf` resolves one against the
-/// `Home` it is given, which in production is the one `Home::from_env()` read
-/// of this same `$HOME`, so the two read the same files, and reports that it
-/// had to guess.
-fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, String, String)> {
+/// `TMUX_TMPDIR` is set to the private directory so the server's socket lands
+/// there rather than in the user's socket dir. `$TMUX` is cleared so a probe
+/// started from inside tmux cannot reach the server it is running in, and the
+/// working directory is `$HOME` because tmux resolves a relative `source-file`
+/// against the process's cwd rather than the config's - verified. The walk in
+/// `tmux_conf` resolves one against the `Home` it is given, which in
+/// production is the one `Home::from_env()` read of this same `$HOME`, so the
+/// two read the same files, and reports that it had to guess.
+fn run_probe(
+    args: &[&str],
+    private_dir: &Path,
+    timeout: Duration,
+    reaped: &Cell<bool>,
+) -> Option<(bool, String, String)> {
     // The test-only switch, shared with the rest of `register`: a tmux that
     // stops answering partway through a sequence is a thing that happens and
     // nothing a test can arrange.
@@ -313,6 +376,7 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
     let mut command = Command::new("tmux");
     command
         .args(args)
+        .env("TMUX_TMPDIR", private_dir)
         .env_remove("TMUX")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -337,12 +401,13 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
             // Out of time, or a wait that itself failed. A config whose
             // `run-shell` blocks holds up `new-session -d` for as long as the
             // command takes - verified on 3.6a - and must not hold up a
-            // `register` run. Kill the client we started, then arrange for the server
-            // it may have left behind.
+            // `register` run. Kill the client we started, then hand the server
+            // and its private directory to a background reaper.
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                reap(socket);
+                reap(private_dir);
+                reaped.set(true);
                 return None;
             }
         }
@@ -359,27 +424,23 @@ fn run_probe(args: &[&str], socket: &str, timeout: Duration) -> Option<(bool, St
     // above, which is what `None` means throughout this module.
 }
 
-/// Clear up a probe server we could not wait for.
+/// Clear up a probe server we could not wait for, and remove its private
+/// directory.
 ///
 /// Not waited on, deliberately. The server is wedged executing its own config
 /// and will not answer `kill-server` until it finishes, which is precisely the
-/// wait we just refused to sit through. Spawning the kill and walking away
-/// means the `register` run is not held up and the server still goes, a moment later,
-/// on a socket nothing else uses.
-fn reap(socket: &str) {
-    let _ = Command::new("tmux")
-        .args(["-L", socket, "kill-server"])
+/// wait we just refused to sit through. Spawning the kill-then-remove as a
+/// single shell command means the `register` run is not held up and the server
+/// and its directory still go, a moment later.
+fn reap(private_dir: &Path) {
+    let dir = private_dir.to_string_lossy();
+    let _ = Command::new("sh")
+        .args(["-c", "tmux -L probe kill-server; rm -rf \"$1\"", "sh", &dir])
+        .env("TMUX_TMPDIR", private_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
-}
-
-/// Where a probe socket lives, for a test that asserts none was left behind.
-pub fn socket_dir() -> PathBuf {
-    std::env::var_os("TMUX_TMPDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
 #[cfg(test)]
@@ -485,10 +546,5 @@ mod tests {
     fn a_flag_option_with_no_value_still_has_a_name() {
         let dump = dump_of(&["some-flag"]);
         assert_eq!(dump.named(), vec![("some-flag", "")]);
-    }
-
-    #[test]
-    fn the_socket_directory_is_wherever_tmux_puts_it() {
-        assert!(socket_dir().is_absolute());
     }
 }

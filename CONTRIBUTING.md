@@ -159,6 +159,11 @@ it. The contract that licences it:
   there without touching the marketplace: a local `directory` marketplace is a
   legitimate development setup that re-adding the GitHub marketplace would
   silently replace.
+- Throwaway probe servers live in a private `0700` directory under `/tmp`,
+  never the user's tmux socket dir, and that directory is removed with the
+  server on every exit path, including the reaped (timed-out) one. tmux never
+  unlinks its own socket (probed on 3.6a), so the probe's cleanup is the only
+  cleanup.
 - tmux config commands execute in encounter order across `source-file`, last
   assignment wins, and relative `source-file` paths resolve against the tmux
   process working directory - not the containing config's directory. Format
