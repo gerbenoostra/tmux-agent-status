@@ -169,6 +169,15 @@ ci_macos_jobs := "test nix-verify"
 # Run ci.yml's macOS and Linux jobs locally, against the committed HEAD.
 ci: ci-macos ci-linux
 
+# Run every CI job this host can, saying so when the macOS jobs could not run.
+[macos]
+ci-gentle: ci
+
+# Run every CI job this host can, saying so when the macOS jobs could not run.
+[linux]
+ci-gentle: ci-linux
+    @echo "ci-gentle: the macOS jobs did not run; they need a Mac." >&2
+
 # Run ci.yml's macOS jobs on this Mac, against the committed HEAD.
 ci-macos:
     #!/usr/bin/env bash
@@ -212,7 +221,7 @@ ci-linux:
     # other's tree. The cargo home is shared whole: cargo keeps its package
     # cache locks at its root, not in registry/, and they hold across
     # containers on one volume.
-    checkout="tmux-agent-status-ci-linux-src-$(printf '%s' "$root" | shasum | cut -c1-12)"
+    checkout="tmux-agent-status-ci-linux-src-$(printf '%s' "$root" | git hash-object --stdin | cut -c1-12)"
     tty=()
     [[ -t 1 ]] && tty=(--tty)
     # ${a[@]+...}: bash 3.2, macOS's /bin/bash, calls an empty array unset.
