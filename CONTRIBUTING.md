@@ -27,11 +27,11 @@ before a push, as `just ci-macos` and `just ci-linux`:
   sandbox needs namespaces; without it Nix would silently build unsandboxed, and the image turns
   that fallback into an error.
 
-Both check the committed `HEAD`, not the working tree: each keeps a clean checkout of it under
-`target/ci/<os>/` (Linux: in a Docker volume per checkout), so an uncommitted or untracked file
-cannot make a local run pass that CI fails. The jobs, their recipes and the Linux image all come
-from `HEAD`; only the recipes that set up the checkout and the container are read from the working
-tree. Builds there stay incremental between runs, and the container keeps its Nix store in a volume
+Both check a commit, `HEAD` unless one is given (`just ci <commit>`), not the working tree: each
+keeps a clean checkout of it under `target/ci/<os>/` (Linux: in a Docker volume per checkout), so an
+uncommitted or untracked file cannot make a local run pass that CI fails. The jobs, their recipes and
+the Linux image all come from that commit; only the recipes that set up the checkout and the
+container are read from the working tree. Builds there stay incremental between runs, and the container keeps its Nix store in a volume
 per image.
 
 `just ci` fails on a host that is not a Mac. `just ci-gentle` runs every job the host can: all of
@@ -44,7 +44,7 @@ Linux jobs when a macOS job fails; run `just ci-linux` on its own to see them.
 The container runs the host's architecture, so on Apple silicon it is aarch64 Linux while
 `ubuntu-latest` is x86_64. The image is rebuilt the first time it is used in each ISO week, to track
 the latest tools CI installs. Each image keeps its own Nix store volume (about 3 GB), so a checkout
-whose `HEAD` builds a different image never evicts another's. A run drops the stores of earlier
+whose commit builds a different image never evicts another's. A run drops the stores of earlier
 weeks, whose images the weekly rebuild replaced, and the snapshots of checkouts that no longer
 exist, such as removed worktrees. `just ci-linux-clean` drops the image and every cache volume.
 
