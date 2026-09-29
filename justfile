@@ -107,6 +107,61 @@ coverage:
 # What CI runs.
 check: fmt-check lint lint-sh test
 
+# Build with the minimum supported Rust version from Cargo.toml.
+msrv:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    msrv="$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)"
+    [[ -n "$msrv" ]] || { echo "Cargo.toml names no rust-version." >&2; exit 1; }
+    rustup toolchain install "$msrv" --profile minimal --no-self-update
+    rustup run "$msrv" cargo build --locked --all-targets
+
+# Check the flake, build the package and run what came out of it.
+nix-verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nix flake check
+    nix build .#tmux-agent-status
+    # The packaging path is only proven by running what came out of it.
+    ./result/bin/tmux-agent-status --version
+    missing=0
+    while IFS= read -r f; do
+        rel="${f#share/agents/}"
+        if [[ ! -e "result/share/agents/$rel" ]]; then
+            echo "missing in Nix output: $rel" >&2
+            missing=1
+        fi
+    done < <(find share/agents -type f -o -type l)
+    exit "$missing"
+
+# Build the release tarball and check it ships every agent file.
+package-verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release --locked
+    target="$(rustc -vV | sed -n 's|host: ||p')"
+    dist="$(mktemp -d)"
+    trap 'rm -rf "$dist"' EXIT
+    name="tmux-agent-status-ci-${target}"
+    mkdir -p "$dist/$name/share/tmux" "$dist/$name/share/agents"
+    cp "${CARGO_TARGET_DIR:-target}/release/tmux-agent-status" "$dist/$name/"
+    cp README.md LICENSE "$dist/$name/"
+    cp share/tmux/tmux-agent-status.conf "$dist/$name/share/tmux/"
+    # -L, not -R alone: share/agents/claude-code/hooks.json is a symlink
+    # into plugins/, which the tarball does not carry.
+    cp -RL share/agents/* "$dist/$name/share/agents/"
+    tar -C "$dist" -czf "$dist/$name.tar.gz" "$name"
+    find share/agents -type f -o -type l | sed 's|^share/agents/||' | sort > "$dist/expected"
+    tar -tzf "$dist/$name.tar.gz" \
+        | grep '/share/agents/.' \
+        | sed 's|^[^/]*/share/agents/||' \
+        | grep -v '/$' \
+        | sort -u > "$dist/actual"
+    if ! diff -u "$dist/expected" "$dist/actual"; then
+        echo "release tarball agent files do not match share/agents/" >&2
+        exit 1
+    fi
+
 # Validate the plugin and marketplace manifests (needs the `claude` CLI).
 check-plugin:
     #!/usr/bin/env bash
