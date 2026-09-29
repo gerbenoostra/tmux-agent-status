@@ -31,16 +31,16 @@ Both check a commit, `HEAD` unless one is given (`just ci <commit>`), not the wo
 keeps a clean checkout of it under `target/ci/<os>/` (Linux: in a Docker volume per checkout), so an
 uncommitted or untracked file cannot make a local run pass that CI fails. The jobs, their recipes and
 the Linux image all come from that commit; only the recipes that set up the checkout and the
-container are read from the working tree. Builds there stay incremental between runs, and the container keeps its Nix store in a volume
-per image.
+container are read from the working tree. Builds there stay incremental between runs, and the
+container keeps its Nix store in a volume per image.
 
 `just ci` fails on a host that is not a Mac. `just ci-gentle` runs every job the host can: all of
 them on macOS; elsewhere the Linux jobs, ending with a notice that the macOS jobs did not run.
 
 `prek install` also installs a pre-push hook: pushing a branch runs `just ci-gentle` against the
-commit pushed, which need not be `HEAD`. Pushing a tag or deleting a branch runs nothing. When one
-push updates several branches, prek checks only one of them, so push branches one at a time.
-`git push --no-verify` skips the hook.
+commit pushed, which need not be `HEAD`. Pushing a tag, deleting a branch or pushing no new
+commits runs nothing. When one push updates several branches, prek checks only one of them, so push
+branches one at a time. `git push --no-verify` skips the hook.
 
 Unlike CI, which runs every job, a local run stops at the first failing job, and `just ci` skips the
 Linux jobs when a macOS job fails; run `just ci-linux` on its own to see them.
