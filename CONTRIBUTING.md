@@ -45,7 +45,8 @@ weeks, whose images the weekly rebuild replaced. `just ci-linux-clean` drops the
 cache volume.
 
 The job lists in the justfile (`ci_linux_jobs`, `ci_macos_jobs`) mirror `ci.yml`'s jobs per runner
-OS; change them together.
+OS; change them together. `tests/ci_jobs.rs` fails when they differ, and when a `ci.yml` job calls
+no recipe, since `just ci` could not run it.
 
 ## PR titles
 
