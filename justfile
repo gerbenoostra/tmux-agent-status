@@ -104,7 +104,7 @@ coverage:
     fi
     echo "Every region of src/ was reached, across $files files."
 
-# What CI runs.
+# The fast subset of CI: format, lints and tests.
 check: fmt-check lint lint-sh test
 
 # Build with the minimum supported Rust version from Cargo.toml.
@@ -161,6 +161,110 @@ package-verify:
         echo "release tarball agent files do not match share/agents/" >&2
         exit 1
     fi
+
+# ci.yml's jobs per runner OS, as recipes. Keep in step with ci.yml.
+ci_linux_jobs := "fmt-check lint lint-sh test coverage msrv nix-verify package-verify"
+ci_macos_jobs := "test nix-verify"
+
+# Run ci.yml's macOS and Linux jobs locally, against the committed HEAD.
+ci: ci-macos ci-linux
+
+# Run ci.yml's macOS jobs on this Mac, against the committed HEAD.
+ci-macos:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "$(uname -s)" == Darwin ]] || { echo "ci-macos runs on macOS." >&2; exit 1; }
+    just _ci-snapshot "{{justfile_directory()}}" "{{justfile_directory()}}/target/ci/macos" macos
+
+# Run ci.yml's Linux jobs in a Docker container, against the committed HEAD.
+ci-linux:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The container runs the host's architecture, so on Apple silicon this is
+    # aarch64 Linux where CI's ubuntu-latest is x86_64. It runs privileged
+    # because the Nix build sandbox needs namespaces.
+    root="{{justfile_directory()}}"
+    # The image, like the jobs, comes from HEAD rather than the working tree.
+    at_head() { git -C "$root" show "HEAD:$1"; }
+    msrv="$(at_head Cargo.toml | sed -n 's/^rust-version = "\(.*\)"$/\1/p')"
+    llvm_cov="$(at_head .github/workflows/ci.yml | sed -n 's/.*tool: cargo-llvm-cov@//p')"
+    week="$(date +%G-W%V)"
+    # Without a provenance attestation, which carries a build timestamp, the
+    # image ID changes only when the image does.
+    image="$(at_head ci/linux.Dockerfile | docker build --quiet --pull --provenance=false \
+        --tag tmux-agent-status-ci-linux --build-arg "IMAGE_WEEK=$week" \
+        --build-arg "MSRV=$msrv" --build-arg "LLVM_COV_VERSION=$llvm_cov" -)"
+    # The Nix store is kept per image: a fresh volume starts as a copy of the
+    # image's /nix, and a rebuilt image's Nix never meets an older store.
+    # Every image is rebuilt weekly, so stores of earlier weeks are dead and
+    # go (unless a running build still holds one); this week's stay, as
+    # checkouts whose HEADs build different images each need theirs.
+    nix_volume="tmux-agent-status-ci-linux-nix-$week-$(printf '%s' "${image#sha256:}" | cut -c1-12)"
+    docker volume ls --quiet --filter name='^tmux-agent-status-ci-linux-nix-' \
+        | { grep -v -- "^tmux-agent-status-ci-linux-nix-$week-" || true; } \
+        | while IFS= read -r stale; do docker volume rm "$stale" >/dev/null 2>&1 || true; done
+    # Mounted at their host paths: a linked worktree's .git names its common
+    # git directory by absolute path, and that may lie outside the checkout.
+    mounts=(--volume "$root:$root:ro")
+    common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
+    [[ "$common" == "$root"/* ]] || mounts+=(--volume "$common:$common:ro")
+    # One snapshot per checkout, so runs from two worktrees cannot reset each
+    # other's tree. The cargo home is shared whole: cargo keeps its package
+    # cache locks at its root, not in registry/, and they hold across
+    # containers on one volume.
+    checkout="tmux-agent-status-ci-linux-src-$(printf '%s' "$root" | shasum | cut -c1-12)"
+    tty=()
+    [[ -t 1 ]] && tty=(--tty)
+    # ${a[@]+...}: bash 3.2, macOS's /bin/bash, calls an empty array unset.
+    docker run --rm --privileged ${tty[@]+"${tty[@]}"} "${mounts[@]}" \
+        --volume "$checkout:/home/runner/ci" \
+        --volume tmux-agent-status-ci-linux-cargo-home:/home/runner/cargo-home \
+        --volume "$nix_volume:/nix" \
+        --env CARGO_TERM_COLOR=always \
+        "$image" \
+        bash -c 'set -euo pipefail
+            git config --global --add safe.directory "*"
+            # CI installs the stable of the day, not the one the image baked.
+            rustup update stable --no-self-update >/dev/null
+            # Set after rustup, whose proxies stay in ~/.cargo from the image.
+            # Only the cache moves: the tools stay on PATH in ~/.cargo/bin,
+            # and anything cargo installs here would land off PATH.
+            export CARGO_HOME=/home/runner/cargo-home
+            just --justfile "$1/justfile" _ci-snapshot "$1" /home/runner/ci linux' \
+        _ "$root"
+
+# Drop the Linux CI image and the volumes that cache its builds, for every checkout.
+ci-linux-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    volumes=()
+    while IFS= read -r v; do volumes+=("$v"); done \
+        < <(docker volume ls --quiet --filter name='^tmux-agent-status-ci-linux-')
+    (( ${#volumes[@]} == 0 )) || docker volume rm "${volumes[@]}"
+    docker image rm --force tmux-agent-status-ci-linux 2>/dev/null || true
+
+# Run CI's jobs for `os` in a clean checkout of the repo's HEAD, kept under
+# `dir` so builds stay incremental between runs. The job list, like the job
+# recipes, is read from that checkout; only this plumbing is the working tree's.
+_ci-snapshot repo dir os:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="{{dir}}/src"
+    [[ -d "$src/.git" ]] || git init --quiet "$src"
+    git -C "$src" fetch --quiet --no-tags "{{repo}}" HEAD
+    git -C "$src" checkout --quiet --force --detach FETCH_HEAD
+    git -C "$src" clean --quiet -ffdx
+    echo "ci: $(git -C "$src" log -1 --format='%h %s') on $(uname -s)" >&2
+    export CARGO_TARGET_DIR="{{dir}}/target"
+    cd "$src"
+    jobs="$(just --evaluate "ci_{{os}}_jobs")"
+    # Coverage profiles from the previous run's HEAD pollute this one's.
+    if [[ " $jobs " == *" coverage "* ]]; then
+        cargo llvm-cov clean --workspace
+    fi
+    # Word-split on purpose: the list is recipe names.
+    # shellcheck disable=SC2086
+    just $jobs
 
 # Validate the plugin and marketplace manifests (needs the `claude` CLI).
 check-plugin:

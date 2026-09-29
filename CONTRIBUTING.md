@@ -4,13 +4,48 @@
 
 ```sh
 nix develop          # cargo, clippy, rustfmt, rust-analyzer, tmux, just
-just check           # fmt-check + lint + test, exactly what CI runs
+just check           # fmt-check + lint + lint-sh + test, the fast inner loop
+just coverage        # the test suite plus a full-region coverage gate on src/
+just ci              # every CI job, on this Mac and in a Linux container
 just harness         # a throwaway tmux server showing all four states, to look at
 just link            # shadow the installed binary with this checkout's debug build
 just check-plugin    # validate the Claude Code plugin manifests (needs the `claude` CLI)
 ```
 
-`just check` is what CI runs. `just harness` starts a throwaway tmux server that displays all four states so you can inspect the glyphs.
+`just check` is the fast subset of CI. `just harness` starts a throwaway tmux server that displays all four states so you can inspect the glyphs.
+
+## Running CI locally
+
+Every CI job is a recipe, and `ci.yml` only installs tools and calls them. `just ci` runs them all
+before a push, as `just ci-macos` and `just ci-linux`:
+
+- `ci-macos` runs the jobs of the `macos-latest` matrix legs (test, nix) natively, in the current
+  shell's toolchain.
+- `ci-linux` runs every `ubuntu-latest` job in a Docker container built from `ci/linux.Dockerfile`:
+  rustup stable and the MSRV, apt's tmux, jq and shellcheck, the pinned cargo-llvm-cov, and
+  Determinate Nix, run by a non-root user as on GitHub. It runs `--privileged` because the Nix build
+  sandbox needs namespaces; without it Nix would silently build unsandboxed, and the image turns
+  that fallback into an error.
+
+Both check the committed `HEAD`, not the working tree: each keeps a clean checkout of it under
+`target/ci/<os>/` (Linux: in a Docker volume per checkout), so an uncommitted or untracked file
+cannot make a local run pass that CI fails. The jobs, their recipes and the Linux image all come
+from `HEAD`; only the recipes that set up the checkout and the container are read from the working
+tree. Builds there stay incremental between runs, and the container keeps its Nix store in a volume
+per image.
+
+Unlike CI, which runs every job, a local run stops at the first failing job, and `just ci` skips the
+Linux jobs when a macOS job fails; run `just ci-linux` on its own to see them.
+
+The container runs the host's architecture, so on Apple silicon it is aarch64 Linux while
+`ubuntu-latest` is x86_64. The image is rebuilt the first time it is used in each ISO week, to track
+the latest tools CI installs. Each image keeps its own Nix store volume (about 3 GB), so a checkout
+whose `HEAD` builds a different image never evicts another's. A run drops the stores of earlier
+weeks, whose images the weekly rebuild replaced. `just ci-linux-clean` drops the image and every
+cache volume.
+
+The job lists in the justfile (`ci_linux_jobs`, `ci_macos_jobs`) mirror `ci.yml`'s jobs per runner
+OS; change them together.
 
 ## PR titles
 
@@ -253,7 +288,9 @@ failed jobs instead of tagging or uploading by hand.
 Before merging a release PR, verify the build end to end on a supported system without relying on
 the development symlink:
 
-1. Run `just check`, `just check-plugin` and `just nix-build` on the release PR's branch.
+1. On a clean checkout of the release PR's branch, run `just ci`, `just check-plugin` and
+   `just nix-build`: `ci` checks the committed `HEAD`, and `nix-build` builds the working tree,
+   which is only the same thing when nothing is modified.
 2. Put the branch's build on the `PATH` your agent hooks use: `cargo install --path .`, or the
    checkout as a flake input (below); `nix build` alone installs nothing. No release binary exists
    before the merge; the documented binary routes install the previous release.
