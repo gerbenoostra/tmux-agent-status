@@ -19,6 +19,11 @@ set -e
 REPO="gerbenoostra/tmux-agent-status"
 BIN="tmux-agent-status"
 INSTALL_DIR="${TMUX_AGENT_STATUS_INSTALL_DIR:-$HOME/.local/bin}"
+# x-release-please-start-version
+# The release this script ships with. The latest release can never be older, so
+# an older answer from GitHub means its "latest" pointer has not caught up yet.
+MIN_VERSION="0.1.2"
+# x-release-please-end
 BUILD_FROM_SOURCE_URL="https://github.com/${REPO}/blob/main/docs/install.md#build-from-source"
 
 RED='\033[0;31m'
@@ -91,6 +96,19 @@ detect_platform() {
     esac
 }
 
+# version_lt <a> <b>: succeed when vX.Y.Z "a" is older than "b" (numeric, POSIX sh).
+version_lt() {
+    a=${1#v}
+    b=${2#v}
+    for i in 1 2 3; do
+        a_part=$(echo "$a" | cut -d. -f"$i" | sed -E 's/[^0-9].*//')
+        b_part=$(echo "$b" | cut -d. -f"$i" | sed -E 's/[^0-9].*//')
+        [ "${a_part:-0}" -lt "${b_part:-0}" ] && return 0
+        [ "${a_part:-0}" -gt "${b_part:-0}" ] && return 1
+    done
+    return 1
+}
+
 latest_version() {
     VERSION=""
     version_error="Failed to determine the latest version (there may be no releases yet, or the GitHub API is rate-limited; set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to pin)"
@@ -105,6 +123,13 @@ latest_version() {
             | tr -d '\r')
     fi
 
+    # Right after a release is published the redirect can keep pointing at the
+    # previous tag for a while; treat that like a failed lookup.
+    if [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
+        warn "Redirect lookup returned ${VERSION}, older than this installer (v${MIN_VERSION}) - GitHub may still be propagating a new release"
+        VERSION=""
+    fi
+
     if [ -z "$VERSION" ]; then
         if command -v curl >/dev/null 2>&1; then
             warn "Redirect lookup failed, falling back to the GitHub API..."
@@ -117,6 +142,9 @@ latest_version() {
             | sed -n -E 's/.*"tag_name": *"([^"]+)".*/\1/p')
         rm -f "$api_json"
         trap - EXIT
+        if [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
+            error "The latest release GitHub reports (${VERSION}) is older than this installer (v${MIN_VERSION}) - a new release is probably still propagating. Retry in a few minutes, or set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to install a specific release"
+        fi
     fi
 
     [ -n "$VERSION" ] || error "$version_error"
