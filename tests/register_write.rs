@@ -98,6 +98,15 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).expect("the file can be read")
 }
 
+fn residue(dir: &TempDir) -> Vec<String> {
+    dir.entries()
+        .into_iter()
+        .filter(|name| {
+            name.contains(".tmp-") || name.contains(".restore-") || name.contains(".lock")
+        })
+        .collect()
+}
+
 #[test]
 fn an_edit_replaces_the_contents_and_leaves_a_backup() {
     let dir = TempDir::new("edit");
@@ -117,17 +126,30 @@ fn an_edit_replaces_the_contents_and_leaves_a_backup() {
 }
 
 #[test]
+fn rapid_edits_keep_distinct_backups() {
+    let dir = TempDir::new("distinct-backups");
+    let target = dir.write("tmux.conf", "first\n");
+    let first = put(&target, "second\n")
+        .expect("first edit")
+        .backup
+        .expect("first backup");
+    let second = put(&target, "third\n")
+        .expect("second edit")
+        .backup
+        .expect("second backup");
+    assert_ne!(first, second);
+    assert_eq!(read(&first), "first\n");
+    assert_eq!(read(&second), "second\n");
+    assert_eq!(backups(&dir).len(), 2);
+}
+
+#[test]
 fn the_lock_and_temp_files_are_gone_afterwards() {
     let dir = TempDir::new("residue");
     let target = dir.write("tmux.conf", "before\n");
     put(&target, "after\n").expect("the write lands");
 
-    let residue: Vec<String> = dir
-        .entries()
-        .into_iter()
-        .filter(|name| name.contains(".tmp-") || name.contains(".lock"))
-        .collect();
-    assert!(residue.is_empty(), "left behind: {residue:?}");
+    assert!(residue(&dir).is_empty(), "left behind: {:?}", residue(&dir));
 }
 
 // 8. A symlink chain two deep: the edit lands on the final target and the links
@@ -157,6 +179,67 @@ fn a_symlink_chain_is_followed_and_survives() {
     // The backup belongs beside what was edited, not beside what was named.
     let backup = written.backup.expect("a backup");
     assert_eq!(backup.parent(), real.parent());
+}
+
+#[test]
+fn a_dangling_symlink_is_followed_and_survives() {
+    let dir = TempDir::new("dangling-symlink");
+    let real = dir.join("dotfiles/tmux.conf");
+    let front = dir.join("front.conf");
+    fs::create_dir_all(real.parent().expect("a parent")).expect("the target directory");
+    std::os::unix::fs::symlink(Path::new("dotfiles/tmux.conf"), &front).expect("the link");
+
+    let written = put(&front, "after\n").expect("the write lands");
+
+    assert_eq!(written.resolved, real);
+    assert_eq!(written.outcome, Outcome::Created);
+    assert_eq!(read(&real), "after\n");
+    assert!(
+        fs::symlink_metadata(&front)
+            .expect("the link remains")
+            .is_symlink()
+    );
+}
+
+#[test]
+fn a_dangling_symlink_to_an_absolute_path_is_followed() {
+    let dir = TempDir::new("dangling-absolute");
+    let real = dir.join("dotfiles/tmux.conf");
+    let front = dir.join("front.conf");
+    fs::create_dir_all(real.parent().expect("a parent")).expect("the target directory");
+    std::os::unix::fs::symlink(&real, &front).expect("the link");
+
+    let written = put(&front, "after\n").expect("the write lands");
+
+    assert_eq!(written.resolved, real);
+    assert_eq!(read(&real), "after\n");
+    assert!(
+        fs::symlink_metadata(&front)
+            .expect("the link remains")
+            .is_symlink()
+    );
+}
+
+#[test]
+fn a_path_through_a_regular_file_is_an_error() {
+    let dir = TempDir::new("through-a-file");
+    let blocker = dir.write("tmux.conf", "before\n");
+    let through = blocker.join("inner.conf");
+    let ask = Answer::yes();
+
+    let error = writer(&through, &ask)
+        .apply(|_| Plan::Write("after\n".to_owned()))
+        .expect_err("a path through a regular file cannot resolve");
+
+    assert!(matches!(error, Error::Io { .. }), "{error}");
+    assert!(
+        error.to_string().contains("resolving the target"),
+        "{error}"
+    );
+    assert!(matches!(
+        write::inspect(&through, &Faults::default()),
+        Err(Error::Io { .. })
+    ));
 }
 
 // 9. A hard link is detected and the warning fires.
@@ -357,6 +440,11 @@ fn a_write_that_does_not_land_is_restored_byte_for_byte() {
             other => panic!("{stage}: expected damage, got {other}"),
         }
         assert_eq!(read(&target), before, "{stage}: the file was not restored");
+        assert!(
+            residue(&dir).is_empty(),
+            "{stage}: left behind: {:?}",
+            residue(&dir)
+        );
     }
 }
 
@@ -396,6 +484,36 @@ fn a_restore_that_fails_names_the_backup_and_the_command() {
     );
 }
 
+#[test]
+fn a_failed_restore_leaves_no_staged_file() {
+    let dir = TempDir::new("restore-staging-fails");
+    let target = dir.write("tmux.conf", "before\n");
+    let ask = Answer::yes();
+
+    let error = SafeWrite {
+        faults: Faults::parse("empty,restore-staging"),
+        ..writer(&target, &ask)
+    }
+    .apply(|_| Plan::Write("after\n".to_owned()))
+    .expect_err("a damaged write with a failing restore must fail");
+
+    assert!(
+        matches!(
+            error,
+            Error::Damaged {
+                restore: Some(_),
+                ..
+            }
+        ),
+        "{error}"
+    );
+    assert!(
+        residue(&dir).is_empty(),
+        "the staged restore file was left behind: {:?}",
+        residue(&dir)
+    );
+}
+
 // 14. The counterpart, and the case a blanket restore gets wrong.
 #[test]
 fn a_write_cut_short_is_restored_even_when_the_remains_look_complete() {
@@ -417,6 +535,7 @@ fn a_write_cut_short_is_restored_even_when_the_remains_look_complete() {
 
     assert!(matches!(error, Error::Damaged { .. }), "{error}");
     assert_eq!(read(&target), "before\n", "the file was not restored");
+    assert!(residue(&dir).is_empty(), "left behind: {:?}", residue(&dir));
 }
 
 #[test]
@@ -497,6 +616,7 @@ fn a_document_that_does_not_parse_is_restored_rather_than_kept() {
 
     assert!(matches!(error, Error::Damaged { .. }), "{error}");
     assert_eq!(read(&target), "before\n", "the backup did not go back");
+    assert!(residue(&dir).is_empty(), "left behind: {:?}", residue(&dir));
 }
 
 #[test]
@@ -514,15 +634,33 @@ fn a_file_that_changes_before_the_rename_is_left_alone() {
 
     assert!(matches!(error, Error::Changed(_)), "{error}");
     assert_eq!(read(&target), "written by somebody else\n");
-    let residue: Vec<String> = dir
-        .entries()
-        .into_iter()
-        .filter(|name| name.contains(".tmp-"))
-        .collect();
     assert!(
-        residue.is_empty(),
-        "the temp file was left behind: {residue:?}"
+        residue(&dir).is_empty(),
+        "the temp file was left behind: {:?}",
+        residue(&dir)
     );
+}
+
+#[test]
+fn a_target_that_appears_under_the_lock_is_left_alone() {
+    let dir = TempDir::new("appeared");
+    let target = dir.join("tmux.conf");
+    let ask = Answer::yes();
+
+    let error = SafeWrite {
+        faults: Faults::parse("appeared"),
+        ..writer(&target, &ask)
+    }
+    .apply(|_| Plan::Write("ours\n".to_owned()))
+    .expect_err("a target that appeared under us must not be written");
+
+    assert!(matches!(error, Error::Changed(_)), "{error}");
+    assert_eq!(read(&target), "written by somebody else\n");
+    assert!(
+        backups(&dir).is_empty(),
+        "no backup may be taken over somebody else's file"
+    );
+    assert!(residue(&dir).is_empty(), "left behind: {:?}", residue(&dir));
 }
 
 #[test]
@@ -532,9 +670,12 @@ fn a_failure_before_the_rename_leaves_the_file_untouched() {
     // one they had.
     for stage in [
         "lstat",
+        "lock-write",
+        "fsync-lock",
         "read",
         "stat",
         "backup",
+        "copy",
         "fsync",
         "create",
         "write",
@@ -555,12 +696,11 @@ fn a_failure_before_the_rename_leaves_the_file_untouched() {
 
         assert!(matches!(error, Error::Io { .. }), "{stage}: {error}");
         assert_eq!(read(&target), "before\n", "{stage}: the file changed");
-        let residue: Vec<String> = dir
-            .entries()
-            .into_iter()
-            .filter(|name| name.contains(".tmp-") || name.contains(".lock"))
-            .collect();
-        assert!(residue.is_empty(), "{stage}: left behind {residue:?}");
+        assert!(
+            residue(&dir).is_empty(),
+            "{stage}: left behind {:?}",
+            residue(&dir)
+        );
     }
 }
 
@@ -654,6 +794,15 @@ impl Verify for Rejects {
     }
 }
 
+struct WritesAndRejects;
+
+impl Verify for WritesAndRejects {
+    fn verify(&self, path: &Path) -> Result<(), String> {
+        fs::write(path, "written by somebody else\n").expect("the third-party write lands");
+        Err("tmux abandoned the config".to_owned())
+    }
+}
+
 #[test]
 fn a_rejected_edit_is_rolled_back() {
     let dir = TempDir::new("rejected");
@@ -673,6 +822,7 @@ fn a_rejected_edit_is_rolled_back() {
     };
     assert!(restored, "the rollback did not run: {error}");
     assert_eq!(read(&target), "before\n");
+    assert!(residue(&dir).is_empty(), "left behind: {:?}", residue(&dir));
     assert!(
         error.to_string().contains("tmux abandoned the config"),
         "the reason is not reported: {error}"
@@ -697,7 +847,56 @@ fn a_rejected_creation_removes_the_file_it_created() {
         !target.exists(),
         "the created file was left behind: {error}"
     );
+    assert!(residue(&dir).is_empty(), "left behind: {:?}", residue(&dir));
     assert!(error.to_string().contains("removed"), "{error}");
+}
+
+#[test]
+fn a_rejection_leaves_a_concurrent_writers_document_alone() {
+    let dir = TempDir::new("rejected-raced");
+    let target = dir.write("tmux.conf", "before\n");
+    let ask = Answer::yes();
+    let verify = WritesAndRejects;
+
+    let error = SafeWrite {
+        verify: Some(&verify),
+        ..writer(&target, &ask)
+    }
+    .apply(|_| Plan::Write("ours\n".to_owned()))
+    .expect_err("a raced rejection must fail");
+
+    let Error::Raced { backup, temp, .. } = &error else {
+        panic!("expected a race, got {error}");
+    };
+    assert_eq!(read(&target), "written by somebody else\n");
+    assert!(backup.is_some(), "an edit takes a backup");
+    let temp = temp.as_ref().expect("our bytes are kept");
+    assert_eq!(read(temp), "ours\n");
+    assert!(residue(&dir).is_empty(), "left behind: {:?}", residue(&dir));
+}
+
+#[test]
+fn a_rejected_creation_leaves_a_concurrent_writers_document_alone() {
+    let dir = TempDir::new("rejected-create-raced");
+    let target = dir.join("tmux.conf");
+    let ask = Answer::yes();
+    let verify = WritesAndRejects;
+
+    let error = SafeWrite {
+        verify: Some(&verify),
+        ..writer(&target, &ask)
+    }
+    .apply(|_| Plan::Write("ours\n".to_owned()))
+    .expect_err("a raced rejection must fail");
+
+    let Error::Raced { backup, temp, .. } = &error else {
+        panic!("expected a race, got {error}");
+    };
+    assert_eq!(read(&target), "written by somebody else\n");
+    assert!(backup.is_none(), "create mode takes no backup");
+    let temp = temp.as_ref().expect("our bytes are kept");
+    assert_eq!(read(temp), "ours\n");
+    assert!(residue(&dir).is_empty(), "left behind: {:?}", residue(&dir));
 }
 
 #[test]

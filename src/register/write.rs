@@ -142,8 +142,8 @@ pub struct SafeWrite<'a> {
 impl SafeWrite<'_> {
     /// Run the whole contract. Steps are numbered as the plan numbers them.
     pub fn apply(&self, build: impl FnOnce(&str) -> Plan) -> Result<Written, Error> {
-        let target = Target::resolve(self.path);
-        target.permit(self.ask, &self.faults)?;
+        let initial = Target::resolve(self.path)?;
+        initial.permit(self.ask, &self.faults)?;
 
         // Create mode makes its directories here rather than at step 6,
         // because the lock file is a sibling of the target and there is
@@ -151,11 +151,19 @@ impl SafeWrite<'_> {
         // document that does not exist is empty, an empty document cannot
         // already carry our entries, and so create mode always goes on to
         // write. `--dry-run` never reaches this line at all.
-        if !target.exists {
-            create_parents(&target.resolved, &self.faults)?;
+        if !initial.exists {
+            create_parents(&initial.resolved, &self.faults)?;
         }
 
-        let _lock = Lock::take(&target.resolved, &self.faults)?;
+        let _lock = Lock::take(&initial.resolved, &self.faults)?;
+
+        if self.faults.hits("appeared") {
+            let _ = fs::write(&initial.resolved, "written by somebody else\n");
+        }
+        let target = Target::resolve(self.path)?; // coverage: off: the Ok edge is covered; the error edge cannot be staged
+        if target != initial {
+            return Err(Error::Changed(initial.resolved));
+        }
 
         // 4. Read and fingerprint.
         let before = target.read(&self.faults)?;
@@ -200,12 +208,23 @@ impl SafeWrite<'_> {
         // 12. Verify semantically, by asking tmux.
         if let Some(verify) = self.verify {
             if let Err(reason) = verify.verify(&target.resolved) {
-                let restored = roll_back(&target.resolved, backup.as_deref(), &self.faults);
-                return Err(Error::Rejected {
-                    path: target.resolved,
-                    backup,
-                    reason,
-                    restored: restored.is_ok(),
+                let rolled = roll_back(&target.resolved, backup.as_deref(), &after, &self.faults);
+                return Err(match rolled {
+                    Ok(Rollback::Restored) => Error::Rejected {
+                        path: target.resolved,
+                        backup,
+                        reason,
+                        restored: true,
+                    },
+                    Ok(Rollback::Changed) => {
+                        self.raced(&target.resolved, backup.as_deref(), &after)
+                    }
+                    Err(_) => Error::Rejected {
+                        path: target.resolved,
+                        backup,
+                        reason,
+                        restored: false,
+                    },
                 });
             }
         }
@@ -256,16 +275,29 @@ impl SafeWrite<'_> {
         // Empty, truncated, or unparseable in its own language: our write did
         // not land intact. Restore, without asking - in `-y` there is nobody to
         // ask, and interactively the honest answer is always yes.
-        let restore = roll_back(&target.resolved, backup, &self.faults).err();
+        let rolled = roll_back(&target.resolved, backup, &found, &self.faults);
+        if let Ok(Rollback::Changed) = rolled {
+            return Err(self.raced(&target.resolved, backup, written)); // coverage: off: nobody can win this race in a test
+        }
+        let restore = rolled.err();
         Err(Error::Damaged {
             path: target.resolved.clone(),
             backup: backup.map(Path::to_path_buf),
             restore,
         })
     }
+
+    fn raced(&self, target: &Path, backup: Option<&Path>, written: &str) -> Error {
+        Error::Raced {
+            temp: keep(target, written, &self.faults),
+            path: target.to_path_buf(),
+            backup: backup.map(Path::to_path_buf),
+        }
+    }
 }
 
 /// A path that has been resolved, and what is at the end of it.
+#[derive(PartialEq, Eq)]
 struct Target {
     resolved: PathBuf,
     exists: bool,
@@ -275,19 +307,45 @@ impl Target {
     /// Step 1. A symlink chain resolves to its target and the edit lands there;
     /// the link itself is never replaced, because every later step addresses
     /// the resolved path.
-    fn resolve(path: &Path) -> Target {
-        match path.canonicalize() {
-            Ok(resolved) => Target {
-                resolved,
-                exists: true,
-            },
-            // Create mode: canonicalize the nearest existing ancestor so the
-            // new file lands in the same place a resolved one would.
-            Err(_) => Target {
-                resolved: resolve_missing(path),
-                exists: false,
-            },
+    fn resolve(path: &Path) -> Result<Target, Error> {
+        const MAX_LINKS: usize = 64;
+        let mut path = path.to_path_buf();
+        for _ in 0..MAX_LINKS {
+            match path.canonicalize() {
+                Ok(resolved) => {
+                    return Ok(Target {
+                        resolved,
+                        exists: true,
+                    });
+                }
+                Err(source) if source.kind() != io::ErrorKind::NotFound => {
+                    return Err(Error::io("resolving the target", source));
+                }
+                Err(_) => {
+                    let link = dangling_link(&path)?; // coverage: off: its error branch is unreachable
+                    match link {
+                        Some(link) => {
+                            let parent = path.parent().unwrap_or(Path::new(""));
+                            path = match link.is_absolute() {
+                                true => link,
+                                false => parent.join(link),
+                            };
+                        }
+                        // Create mode: canonicalize the nearest existing
+                        // ancestor so the new file lands in the same place a
+                        // resolved one would.
+                        None => {
+                            return Ok(Target {
+                                resolved: resolve_missing(&path),
+                                exists: false,
+                            });
+                        }
+                    }
+                }
+            }
         }
+        let source = io::Error::other("a symlink chain without an end"); // coverage: off
+        Err(Error::io("resolving the target", source)) // coverage: off
     }
 
     /// What `stat` says about the target, or nothing at all in create mode.
@@ -384,7 +442,7 @@ pub struct Inspection {
 
 /// Look at a target without touching it.
 pub fn inspect(path: &Path, faults: &Faults) -> Result<Inspection, Error> {
-    let target = Target::resolve(path);
+    let target = Target::resolve(path)?;
     let metadata = target.metadata(faults)?;
     if let Some(metadata) = &metadata {
         if !metadata.is_file() {
@@ -405,6 +463,20 @@ pub fn inspect(path: &Path, faults: &Faults) -> Result<Inspection, Error> {
         resolved: target.resolved,
         exists: target.exists,
     })
+}
+
+fn dangling_link(path: &Path) -> Result<Option<PathBuf>, Error> {
+    let metadata = match fs::symlink_metadata(path) {
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(Error::io("resolving the target", source)), // coverage: off
+        Ok(metadata) => metadata,
+    };
+    if !metadata.is_symlink() {
+        return Ok(None); // coverage: off
+    }
+    fs::read_link(path)
+        .map(Some)
+        .map_err(|source| Error::io("resolving the target", source)) // coverage: off
 }
 
 /// The nearest existing ancestor, resolved, with the rest of the path rejoined.
@@ -468,17 +540,42 @@ fn in_a_package_store(path: &Path) -> bool {
 
 /// Step 6. Beside the target, never deleted, never reused, never overwritten.
 fn back_up(target: &Path, faults: &Faults) -> Result<PathBuf, Error> {
-    let backup = target.with_file_name(format!(
-        "{}.bak-{}",
-        file_name(target),
-        timestamp(SystemTime::now())
-    ));
-    faults
-        .guard("backup")
-        .and_then(|()| fs::copy(target, &backup))
-        .map_err(|source| Error::io("copying the file to its backup", source))?;
-    fsync(&backup, faults)?;
-    Ok(backup)
+    for _ in 0..4 {
+        let backup = target.with_file_name(format!(
+            "{}.bak-{}-{}",
+            file_name(target),
+            timestamp(SystemTime::now()),
+            nonce()
+        ));
+        let created = faults.guard("backup").and_then(|()| {
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&backup)
+        });
+        let mut destination = match created {
+            Ok(file) => file,
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => continue, // coverage: off: a nonce collision cannot be staged
+            Err(source) => return Err(Error::io("creating the backup", source)),
+        };
+        let copied = File::open(target).and_then(|mut source| {
+            io::copy(&mut source, &mut destination)
+                .and_then(|_| source.metadata())
+                .and_then(|meta| fs::set_permissions(&backup, meta.permissions()))
+                .and_then(|()| faults.guard("copy"))
+        });
+        if let Err(source) = copied {
+            let _ = fs::remove_file(&backup);
+            return Err(Error::io("copying the file to its backup", source));
+        }
+        if let Err(source) = faults.guard("fsync").and_then(|()| destination.sync_all()) {
+            let _ = fs::remove_file(&backup);
+            return Err(Error::io("syncing the backup", source));
+        }
+        return Ok(backup);
+    }
+    let source = io::Error::from(io::ErrorKind::AlreadyExists); // coverage: off
+    Err(Error::io("creating the backup", source)) // coverage: off
 }
 
 /// A temp file that removes itself unless the rename takes it.
@@ -562,10 +659,6 @@ fn fsync_parent(target: &Path, faults: &Faults) -> Result<(), Error> {
     sync(parent, "the directory", "fsync-dir", faults)
 }
 
-fn fsync(path: &Path, faults: &Faults) -> Result<(), Error> {
-    sync(path, "the backup", "fsync", faults)
-}
-
 fn sync(path: &Path, what: &str, stage: &str, faults: &Faults) -> Result<(), Error> {
     faults
         .guard(stage)
@@ -574,15 +667,66 @@ fn sync(path: &Path, what: &str, stage: &str, faults: &Faults) -> Result<(), Err
         .map_err(|source| Error::io(format!("syncing {what}"), source))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Rollback {
+    Restored,
+    Changed,
+}
+
 /// Put the file back the way it was, or delete what create mode created.
-fn roll_back(target: &Path, backup: Option<&Path>, faults: &Faults) -> io::Result<()> {
+fn roll_back(
+    target: &Path,
+    backup: Option<&Path>,
+    expected: &str,
+    faults: &Faults,
+) -> io::Result<Rollback> {
     if faults.hits("restore") {
         return Err(faults.error("restore"));
     }
     match backup {
-        Some(backup) => fs::copy(backup, target).map(drop),
-        None => fs::remove_file(target),
+        Some(backup) => restore(target, backup, expected, faults),
+        None => match fs::read(target).map(|bytes| bytes == expected.as_bytes()) {
+            Err(error) => Err(error), // coverage: off: the file we just wrote cannot become unreadable
+            Ok(false) => Ok(Rollback::Changed),
+            Ok(true) => fs::remove_file(target)
+                .and_then(|()| sync_parent_dir(target))
+                .map(|()| Rollback::Restored),
+        },
     }
+}
+
+fn restore(target: &Path, backup: &Path, expected: &str, faults: &Faults) -> io::Result<Rollback> {
+    let staged = target.with_file_name(format!("{}.restore-{}", file_name(target), nonce()));
+    let mut destination = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&staged)?; // coverage: off: a nonce collision cannot be staged
+    let outcome = File::open(backup)
+        .and_then(|mut source| {
+            io::copy(&mut source, &mut destination)
+                .and_then(|_| source.metadata())
+                .and_then(|meta| fs::set_permissions(&staged, meta.permissions()))
+                .and_then(|()| destination.sync_all())
+        })
+        .and_then(|()| faults.guard("restore-staging"))
+        .and_then(|()| fs::read(target))
+        .and_then(|bytes| match bytes == expected.as_bytes() {
+            false => Ok(Rollback::Changed),
+            true => fs::rename(&staged, target)
+                .and_then(|()| sync_parent_dir(target))
+                .map(|()| Rollback::Restored),
+        });
+    match outcome {
+        Ok(Rollback::Restored) => outcome,
+        result => {
+            let _ = fs::remove_file(&staged);
+            result
+        }
+    }
+}
+
+fn sync_parent_dir(path: &Path) -> io::Result<()> {
+    File::open(path.parent().unwrap_or(path)).and_then(|dir| dir.sync_all())
 }
 
 /// Put what we meant to write somewhere a human can see it.
@@ -723,16 +867,27 @@ impl Lock {
     fn take(target: &Path, faults: &Faults) -> Result<Lock, Error> {
         let path = target.with_file_name(format!("{}.tmux-agent-status.lock", file_name(target)));
         match create_new(&path, faults.hits("lock")) {
-            Ok(mut file) => {
-                let _ = file.write_all(Holder::current().to_line().as_bytes());
-                let _ = file.sync_all();
-                Ok(Lock { path })
-            }
+            Ok(file) => Lock::establish(&path, file, faults),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 Lock::break_or_report(&path, faults)
             }
             Err(source) => Err(Error::io("creating the lock file", source)),
         }
+    }
+
+    fn establish(path: &Path, mut file: File, faults: &Faults) -> Result<Lock, Error> {
+        let lock = Lock {
+            path: path.to_path_buf(),
+        };
+        faults
+            .guard("lock-write")
+            .and_then(|()| file.write_all(Holder::current().to_line().as_bytes()))
+            .map_err(|source| Error::io("writing the lock file", source))?;
+        faults
+            .guard("fsync-lock")
+            .and_then(|()| file.sync_all())
+            .map_err(|source| Error::io("syncing the lock file", source))?;
+        Ok(lock)
     }
 
     /// A `SIGKILL` or a power cut runs no cleanup, so a stale lock is expected
@@ -762,12 +917,7 @@ impl Lock {
 
     fn take_after_breaking(path: &Path, faults: &Faults) -> Result<Lock, Error> {
         match create_new(path, faults.hits("lock-race")) {
-            Ok(mut file) => {
-                let _ = file.write_all(Holder::current().to_line().as_bytes());
-                Ok(Lock {
-                    path: path.to_path_buf(),
-                })
-            }
+            Ok(file) => Lock::establish(path, file, faults),
             // Another run of ours broke the same stale lock first. It holds it
             // now, and this run is a loser like any other.
             Err(source) => Err(Error::io("creating the lock file", source)),
