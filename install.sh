@@ -128,12 +128,11 @@ latest_version() {
     if [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
         warn "Redirect lookup returned ${VERSION}, older than this installer (v${MIN_VERSION}) - GitHub may still be propagating a new release"
         VERSION=""
+    elif [ -z "$VERSION" ] && command -v curl >/dev/null 2>&1; then
+        warn "Redirect lookup failed, falling back to the GitHub API..."
     fi
 
     if [ -z "$VERSION" ]; then
-        if command -v curl >/dev/null 2>&1; then
-            warn "Redirect lookup failed, falling back to the GitHub API..."
-        fi
         api_json=$(mktemp)
         trap 'rm -f "$api_json"' EXIT
         fetch "https://api.github.com/repos/${REPO}/releases/latest" "$api_json" \
@@ -142,8 +141,10 @@ latest_version() {
             | sed -n -E 's/.*"tag_name": *"([^"]+)".*/\1/p')
         rm -f "$api_json"
         trap - EXIT
+        # The release matching this installer may still be a draft (or not yet
+        # propagated); the API's answer is the newest published release.
         if [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
-            error "The latest release GitHub reports (${VERSION}) is older than this installer (v${MIN_VERSION}) - a new release is probably still propagating. Retry in a few minutes, or set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to install a specific release"
+            warn "GitHub reports ${VERSION} as the latest release, older than this installer (v${MIN_VERSION}) - the newer release may not be published yet"
         fi
     fi
 

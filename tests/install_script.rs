@@ -93,11 +93,18 @@ fn stale_redirect_falls_back_to_the_api() {
 }
 
 #[test]
-fn stale_redirect_and_stale_api_refuse_to_install_the_old_release() {
-    let (out, urls) = run_installer("v0.0.1", "v0.0.1", None);
-    assert!(!out.status.success());
-    assert!(text(&out.stderr).contains("still propagating"));
-    assert!(!urls.contains("releases/download"), "{urls}");
+fn stale_redirect_and_stale_api_install_the_api_version_with_a_warning() {
+    let (out, urls) = run_installer("v0.0.1", "v0.0.2", None);
+    assert!(text(&out.stdout).contains("Installing version: v0.0.2"));
+    assert!(text(&out.stdout).contains("may not be published yet"));
+    assert!(urls.contains("releases/download/v0.0.2/"), "{urls}");
+}
+
+#[test]
+fn redirect_newer_than_the_installer_is_used_without_touching_the_api() {
+    let (out, urls) = run_installer("v99.0.0", "v0.0.1", None);
+    assert!(text(&out.stdout).contains("Installing version: v99.0.0"));
+    assert!(!urls.contains("api.github.com"), "{urls}");
 }
 
 #[test]
