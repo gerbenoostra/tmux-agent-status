@@ -319,3 +319,15 @@ If testing through a separate system or home-manager flake, temporarily override
 `tmux-agent-status` input with `path:/absolute/path/to/this/checkout`. The exact rebuild command is
 specific to that configuration. Do not commit the `path:` input: it is machine-local, and its lock
 entry changes with the checkout contents.
+
+## Decisions
+
+- Release PRs and tags use a repository-scoped GitHub App token - because `GITHUB_TOKEN` activity
+  does not start the required workflows; not a personal access token (it expires and belongs to one
+  person) or stamped statuses (they would duplicate and bypass the real checks).
+- A release stays draft until every archive and checksum is attached - because
+  `releases/latest` must always resolve to a complete installable release; not separate tag and
+  build workflows or a published release with an asset gap (both expose partial releases).
+- The squash body is the PR description - because release-please interprets conventional-looking
+  paragraphs as separate changes; not the original commit messages (unchecked inner subjects can
+  alter the changelog and version bump).
