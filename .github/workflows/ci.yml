@@ -76,13 +76,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Read from Cargo.toml rather than repeated here, so the two cannot drift.
-      - id: msrv
-        run: echo "version=$(grep '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
-        with:
-          toolchain: ${{ steps.msrv.outputs.version }}
-      - run: cargo build --locked --all-targets
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      # Reads the MSRV from Cargo.toml, so the two cannot drift, and installs it.
+      - run: just msrv
 
   nix:
     strategy:
@@ -93,22 +89,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
-      - run: nix flake check
-      - run: nix build .#tmux-agent-status
-      # The packaging path is only proven by running what came out of it.
-      - run: ./result/bin/tmux-agent-status --version
-      - name: Assert every shipped agent file is in the Nix output
-        run: |
-          set -euo pipefail
-          missing=0
-          while IFS= read -r f; do
-            rel="${f#share/agents/}"
-            if [[ ! -e "result/share/agents/$rel" ]]; then
-              echo "missing in Nix output: $rel" >&2
-              missing=1
-            fi
-          done < <(find share/agents -type f -o -type l)
-          exit "$missing"
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      - run: just nix-verify
 
   packaging:
     runs-on: ubuntu-latest
@@ -117,33 +99,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
-      - run: cargo build --release --locked
-      - name: Assert every shipped agent file is in the release tarball
-        run: |
-          set -euo pipefail
-          target="$(rustc -vV | sed -n 's|host: ||p')"
-          # Not GITHUB_REF_NAME: on a pull_request it is "<pr>/merge", and the
-          # slash turns the name into a path. The name is irrelevant here.
-          name="tmux-agent-status-ci-${target}"
-          mkdir -p "dist/$name/share/tmux" "dist/$name/share/agents"
-          cp "target/release/tmux-agent-status" "dist/$name/"
-          cp README.md LICENSE "dist/$name/"
-          cp share/tmux/tmux-agent-status.conf "dist/$name/share/tmux/"
-          # -L, not -R alone: share/agents/claude-code/hooks.json is a symlink
-          # into plugins/, which the tarball does not carry.
-          cp -RL share/agents/* "dist/$name/share/agents/"
-          tar -C dist -czf "$name.tar.gz" "$name"
-
-          expected=$(mktemp)
-          actual=$(mktemp)
-          find share/agents -type f -o -type l | sed 's|^share/agents/||' | sort > "$expected"
-          tar -tzf "$name.tar.gz" \
-            | grep '/share/agents/.' \
-            | sed 's|^[^/]*/share/agents/||' \
-            | grep -v '/$' \
-            | sort -u > "$actual"
-
-          if ! diff -u "$expected" "$actual"; then
-            echo "release tarball agent files do not match share/agents/" >&2
-            exit 1
-          fi
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      - run: just package-verify
