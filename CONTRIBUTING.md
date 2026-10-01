@@ -294,6 +294,13 @@ The release stays a draft, so `releases/latest` keeps pointing at the previous r
 every archive is attached. If a build or the publish step fails, re-run the release workflow's
 failed jobs instead of tagging or uploading by hand.
 
+`MIN_VERSION` in `install.sh` is the release the script ships with, bumped by the same release PR.
+An unpinned install treats a `releases/latest` redirect older than it as stale and asks the GitHub
+API instead; if the API is older too, or fails, it installs the newest release it found with a
+warning. So between merging a release PR and its publication, installs warn and get the previous
+release. Keep `MIN_VERSION` inside its `x-release-please` markers, or the check silently stops
+working.
+
 Before merging a release PR, verify the build end to end on a supported system without relying on
 the development symlink:
 
@@ -328,6 +335,12 @@ entry changes with the checkout contents.
 - A release stays draft until every archive and checksum is attached - because
   `releases/latest` must always resolve to a complete installable release; not separate tag and
   build workflows or a published release with an asset gap (both expose partial releases).
+- An unpinned install checks the `releases/latest` redirect against the installer's own version
+  and only then asks the API - because the redirect can lag a new release for a while after
+  publication; not always asking the API (it is rate-limited for anonymous callers) or retrying
+  until the redirect catches up (it would hang installs while a release is still a draft). A stale
+  answer is installed with a warning rather than refused, so installs never fail where they used
+  to succeed.
 - The squash body is the PR description - because release-please interprets conventional-looking
   paragraphs as separate changes; not the original commit messages (unchecked inner subjects can
   alter the changelog and version bump).
