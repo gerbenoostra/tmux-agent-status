@@ -20,8 +20,9 @@ REPO="gerbenoostra/tmux-agent-status"
 BIN="tmux-agent-status"
 INSTALL_DIR="${TMUX_AGENT_STATUS_INSTALL_DIR:-$HOME/.local/bin}"
 # x-release-please-start-version
-# The release this script ships with. The latest release can never be older, so
-# an older answer from GitHub means its "latest" pointer has not caught up yet.
+# The release this script ships with. Once published, the latest release is
+# never older, so an older answer from GitHub means its "latest" pointer has
+# not caught up or this release is still a draft.
 MIN_VERSION="0.1.2"
 # x-release-please-end
 BUILD_FROM_SOURCE_URL="https://github.com/${REPO}/blob/main/docs/install.md#build-from-source"
