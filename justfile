@@ -226,14 +226,20 @@ ci-linux rev="HEAD":
     image="$(at_commit ci/linux.Dockerfile | docker build --quiet --pull --provenance=false \
         --tag tmux-agent-status-ci-linux --build-arg "IMAGE_WEEK=$week" \
         --build-arg "MSRV=$msrv" --build-arg "LLVM_COV_VERSION=$llvm_cov" -)"
-    # The Nix store is kept per image: a fresh volume starts as a copy of the
-    # image's /nix, and a rebuilt image's Nix never meets an older store.
-    # Every image is rebuilt weekly, so stores of earlier weeks are dead and
+    # The Nix store and the Rust toolchains are kept per image: a fresh volume
+    # starts as a copy of the image's /nix or ~/.rustup, and a rebuilt image's
+    # tools never meet an older store. The toolchains are a volume, rather than
+    # left in the image's layers, because `rustup update` renames directories
+    # between its toolchain and its tmp dir, and where the container's layers
+    # are overlayfs a rename out of an image layer fails with EXDEV.
+    # Every image is rebuilt weekly, so volumes of earlier weeks are dead and
     # go (unless a running build still holds one); this week's stay, as
     # checkouts whose commits build different images each need theirs.
-    nix_volume="tmux-agent-status-ci-linux-nix-$week-$(printf '%s' "${image#sha256:}" | cut -c1-12)"
-    docker volume ls --quiet --filter name='^tmux-agent-status-ci-linux-nix-' \
-        | { grep -v -- "^tmux-agent-status-ci-linux-nix-$week-" || true; } \
+    suffix="$week-$(printf '%s' "${image#sha256:}" | cut -c1-12)"
+    nix_volume="tmux-agent-status-ci-linux-nix-$suffix"
+    rustup_volume="tmux-agent-status-ci-linux-rustup-$suffix"
+    docker volume ls --quiet --filter name='^tmux-agent-status-ci-linux-(nix|rustup)-' \
+        | { grep -v -- "-$week-" || true; } \
         | while IFS= read -r stale; do docker volume rm "$stale" >/dev/null 2>&1 || true; done
     # Mounted at their host paths: a linked worktree's .git names its common
     # git directory by absolute path, and that may lie outside the checkout.
@@ -262,6 +268,7 @@ ci-linux rev="HEAD":
         --volume "$checkout:/home/runner/ci" \
         --volume tmux-agent-status-ci-linux-cargo-home:/home/runner/cargo-home \
         --volume "$nix_volume:/nix" \
+        --volume "$rustup_volume:/home/runner/.rustup" \
         --env CARGO_TERM_COLOR=always \
         "$image" \
         bash -c 'set -euo pipefail
