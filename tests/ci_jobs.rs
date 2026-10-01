@@ -140,8 +140,9 @@ fn read(relative: &str) -> String {
 fn ci_snapshot_ignores_the_git_dir_a_worktree_hook_inherits() {
     // It drives `just` and `git` against scratch repositories, and runs a
     // `#!/usr/bin/env bash` recipe: none of that exists in the Nix build
-    // sandbox, which sets NIX_BUILD_TOP. `just test` and CI's other jobs run it.
-    if std::env::var_os("NIX_BUILD_TOP").is_some() {
+    // sandbox, which sets NIX_BUILD_TOP but, unlike `nix develop`, not
+    // IN_NIX_SHELL. `just test` and CI's other jobs run it.
+    if std::env::var_os("NIX_BUILD_TOP").is_some() && std::env::var_os("IN_NIX_SHELL").is_none() {
         eprintln!("skipped: inside the Nix build sandbox");
         return;
     }
