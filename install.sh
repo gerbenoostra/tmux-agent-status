@@ -124,9 +124,12 @@ latest_version() {
     fi
 
     # Right after a release is published the redirect can keep pointing at the
-    # previous tag for a while; treat that like a failed lookup.
+    # previous tag for a while; ask the API instead, but keep the redirect's
+    # answer so a failing API (rate limit) installs no worse than before.
+    stale_version=""
     if [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
         warn "Redirect lookup returned ${VERSION}, older than this installer (v${MIN_VERSION}) - GitHub may still be propagating a new release"
+        stale_version=$VERSION
         VERSION=""
     elif [ -z "$VERSION" ] && command -v curl >/dev/null 2>&1; then
         warn "Redirect lookup failed, falling back to the GitHub API..."
@@ -135,15 +138,18 @@ latest_version() {
     if [ -z "$VERSION" ]; then
         api_json=$(mktemp)
         trap 'rm -f "$api_json"' EXIT
-        fetch "https://api.github.com/repos/${REPO}/releases/latest" "$api_json" \
-            || error "$version_error"
-        VERSION=$(grep '"tag_name"' "$api_json" | head -n 1 \
-            | sed -n -E 's/.*"tag_name": *"([^"]+)".*/\1/p')
+        if fetch "https://api.github.com/repos/${REPO}/releases/latest" "$api_json"; then
+            VERSION=$(grep '"tag_name"' "$api_json" | head -n 1 \
+                | sed -n -E 's/.*"tag_name": *"([^"]+)".*/\1/p')
+        fi
         rm -f "$api_json"
         trap - EXIT
+        if [ -z "$VERSION" ] && [ -n "$stale_version" ]; then
+            warn "GitHub API lookup failed - installing ${stale_version}, which may not be the latest release"
+            VERSION=$stale_version
         # The release matching this installer may still be a draft (or not yet
         # propagated); the API's answer is the newest published release.
-        if [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
+        elif [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
             warn "GitHub reports ${VERSION} as the latest release, older than this installer (v${MIN_VERSION}) - the newer release may not be published yet"
         fi
     fi

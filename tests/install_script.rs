@@ -29,13 +29,25 @@ fn write_stub(dir: &Path, name: &str, body: &str) {
 }
 
 /// Runs the installer with `redirect_tag` answering the `/releases/latest`
-/// redirect and `api_tag` answering the API. Every download fails, so the run
-/// ends right after choosing a version; returns the output and the URL log.
-fn run_installer(redirect_tag: &str, api_tag: &str, pinned: Option<&str>) -> (Output, String) {
+/// redirect and `api_tag` answering the API (`None`: the API request fails, as
+/// when rate-limited). Every download fails, so the run ends right after
+/// choosing a version; returns the output and the URL log.
+fn run_installer(
+    redirect_tag: &str,
+    api_tag: Option<&str>,
+    pinned: Option<&str>,
+) -> (Output, String) {
     let work = tempfile::tempdir().unwrap();
     let bin = work.path().join("bin");
     fs::create_dir(&bin).unwrap();
     let log = work.path().join("urls.log");
+    let api = match api_tag {
+        Some(tag) => format!(
+            r#"out=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
+    printf '{{"tag_name": "{tag}"}}' > "$out""#
+        ),
+        None => "exit 22".to_string(),
+    };
     write_stub(
         &bin,
         "uname",
@@ -49,8 +61,7 @@ fn run_installer(redirect_tag: &str, api_tag: &str, pinned: Option<&str>) -> (Ou
 case "$*" in
   *-fsSI*releases/latest*) printf 'HTTP/2 302\r\nlocation: https://github.com/o/r/releases/tag/{redirect_tag}\r\n\r\n' ;;
   *api.github.com*)
-    out=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
-    printf '{{"tag_name": "{api_tag}"}}' > "$out" ;;
+    {api} ;;
   *) exit 22 ;;
 esac"#,
             log = log.display(),
@@ -78,14 +89,14 @@ fn text(out: &[u8]) -> String {
 fn fresh_redirect_is_used_without_touching_the_api() {
     let min = min_version();
     let tag = format!("v{min}");
-    let (out, urls) = run_installer(&tag, "v0.0.1", None);
+    let (out, urls) = run_installer(&tag, Some("v0.0.1"), None);
     assert!(text(&out.stdout).contains(&format!("Installing version: {tag}")));
     assert!(!urls.contains("api.github.com"), "{urls}");
 }
 
 #[test]
 fn stale_redirect_falls_back_to_the_api() {
-    let (out, urls) = run_installer("v0.0.1", "v99.0.0", None);
+    let (out, urls) = run_installer("v0.0.1", Some("v99.0.0"), None);
     let stdout = text(&out.stdout);
     assert!(stdout.contains("Installing version: v99.0.0"), "{stdout}");
     assert!(urls.contains("api.github.com"), "{urls}");
@@ -94,7 +105,7 @@ fn stale_redirect_falls_back_to_the_api() {
 
 #[test]
 fn stale_redirect_and_stale_api_install_the_api_version_with_a_warning() {
-    let (out, urls) = run_installer("v0.0.1", "v0.0.2", None);
+    let (out, urls) = run_installer("v0.0.1", Some("v0.0.2"), None);
     assert!(text(&out.stdout).contains("Installing version: v0.0.2"));
     assert!(text(&out.stdout).contains("may not be published yet"));
     assert!(urls.contains("releases/download/v0.0.2/"), "{urls}");
@@ -102,16 +113,25 @@ fn stale_redirect_and_stale_api_install_the_api_version_with_a_warning() {
 
 #[test]
 fn redirect_newer_than_the_installer_is_used_without_touching_the_api() {
-    let (out, urls) = run_installer("v99.0.0", "v0.0.1", None);
+    let (out, urls) = run_installer("v99.0.0", Some("v0.0.1"), None);
     assert!(text(&out.stdout).contains("Installing version: v99.0.0"));
     assert!(!urls.contains("api.github.com"), "{urls}");
 }
 
 #[test]
 fn pinned_version_skips_the_lookup_even_when_older() {
-    let (out, urls) = run_installer("v99.0.0", "v99.0.0", Some("0.0.1"));
+    let (out, urls) = run_installer("v99.0.0", Some("v99.0.0"), Some("0.0.1"));
     assert!(text(&out.stdout).contains("Using pinned version: v0.0.1"));
     assert!(urls.contains("releases/download/v0.0.1/"), "{urls}");
     assert!(!urls.contains("releases/latest"), "{urls}");
     assert!(!urls.contains("api.github.com"), "{urls}");
+}
+
+#[test]
+fn stale_redirect_is_installed_when_the_api_fails() {
+    let (out, urls) = run_installer("v0.0.1", None, None);
+    let stdout = text(&out.stdout);
+    assert!(stdout.contains("Installing version: v0.0.1"), "{stdout}");
+    assert!(stdout.contains("GitHub API lookup failed"), "{stdout}");
+    assert!(urls.contains("releases/download/v0.0.1/"), "{urls}");
 }
