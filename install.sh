@@ -147,9 +147,9 @@ latest_version() {
         if [ -z "$VERSION" ] && [ -n "$stale_version" ]; then
             warn "GitHub API lookup failed - installing ${stale_version}, which may not be the latest release"
             VERSION=$stale_version
-        # The release matching this installer may still be a draft (or not yet
-        # propagated); the API's answer is the newest published release.
         elif [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
+            # The release matching this installer may still be a draft (or not
+            # yet propagated); the API's answer is the newest published release.
             warn "GitHub reports ${VERSION} as the latest release, older than this installer (v${MIN_VERSION}) - the newer release may not be published yet"
         fi
     fi

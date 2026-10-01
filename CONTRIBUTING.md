@@ -279,10 +279,11 @@ just nix-build
 
 [release-please](https://github.com/googleapis/release-please) turns conventional commits on `main`
 (see [PR titles](#pr-titles)) into a standing PR titled `chore(main): release X.Y.Z`. That PR is the
-only place `Cargo.toml`, `Cargo.lock`, `plugins/tmux-agent-status/.claude-plugin/plugin.json` and the
-pin examples in `docs/install.md` and `install.sh` change version - never bump them by hand, and
-never tag or publish a release by hand. Merging it tags `vX.Y.Z`, builds the release binaries, and
-publishes the GitHub release once every platform archive is attached.
+only place `Cargo.toml`, `Cargo.lock`, `plugins/tmux-agent-status/.claude-plugin/plugin.json`, the
+pin examples in `docs/install.md` and `install.sh`, and `MIN_VERSION` in `install.sh` change
+version - never bump them by hand, and never tag or publish a release by hand. Merging it tags
+`vX.Y.Z`, builds the release binaries, and publishes the GitHub release once every platform archive
+is attached.
 
 release-please opens its release PR and creates its tag with a GitHub App token, not the default
 `GITHUB_TOKEN`: CI doesn't run on a PR that `GITHUB_TOKEN` opens or updates, and the PR's required
