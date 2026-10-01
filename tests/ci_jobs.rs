@@ -138,6 +138,12 @@ fn read(relative: &str) -> String {
 /// snapshot, and otherwise detach the pushing worktree's HEAD.
 #[test]
 fn ci_snapshot_ignores_the_git_dir_a_worktree_hook_inherits() {
+    // The recipe is a `#!/usr/bin/env bash` script, which the Nix build sandbox
+    // on Linux cannot run; `just test` and CI's other jobs cover it.
+    if !Path::new("/usr/bin/env").exists() {
+        eprintln!("skipped: no /usr/bin/env in this sandbox");
+        return;
+    }
     let scratch = tempfile::tempdir().expect("scratch dir");
     let root = scratch.path();
     let main = root.join("main");
