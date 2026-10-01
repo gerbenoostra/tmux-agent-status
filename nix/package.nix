@@ -1,6 +1,8 @@
 {
   lib,
   rustPlatform,
+  git,
+  just,
   tmux,
   unixtools,
 }:
@@ -27,7 +29,12 @@ rustPlatform.buildRustPackage {
   # sandbox's minimal $PATH does not otherwise carry. `unixtools` picks the
   # right implementation per platform (the real `ps`/`hostname` on Darwin,
   # `procps`/`inetutils` on Linux).
+  #
+  # `tests/ci_jobs.rs` runs the justfile's `_ci-snapshot` on scratch
+  # repositories, so it needs `just` and `git`.
   nativeCheckInputs = [
+    git
+    just
     tmux
     unixtools.hostname
     unixtools.ps
