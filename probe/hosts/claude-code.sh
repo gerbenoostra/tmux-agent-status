@@ -37,9 +37,10 @@ probe_install_hooks() {
         var="TAS_PROBE_HOOK_SLEEP_$(printf '%s' "$event" | tr '[:lower:]' '[:upper:]')"
         delay=0
         eval "delay=\${$var:-0}"
-        command="$logger $event $log"
+        # Hook commands run through a shell, so paths are quoted for one.
+        command=$(printf '%q %q %q' "$logger" "$event" "$log")
         if [ "$delay" != "0" ]; then
-            command="TAS_HOOK_SLEEP=$delay $command"
+            command="TAS_HOOK_SLEEP=$(printf %q "$delay") $command"
         fi
         # FileChanged's matcher is a `|`-list of literal basenames to watch,
         # not a pattern, and the file must exist at session start; the
@@ -56,7 +57,8 @@ probe_install_hooks() {
             # replaces the host's default worktree handling, so they get a
             # responder that logs and still answers.
             WorktreeCreate | WorktreeRemove)
-                command="$PROBE_DIR/worktree-hook.sh $event $log $scratch/worktrees"
+                command=$(printf '%q %q %q %q' "$PROBE_DIR/worktree-hook.sh" "$event" \
+                    "$log" "$scratch/worktrees")
                 hooks=$(jq --arg e "$event" --arg c "$command" \
                     '. + {($e): [{hooks: [{type: "command", command: $c}]}]}' \
                     <<<"$hooks")
