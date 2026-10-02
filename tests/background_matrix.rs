@@ -26,7 +26,7 @@ fn matrix_rows(readme: &str) -> Vec<&str> {
         .expect("docs/agents/README.md has no '## Background work' section");
     section
         .lines()
-        .take_while(|line| !line.starts_with("## ") || line.starts_with('|'))
+        .take_while(|line| !line.starts_with("## "))
         .filter(|line| line.starts_with("| ["))
         .collect()
 }
@@ -54,7 +54,8 @@ fn shipped_commands(name: &str) -> Vec<String> {
     let mut texts = vec![
         agents::by_name(name)
             .unwrap_or_else(|| panic!("{name} is not a registered agent"))
-            .contents,
+            .contents
+            .to_owned(),
     ];
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("share/agents")
@@ -65,16 +66,15 @@ fn shipped_commands(name: &str) -> Vec<String> {
             if file.is_file() {
                 // The embedded template is read back verbatim for JSON and
                 // TOML alike; only raw `tmux-agent-status` strings matter.
-                texts.push(Box::leak(
+                texts.push(
                     fs::read_to_string(&file)
-                        .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()))
-                        .into_boxed_str(),
-                ));
+                        .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display())),
+                );
             }
         }
     }
     let mut commands = Vec::new();
-    for text in texts {
+    for text in &texts {
         for line in text.lines() {
             for part in line.split('"') {
                 if part.trim_start().starts_with("tmux-agent-status ") {
