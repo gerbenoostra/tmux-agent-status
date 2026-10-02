@@ -186,6 +186,13 @@ fn stop_failure_matches_on_the_error_code() {
 }
 
 #[test]
+#[should_panic(expected = "StopFailure payload has no string `error`")]
+fn a_payload_missing_its_matcher_subject_fails_the_replay() {
+    let hooks = drop_in_with("StopFailure", "rate_limit");
+    commands_for(&record("StopFailure", serde_json::json!({})), &hooks);
+}
+
+#[test]
 #[should_panic(expected = "does not know how Claude matches")]
 fn a_matcher_on_an_unmodelled_event_fails_the_replay() {
     let hooks = drop_in_with("FileChanged", ".envrc");
@@ -202,10 +209,17 @@ fn commands_for(record: &serde_json::Value, hooks: &serde_json::Value) -> Vec<St
             None => true,
             Some(matcher) => match match_subject(event) {
                 MatchSubject::Ignored => true,
-                // A payload without the field matches only a wildcard.
+                // A fixture missing the field would replay as a silent
+                // non-match; it means the sanitizer dropped it.
                 MatchSubject::Field(field) => {
-                    let subject = payload.get(field).and_then(|v| v.as_str());
-                    matcher_applies(event, matcher, subject.unwrap_or(""))
+                    let subject =
+                        payload
+                            .get(field)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_else(|| {
+                                panic!("{event} payload has no string `{field}`: {payload}")
+                            });
+                    matcher_applies(event, matcher, subject)
                 }
             },
         };
