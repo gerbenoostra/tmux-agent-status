@@ -8,7 +8,7 @@
 //! so the bell reaches a real tty and `window_bell_flag` can see it.
 //!
 //! Every record yields one row: `NNN event command pane window bell`, held in
-//! the scenario's `expected.tsv`. With `TAS_REPLAY_WRITE=1` the rows are
+//! the scenario's `expected.tsv`. With `TAS_REPLAY_WRITE=1` (only `1`) the rows are
 //! written instead of asserted. The rows document what the *shipped* mapping
 //! does - including the defect where a parent `Stop` shows ✅ and rings while
 //! a tracked child is still running.
@@ -285,7 +285,7 @@ fn claude_lifecycle_fixtures_replay_through_the_shipped_drop_in() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let hooks: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(root.join(DROP_IN)).unwrap()).unwrap();
-    let write = std::env::var_os("TAS_REPLAY_WRITE").is_some();
+    let write = std::env::var_os("TAS_REPLAY_WRITE").is_some_and(|v| v == "1");
 
     // Each scenario has its own server, so they replay concurrently; a
     // failing scenario's panic names its thread.
