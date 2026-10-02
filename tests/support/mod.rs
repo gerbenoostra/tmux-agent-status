@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 pub mod command;
+pub mod lifecycle;
 pub mod markdown;
 pub mod tempdir;
 pub mod tmux;

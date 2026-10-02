@@ -7,9 +7,11 @@
 //! anywhere in the tree.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-const FIXTURES: &str = "tests/fixtures/claude-code/lifecycle";
+mod support;
+
+use support::lifecycle::{self, read_record};
 
 /// Top-level payload keys a fixture may carry. Anything outside this list is
 /// either content (prompt, message, tool bodies) or a local path - both are
@@ -47,22 +49,10 @@ const TOOL_RESPONSE_KEYS: &[&str] = &[
 const BACKGROUND_TASK_KEYS: &[&str] = &["id", "type", "status", "agent_type"];
 
 fn fixture_files() -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
-    let mut files = Vec::new();
-    for entry in fs::read_dir(&root).unwrap_or_else(|e| panic!("{FIXTURES}: {e}")) {
-        let dir = entry.unwrap().path();
-        if !dir.is_dir() {
-            continue;
-        }
-        for file in fs::read_dir(&dir).unwrap() {
-            let path = file.unwrap().path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    files
+    lifecycle::scenarios()
+        .into_iter()
+        .flat_map(|scenario| scenario.records)
+        .collect()
 }
 
 /// Every string leaf in the fixture, to be checked for absolute paths.
@@ -98,12 +88,9 @@ fn check_keys(value: &serde_json::Value, allowed: &[&str], at: &str) {
 #[test]
 fn every_fixture_is_a_sanitized_probe_record() {
     let files = fixture_files();
-    assert!(!files.is_empty(), "no fixtures under {FIXTURES}");
+    assert!(!files.is_empty(), "no lifecycle fixture records");
     for file in &files {
-        let record: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display())),
-        )
-        .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", file.display()));
+        let record = read_record(file);
 
         for key in ["event", "ts_enter", "ts_exit", "payload"] {
             assert!(
@@ -173,45 +160,26 @@ fn every_fixture_is_a_sanitized_probe_record() {
 /// the directory layout refuses to let one slip in untested.
 #[test]
 fn every_scenario_has_an_expected_replay() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
-    for entry in fs::read_dir(&root).unwrap() {
-        let dir = entry.unwrap().path();
-        if !dir.is_dir() {
-            continue;
-        }
-        let expected = dir.join("expected.tsv");
+    for scenario in lifecycle::scenarios() {
+        let expected = scenario.expected_path();
         assert!(
             expected.exists(),
             "{} has no expected.tsv - record one with TAS_REPLAY_WRITE=1",
-            dir.display()
+            scenario.name()
         );
         let rows = fs::read_to_string(&expected)
             .unwrap()
             .lines()
             .filter(|l| !l.starts_with('#'))
             .count();
-        let fixtures = fs::read_dir(&dir)
-            .unwrap()
-            .filter(|f| {
-                f.as_ref()
-                    .unwrap()
-                    .path()
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    == Some("json")
-            })
-            .count();
+        let fixtures = scenario.records.len();
         assert_eq!(
             rows,
             fixtures,
             "{}: expected.tsv has {rows} rows for {fixtures} fixtures",
-            dir.display()
+            scenario.name()
         );
     }
-}
-
-fn read_record(path: &Path) -> serde_json::Value {
-    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
 }
 
 /// A tracked adapter cancels a background agent by the `task_id` of
@@ -220,13 +188,14 @@ fn read_record(path: &Path) -> serde_json::Value {
 /// sanitizer from silently dropping either half of it.
 #[test]
 fn task_stop_cancels_by_the_subagent_start_id() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(FIXTURES)
-        .join("s5-model-cancellation");
+    let s5 = lifecycle::scenarios()
+        .into_iter()
+        .find(|scenario| scenario.name() == "s5-model-cancellation")
+        .expect("the S5 capture is committed");
     let mut started = Vec::new();
     let mut cancelled = Vec::new();
-    for file in fixture_files().iter().filter(|f| f.starts_with(&dir)) {
-        let payload = read_record(file)["payload"].clone();
+    for file in &s5.records {
+        let payload = read_record(file)["payload"].take();
         match (
             payload["hook_event_name"].as_str(),
             payload["tool_name"].as_str(),

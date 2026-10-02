@@ -14,14 +14,14 @@
 //! a tracked child is still running.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 mod support;
 
+use support::lifecycle::{self, Scenario, read_record};
 use support::tmux::{Server, wait_for};
 
-const FIXTURES: &str = "tests/fixtures/claude-code/lifecycle";
 const DROP_IN: &str = "share/agents/claude-code/hooks.json";
 
 /// The pane's shell. Without `--noprofile --norc` it would source the
@@ -213,26 +213,8 @@ fn commands_for(record: &serde_json::Value, hooks: &serde_json::Value) -> Vec<St
     found
 }
 
-fn fixture_records(dir: &Path) -> Vec<(String, serde_json::Value)> {
-    let mut files: Vec<PathBuf> = fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .map(|f| f.unwrap().path())
-        .filter(|f| f.extension().and_then(|s| s.to_str()) == Some("json"))
-        .collect();
-    files.sort();
-    files
-        .iter()
-        .map(|f| {
-            let name = f.file_name().unwrap().to_string_lossy().into_owned();
-            let record = serde_json::from_str(&fs::read_to_string(f).unwrap())
-                .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", f.display()));
-            (name, record)
-        })
-        .collect()
-}
-
 /// Replay one scenario directory and return its `NNN\tevent\tcommand\tpane\twindow\tbell` rows.
-fn replay(dir: &Path, hooks: &serde_json::Value) -> Vec<String> {
+fn replay(scenario: &Scenario, hooks: &serde_json::Value) -> Vec<String> {
     let server = Server::start_running(SHELL);
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "any"]);
@@ -261,9 +243,10 @@ fn replay(dir: &Path, hooks: &serde_json::Value) -> Vec<String> {
     );
 
     let mut rows = Vec::new();
-    for (seq, (name, record)) in fixture_records(dir).iter().enumerate() {
+    for (seq, path) in scenario.records.iter().enumerate() {
+        let record = read_record(path);
         let event = record["event"].as_str().unwrap();
-        let commands = commands_for(record, hooks);
+        let commands = commands_for(&record, hooks);
         let command = if commands.is_empty() {
             "-".to_owned()
         } else {
@@ -278,7 +261,7 @@ fn replay(dir: &Path, hooks: &serde_json::Value) -> Vec<String> {
         server.tmux(&["select-window", "-t", &format!("t:{window}")]);
         rows.push(format!(
             "{}\t{}\t{}\t{}\t{}\t{}",
-            name.trim_end_matches(".json"),
+            path.file_stem().unwrap().to_string_lossy(),
             event,
             command,
             server.pane_status(&pane),
@@ -301,15 +284,9 @@ fn claude_lifecycle_fixtures_replay_through_the_shipped_drop_in() {
         serde_json::from_str(&fs::read_to_string(root.join(DROP_IN)).unwrap()).unwrap();
     let write = std::env::var_os("TAS_REPLAY_WRITE").is_some();
 
-    let mut scenarios = 0;
-    for entry in fs::read_dir(root.join(FIXTURES)).unwrap() {
-        let dir = entry.unwrap().path();
-        if !dir.is_dir() {
-            continue;
-        }
-        let rows = replay(&dir, &hooks);
-        scenarios += 1;
-        let expected_path = dir.join("expected.tsv");
+    for scenario in lifecycle::scenarios() {
+        let rows = replay(&scenario, &hooks);
+        let expected_path = scenario.expected_path();
         if write {
             let mut text = String::from(HEADER);
             text.push('\n');
@@ -331,11 +308,10 @@ fn claude_lifecycle_fixtures_replay_through_the_shipped_drop_in() {
             rows.len(),
             expected_rows.len(),
             "{}: fixture count changed - re-record with TAS_REPLAY_WRITE=1",
-            dir.display()
+            scenario.name()
         );
         for (actual, wanted) in rows.iter().zip(&expected_rows) {
-            assert_eq!(actual, wanted, "{}: replay drifted", dir.display());
+            assert_eq!(actual, wanted, "{}: replay drifted", scenario.name());
         }
     }
-    assert!(scenarios > 0, "no lifecycle scenarios under {FIXTURES}");
 }
