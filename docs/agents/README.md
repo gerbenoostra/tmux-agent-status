@@ -132,14 +132,14 @@ while a child is still running.
 | Agent | Probed version | Probe date | Lifecycle eligibility | Shipped tier |
 | --- | --- | --- | --- | --- |
 | [Claude Code](claude-code.md) | 2.1.287 | 2026-10-01 | tracked aggregate | scalar |
-| [Codex CLI](codex.md) | - | - | not probed - T4 | scalar |
-| [GitHub Copilot CLI](copilot.md) | - | - | not probed - T4 | scalar |
-| [Cursor](cursor.md) | - | - | not probed - T4 | scalar |
+| [Codex CLI](codex.md) | - | - | not probed - binary not installed; `agent_id` is documented on both subagent events | scalar |
+| [GitHub Copilot CLI](copilot.md) | - | - | not probed - an organization policy blocked the probe; `agentId` is documented on both subagent events | scalar |
+| [Cursor](cursor.md) | - | - | not probed - `subagent_id` is documented, but background `subagentStop` reportedly never fires | scalar |
 | [Devin CLI](devin.md) | 3000.11.3 | 2026-10 | scalar - the worker's stop carries no ID | scalar |
-| [Droid](droid.md) | - | - | not probed - T4 | scalar |
-| [Gemini CLI](gemini.md) | - | - | not probed - T4 | scalar |
-| [Grok CLI](grok.md) | - | - | not probed - T4 | scalar |
-| [Kiro](kiro.md) | 2.21.2 | 2026-10 | synchronous native children - the parent waits | scalar |
+| [Droid](droid.md) | - | - | not probed - documented `SubagentStop` carries no task ID and there is no start event | scalar |
+| [Gemini CLI](gemini.md) | - | - | not probed - no subagent start/end hooks are documented | scalar |
+| [Grok CLI](grok.md) | - | - | not probed - needs an authenticated run; subagent IDs are documented inconsistently | scalar |
+| [Kiro](kiro.md) | - | - | not probed - documented synchronous native children: the parent waits for them | scalar |
 | [Mistral Vibe](mistral-vibe.md) | 2.25.8 | 2026-10 | scalar - spawn carries no hook-visible child ID | scalar |
 
 ### Claude Code: observed lifecycle scenarios
