@@ -237,12 +237,14 @@ fn sanitizer_orders_records_by_hook_entry_time() {
     out.write("999-stale.json", "{}\n");
     out.write("notes.json", "{}\n");
 
-    let ran =
-        Command::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("probe/sanitize-fixtures.sh"))
-            .arg(&raw)
-            .arg(out.path())
-            .output()
-            .expect("the sanitizer runs");
+    // `bash` rather than the script path: the Nix check sandbox has no
+    // /usr/bin/env to resolve the shebang.
+    let ran = Command::new("bash")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("probe/sanitize-fixtures.sh"))
+        .arg(&raw)
+        .arg(out.path())
+        .output()
+        .expect("the sanitizer runs");
     assert!(
         ran.status.success(),
         "sanitize-fixtures.sh failed: {}",
