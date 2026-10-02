@@ -267,7 +267,9 @@ ci-linux rev="HEAD":
         bash -c 'set -euo pipefail
             git config --global --add safe.directory "*"
             # CI installs the stable of the day, not the one the image baked.
-            rustup update stable --no-self-update >/dev/null
+            # The baked toolchain lies in an image layer, which overlayfs
+            # cannot rename out of (EXDEV); rustup then copies instead.
+            RUSTUP_PERMIT_COPY_RENAME=1 rustup update stable --no-self-update >/dev/null
             # Set after rustup, whose proxies stay in ~/.cargo from the image.
             # Only the cache moves: the tools stay on PATH in ~/.cargo/bin,
             # and anything cargo installs here would land off PATH.

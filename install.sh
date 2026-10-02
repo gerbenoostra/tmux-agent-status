@@ -19,6 +19,12 @@ set -e
 REPO="gerbenoostra/tmux-agent-status"
 BIN="tmux-agent-status"
 INSTALL_DIR="${TMUX_AGENT_STATUS_INSTALL_DIR:-$HOME/.local/bin}"
+# x-release-please-start-version
+# The release this script ships with. Once published, the latest release is
+# never older, so an older answer from GitHub means its "latest" pointer has
+# not caught up or this release is still a draft.
+MIN_VERSION="0.1.2"
+# x-release-please-end
 BUILD_FROM_SOURCE_URL="https://github.com/${REPO}/blob/main/docs/install.md#build-from-source"
 
 RED='\033[0;31m'
@@ -91,6 +97,19 @@ detect_platform() {
     esac
 }
 
+# version_lt <a> <b>: succeed when vX.Y.Z "a" is older than "b" (numeric, POSIX sh).
+version_lt() {
+    a=${1#v}
+    b=${2#v}
+    for i in 1 2 3; do
+        a_part=$(echo "$a" | cut -d. -f"$i" | sed -E 's/[^0-9].*//')
+        b_part=$(echo "$b" | cut -d. -f"$i" | sed -E 's/[^0-9].*//')
+        [ "${a_part:-0}" -lt "${b_part:-0}" ] && return 0
+        [ "${a_part:-0}" -gt "${b_part:-0}" ] && return 1
+    done
+    return 1
+}
+
 latest_version() {
     VERSION=""
     version_error="Failed to determine the latest version (there may be no releases yet, or the GitHub API is rate-limited; set TMUX_AGENT_STATUS_VERSION=vX.Y.Z to pin)"
@@ -105,18 +124,35 @@ latest_version() {
             | tr -d '\r')
     fi
 
+    # Right after a release is published the redirect can keep pointing at the
+    # previous tag for a while; ask the API instead, but keep the redirect's
+    # answer so a failing API (rate limit) installs no worse than before.
+    stale_version=""
+    if [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
+        warn "Redirect lookup returned ${VERSION}, older than this installer (v${MIN_VERSION}) - GitHub may still be propagating a new release"
+        stale_version=$VERSION
+        VERSION=""
+    elif [ -z "$VERSION" ] && command -v curl >/dev/null 2>&1; then
+        warn "Redirect lookup failed, falling back to the GitHub API..."
+    fi
+
     if [ -z "$VERSION" ]; then
-        if command -v curl >/dev/null 2>&1; then
-            warn "Redirect lookup failed, falling back to the GitHub API..."
-        fi
         api_json=$(mktemp)
         trap 'rm -f "$api_json"' EXIT
-        fetch "https://api.github.com/repos/${REPO}/releases/latest" "$api_json" \
-            || error "$version_error"
-        VERSION=$(grep '"tag_name"' "$api_json" | head -n 1 \
-            | sed -n -E 's/.*"tag_name": *"([^"]+)".*/\1/p')
+        if fetch "https://api.github.com/repos/${REPO}/releases/latest" "$api_json"; then
+            VERSION=$(grep '"tag_name"' "$api_json" | head -n 1 \
+                | sed -n -E 's/.*"tag_name": *"([^"]+)".*/\1/p')
+        fi
         rm -f "$api_json"
         trap - EXIT
+        if [ -z "$VERSION" ] && [ -n "$stale_version" ]; then
+            warn "GitHub API lookup failed - installing ${stale_version}, which may not be the latest release"
+            VERSION=$stale_version
+        elif [ -n "$VERSION" ] && version_lt "$VERSION" "$MIN_VERSION"; then
+            # The release matching this installer may still be a draft (or not
+            # yet propagated); the API's answer is the newest published release.
+            warn "GitHub reports ${VERSION} as the latest release, older than this installer (v${MIN_VERSION}) - the newer release may not be published yet"
+        fi
     fi
 
     [ -n "$VERSION" ] || error "$version_error"
