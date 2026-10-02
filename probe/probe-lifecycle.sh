@@ -49,7 +49,9 @@ for tool in tmux jq; do
     }
 done
 
-scratch=$(mktemp -d "${TMPDIR:-/tmp}tas-probe-$host.XXXXXX")
+# macOS sets TMPDIR with a trailing slash, Linux usually leaves it unset.
+tmp=${TMPDIR:-/tmp}
+scratch=$(mktemp -d "${tmp%/}/tas-probe-$host.XXXXXX")
 mkdir -p "$scratch/workspace"
 probe_install_hooks "$scratch"
 
