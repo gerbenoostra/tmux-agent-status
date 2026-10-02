@@ -5,4 +5,4 @@
 .envrc
 coverage*.json
 coverage.lcov
-.tasks/
+.tasks
