@@ -58,8 +58,10 @@ Depending on the agent, manual delivery means installing a plugin, copying a dro
 ## Optional bell settings
 
 When a turn ends (`waiting`, `error`, or `done`, but not `working`), the tool writes a bell (`\a`)
-to its tmux pane. tmux's defaults already do the right thing, so these settings matter only if you
-or your tmux framework changed them. Check with `tmux show-options -g bell-action`.
+to its tmux pane. A `done` while the pane still tracks background work is the exception: it stays
+silent, and the clean stop after the last item rings. tmux's defaults already do the right thing,
+so these settings matter only if you or your tmux framework changed them. Check with
+`tmux show-options -g bell-action`.
 
 | Setting | What it decides | Suggested |
 | --- | --- | --- |
@@ -86,7 +88,8 @@ a sound in `bell-features`. The bell tells you *which terminal tab*; the glyph t
 
 ## The bell, and colour
 
-For the end states (`waiting`, `error` and `done`, thus not `working`) a terminal bell (`\a`) is printed.
+For the end states (`waiting`, `error` and `done`, thus not `working`) a terminal bell (`\a`) is
+printed; a `done` stays silent while tracked work is still running.
 With `monitor-bell on`, tmux gives you the window highlight, in whatever way you configure it, and
 `bell-action` decides whether the bell also reaches your terminal: see the
 [optional bell settings](#optional-bell-settings).

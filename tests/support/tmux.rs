@@ -5,8 +5,10 @@
 //! and removes its socket file, so a panicking test cannot leak one. Test
 //! files add their own helpers in further `impl Server` blocks.
 
+use std::ffi::OsString;
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// A throwaway tmux server holding one session `t`.
@@ -102,6 +104,55 @@ impl Server {
             .trim_end()
             .to_owned()
     }
+
+    /// Run `f` with the process environment aimed at this server, for calls
+    /// into the library (`command::apply` and friends) the CLI does not cover.
+    ///
+    /// `$TMUX` is process-global while `cargo test` threads share it, so a
+    /// lock serializes every such call; `f` may itself spawn threads inside,
+    /// which then all see this server. The previous values are restored
+    /// afterwards - a panicking `f` leaves them dirty, but the next holder
+    /// of the lock rewrites them before any call anyway.
+    pub fn in_process<R>(&self, f: impl FnOnce() -> R) -> R {
+        let _guard = env_lock();
+        let saved: Vec<(&'static str, Option<OsString>)> = ENV_VARS
+            .iter()
+            .map(|var| (*var, std::env::var_os(var)))
+            .collect();
+        // SAFETY: every edit of these variables in this test process happens
+        // under `env_lock()`, which `f` cannot outlast.
+        unsafe {
+            std::env::set_var("TMUX", format!("{},0,0", self.socket_path()));
+            for var in &ENV_VARS[1..] {
+                std::env::remove_var(var);
+            }
+        }
+        let result = f();
+        for (var, value) in saved {
+            // SAFETY: the lock is still held.
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var(var, value),
+                    None => std::env::remove_var(var),
+                }
+            }
+        }
+        result
+    }
+}
+
+/// The environment the hook commands resolve a pane and a server from.
+const ENV_VARS: [&str; 4] = [
+    "TMUX",
+    "TMUX_PANE",
+    "TMUX_AGENT_STATUS_PANE",
+    "TMUX_AGENT_STATUS_DISABLED",
+];
+
+fn env_lock() -> MutexGuard<'static, ()> {
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    // A panicking test must not poison the lock for the others.
+    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl Drop for Server {

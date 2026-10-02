@@ -197,8 +197,8 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     }
 
     match notify::dispatch(&agent, &payload) {
-        Some(state) => {
-            hook(command::set(state, pane.as_deref()));
+        Some(action) => {
+            hook(command::apply(&action, pane.as_deref()));
         }
         None => {
             debug(&format!("notify: dropped payload for {agent}"));

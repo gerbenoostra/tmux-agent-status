@@ -4,57 +4,304 @@
 //!
 //! An agent may run its hooks concurrently, so a decision taken on a value read
 //! in an earlier tmux call can be stale by the time it is written. Every
-//! decision that depends on what tmux holds - which state wins on a pane, what
-//! the window's glyph is - is therefore a format that `set-option -F` expands
-//! against its target at the moment it sets it, and the server runs one command
-//! at a time. That makes each write a compare-and-set taken inside the server:
-//! no lock file, no read-then-write race. A `-F` write can only produce a
-//! value, so a clear produces `""` and is then normalised to unset by a
-//! conditional `if-shell -F ... 'set-option -u'` that decides on the value
-//! current at that instant - an unconditional unset could erase a concurrent
-//! write that landed in between.
+//! decision that depends on what tmux holds - which layer value wins, what the
+//! projection and window glyph are - is therefore a format that
+//! `set-option -F` expands against its target at the moment it sets it, and the
+//! server runs one command at a time. That makes each write a compare-and-set
+//! taken inside the server: no lock file, no read-then-write race. A `-F`
+//! write can only produce a value, so a clear produces `""` and is then
+//! normalised to unset by a conditional `if-shell -F ... 'set-option -u'` that
+//! decides on the value current at that instant - an unconditional unset could
+//! erase a concurrent write that landed in between.
+//!
+//! The pane state an agent reports is layered, not scalar:
+//!
+//! - `@agent_pane_root`: the parent turn's phase - `working`, `stopped`, or
+//!   `settling` (the last tracked item has stopped and the host's automatic
+//!   turn is expected to end with a root stop).
+//! - `@agent_pane_attention`: an unacknowledged `waiting` or `error`.
+//! - `@agent_pane_completion`: `pending` for a clean stop nobody has seen.
+//! - `@agent_pane_work`: the ledger of tracked work items, `,token,...,` or
+//!   unset. Tokens are lowercase hex, so the `,token,` substring is an exact
+//!   membership test and `s|,token,|,|` an exact removal.
+//! - `@agent_pane_host_session`: the hex-encoded host session the lifecycle
+//!   events must match.
+//! - `@agent_pane_model`: `1` once the layers have been initialised; before
+//!   that, the first transition imports the legacy `@agent_pane_status`.
+//!
+//! `@agent_pane_status` remains the only public pane value: it is `project`ed
+//! from the layers inside the same queue that mutated them.
 
+use crate::notify::{HostSession, WorkKey};
 use crate::state::State;
-use crate::tmux::PANE_OPTION;
+use crate::tmux::{
+    PANE_ATTENTION, PANE_COMPLETION, PANE_HOST_SESSION, PANE_MODEL, PANE_OPTION, PANE_ROOT,
+    PANE_WORK,
+};
 
-/// The pane's own status, as the server holds it when the format expands.
-fn status() -> String {
-    format!("#{{{PANE_OPTION}}}")
+/// One layer write of a transition: the pane option and the format computing
+/// its new value from what the server holds when the write runs.
+#[derive(Debug)]
+pub struct Layer {
+    pub option: &'static str,
+    pub format: String,
 }
 
-/// `then` when the pane holds `state`, `otherwise` when it does not.
-fn if_holds(state: State, then: &str, otherwise: &str) -> String {
+/// A layer write on `option` produced by `format`.
+fn layer(option: &'static str, format: impl Into<String>) -> Layer {
+    Layer {
+        option,
+        format: format.into(),
+    }
+}
+
+/// The current value of `option`, expanded where the format is used.
+fn opt(option: &'static str) -> String {
+    format!("#{{{option}}}")
+}
+
+fn status() -> String {
+    opt(PANE_OPTION)
+}
+fn root() -> String {
+    opt(PANE_ROOT)
+}
+fn attention() -> String {
+    opt(PANE_ATTENTION)
+}
+fn completion() -> String {
+    opt(PANE_COMPLETION)
+}
+fn work() -> String {
+    opt(PANE_WORK)
+}
+fn host_session() -> String {
+    opt(PANE_HOST_SESSION)
+}
+fn model() -> String {
+    opt(PANE_MODEL)
+}
+
+/// `a == b`, expanded where the format is used.
+fn eq(a: String, b: &str) -> String {
+    format!("#{{==:{a},{b}}}")
+}
+
+/// `then` when `condition` expands true, `otherwise` when it does not.
+fn gate(condition: String, then: &str, otherwise: String) -> String {
+    format!("#{{?{condition},{then},{otherwise}}}")
+}
+
+/// Any of `conditions`.
+fn any(conditions: &[String]) -> String {
+    let mut it = conditions.iter().rev();
+    let last = it.next().cloned().unwrap_or_default();
+    it.fold(last, |rest, c| format!("#{{||:{c},{rest}}}"))
+}
+
+/// All of `conditions`.
+fn all(conditions: &[String]) -> String {
+    let mut it = conditions.iter().rev();
+    let last = it.next().cloned().unwrap_or_default();
+    it.fold(last, |rest, c| format!("#{{&&:{c},{rest}}}"))
+}
+
+/// The layered equivalent of the legacy scalar status, applied only while
+/// `@agent_pane_model` does not mark the pane migrated.
+///
+/// An un-migrated pane has no ledger and no accepted session, so those two
+/// layers need no import. The marker itself is written after the imports, so
+/// every import in the queue still sees the legacy value.
+pub fn migrate() -> Vec<Layer> {
+    let migrated = eq(model(), "1");
+    let legacy = status();
+    let terminal = any(&[
+        eq(legacy.clone(), "done"),
+        eq(legacy.clone(), "waiting"),
+        eq(legacy.clone(), "error"),
+    ]);
+    let root_import = format!(
+        "#{{?{},working,#{{?{terminal},stopped,}}}}",
+        eq(legacy.clone(), "working")
+    );
+    let attention_import = format!(
+        "#{{?{},waiting,#{{?{},error,}}}}",
+        eq(legacy.clone(), "waiting"),
+        eq(legacy, "error")
+    );
+    let completion_import = format!("#{{?{},pending,}}", eq(status(), "done"));
+    vec![
+        layer(PANE_ROOT, gate(migrated.clone(), &root(), root_import)),
+        layer(
+            PANE_ATTENTION,
+            gate(migrated.clone(), &attention(), attention_import),
+        ),
+        layer(
+            PANE_COMPLETION,
+            gate(migrated.clone(), &completion(), completion_import),
+        ),
+        layer(PANE_MODEL, "1"),
+    ]
+}
+
+/// The public pane state the layers project to, in precedence order:
+/// unacknowledged attention, then activity (a `working` or `settling` root, or
+/// tracked work remaining), then a pending clean stop, then nothing.
+pub fn project() -> String {
+    let activity = any(&[eq(root(), "working"), eq(root(), "settling"), work()]);
+    let pending_stop = all(&[eq(root(), "stopped"), eq(completion(), "pending")]);
     format!(
-        "#{{?#{{==:{},{}}},{then},{otherwise}}}",
-        status(),
-        state.name()
+        "#{{?{a},{a},#{{?{activity},working,#{{?{pending_stop},done,}}}}}}",
+        a = attention()
     )
 }
 
-/// The value a pane takes when `state` is reported on it.
-///
-/// A state that outranks `state` in precedence keeps itself; anything else - a
-/// lower state, nothing, or a value this tool does not recognise - becomes
-/// `state`. Whether anyone is looking is never consulted: tmux cannot tell a
-/// focused terminal from a background tab, so the glyph is always written and
-/// only a focus event on the pane clears it.
-pub fn report(state: State) -> String {
-    State::ALL
-        .into_iter()
-        .filter(|held| held.precedence() > state.precedence())
-        .fold(state.name().to_owned(), |otherwise, held| {
-            if_holds(held, held.name(), &otherwise)
-        })
+/// The layer writes for `set <state>` and `Report(state)`.
+pub fn report(state: State) -> Vec<Layer> {
+    match state {
+        State::Working => vec![layer(PANE_ROOT, "working")],
+        State::Waiting => vec![
+            layer(PANE_ROOT, "stopped"),
+            layer(
+                PANE_ATTENTION,
+                gate(eq(attention(), "error"), "error", "waiting".to_owned()),
+            ),
+        ],
+        State::Error => vec![layer(PANE_ROOT, "stopped"), layer(PANE_ATTENTION, "error")],
+        State::Done => finish(),
+    }
 }
 
-/// The value a pane keeps once it is acknowledged: nothing in place of a state
-/// that clears on focus, and whatever it holds otherwise, so a sticky state and
-/// a value this tool does not recognise both survive.
-pub fn seen() -> String {
-    State::ALL
-        .into_iter()
-        .filter(|state| !state.is_sticky())
-        .fold(status(), |otherwise, state| if_holds(state, "", &otherwise))
+/// The layer writes for `start`: a new turn acknowledges whatever the last one
+/// left, but work that outlives a turn is preserved.
+pub fn start() -> Vec<Layer> {
+    vec![
+        layer(PANE_ROOT, "working"),
+        layer(PANE_ATTENTION, ""),
+        layer(PANE_COMPLETION, ""),
+    ]
+}
+
+/// The layer writes of a clean stop: `set done`, `Report(done)` and `finish`.
+///
+/// `error` keeps standing - it outranks a clean stop - while `waiting` is
+/// replaced: the turn could only end once the input was given.
+pub fn finish() -> Vec<Layer> {
+    vec![
+        layer(PANE_ROOT, "stopped"),
+        layer(
+            PANE_ATTENTION,
+            gate(eq(attention(), "error"), "error", String::new()),
+        ),
+        layer(PANE_COMPLETION, "pending"),
+    ]
+}
+
+/// The layer writes for `clear-pane`: focus acknowledges attention and a
+/// pending outcome; it never clears activity.
+pub fn seen() -> Vec<Layer> {
+    vec![layer(PANE_ATTENTION, ""), layer(PANE_COMPLETION, "")]
+}
+
+/// The layer writes for `reset`: every layer dropped, the pane marked
+/// initialised so no later transition imports a legacy scalar.
+pub fn reset() -> Vec<Layer> {
+    vec![
+        layer(PANE_ROOT, ""),
+        layer(PANE_ATTENTION, ""),
+        layer(PANE_COMPLETION, ""),
+        layer(PANE_WORK, ""),
+        layer(PANE_HOST_SESSION, ""),
+        layer(PANE_MODEL, "1"),
+    ]
+}
+
+/// The layer writes for `ResetSession`: the aggregate dropped and `session`
+/// accepted as the host session every later lifecycle event must match.
+pub fn reset_session(session: &HostSession) -> Vec<Layer> {
+    vec![
+        layer(PANE_ROOT, ""),
+        layer(PANE_ATTENTION, ""),
+        layer(PANE_COMPLETION, ""),
+        layer(PANE_WORK, ""),
+        layer(PANE_HOST_SESSION, session.encoded().to_owned()),
+        layer(PANE_MODEL, "1"),
+    ]
+}
+
+/// `1` when the event's session is the accepted host session; lifecycle events
+/// from any other session are a no-op.
+fn accepted(session: &HostSession) -> String {
+    eq(host_session(), session.encoded())
+}
+
+/// The layer writes for `WorkStarted`: an exact-add of the key's token to the
+/// ledger, so a duplicate start is a no-op. The first token opens the ledger
+/// with its leading comma; later tokens append after the trailing one.
+pub fn work_started(key: &WorkKey) -> Vec<Layer> {
+    let ledger = work();
+    let token = key.encoded();
+    let removed = format!("#{{s|,{token},|,|:{ledger}}}");
+    let absent = eq(removed, &ledger);
+    let append = format!("#{{?{ledger},{ledger},#,}}{token}#,");
+    let add = gate(
+        accepted(key.session()),
+        &gate(absent, &append, ledger.clone()),
+        ledger,
+    );
+    vec![layer(PANE_WORK, add)]
+}
+
+/// The layer writes for `WorkStopped`: an exact-remove of the key's token, so
+/// an unmatched or foreign-session stop is a no-op.
+///
+/// When the removal empties the ledger under a `stopped` root, the root enters
+/// `settling`: the pane stays on `working` through the host's automatic turn,
+/// whose own clean stop is what exposes `done`.
+pub fn work_stopped(key: &WorkKey) -> Vec<Layer> {
+    let ledger = work();
+    let session_matches = accepted(key.session());
+    let removed = format!("#{{s|,{key},|,|:{ledger}}}", key = key.encoded());
+    vec![
+        layer(PANE_WORK, gate(session_matches.clone(), &removed, ledger)),
+        layer(
+            PANE_ROOT,
+            gate(
+                all(&[session_matches, work_gone(), eq(root(), "stopped")]),
+                "settling",
+                root(),
+            ),
+        ),
+    ]
+}
+
+/// `1` when the ledger holds no tracked work: unset, empty, or the bare `,` a
+/// last removal leaves behind before its normalisation command runs.
+pub fn work_gone() -> String {
+    any(&[eq(work(), ""), eq(work(), "#,")])
+}
+
+/// The layer writes for `EndSession` of the accepted session: the silent clean
+/// stop, plus the ledger cleared - a host whose lifecycle ends has no work to
+/// keep tracking. An `EndSession` from any other session is a no-op.
+pub fn end_session(session: &HostSession) -> Vec<Layer> {
+    let matches = accepted(session);
+    vec![
+        layer(PANE_ROOT, gate(matches.clone(), "stopped", root())),
+        layer(
+            PANE_ATTENTION,
+            gate(
+                matches.clone(),
+                &gate(eq(attention(), "error"), "error", String::new()),
+                attention(),
+            ),
+        ),
+        layer(
+            PANE_COMPLETION,
+            gate(matches.clone(), "pending", completion()),
+        ),
+        layer(PANE_WORK, gate(matches, "", work())),
+    ]
 }
 
 /// The window's glyph: the icon of the highest-ranked state any of its panes
@@ -80,39 +327,122 @@ pub fn glyph() -> String {
     })
 }
 
+/// `then` when the pane's public status holds `state`, `otherwise` when it
+/// does not.
+fn if_holds(state: State, then: &str, otherwise: &str) -> String {
+    format!(
+        "#{{?#{{==:{},{}}},{then},{otherwise}}}",
+        status(),
+        state.name()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// The tests against a real server are what prove these formats right;
     /// these pin the properties a format silently breaks on.
+
     #[test]
-    fn a_report_checks_exactly_the_states_that_outrank_it() {
-        for state in State::ALL {
-            let format = report(state);
-            for other in State::ALL {
-                let checked = format.contains(&format!("#{{==:{},{}}}", status(), other.name()));
-                assert_eq!(
-                    checked,
-                    other.precedence() > state.precedence(),
-                    "report({state}) and {other}: {format}"
+    fn the_projection_orders_attention_then_activity_then_pending_done() {
+        let p = project();
+        let attention = p.find(&attention()).unwrap();
+        let activity = p.find("working").unwrap();
+        let done = p.rfind("done").unwrap();
+        assert!(attention < activity && activity < done, "{p}");
+    }
+
+    #[test]
+    fn a_work_start_is_session_gated_and_idempotent() {
+        let key = WorkKey::new("s", "w").unwrap();
+        let writes = work_started(&key);
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].option, PANE_WORK);
+        let format = &writes[0].format;
+        assert!(
+            format.contains(&eq(host_session(), key.session().encoded())),
+            "{format}"
+        );
+        // The token is added only when removing it is already a no-op.
+        assert!(
+            format.contains(&format!("#{{s|,{},|,|:", key.encoded())),
+            "{format}"
+        );
+    }
+
+    #[test]
+    fn a_work_stop_settles_only_a_stopped_root_and_an_empty_ledger() {
+        let key = WorkKey::new("s", "w").unwrap();
+        let writes = work_stopped(&key);
+        let settle = &writes[1];
+        assert_eq!(settle.option, PANE_ROOT);
+        for fragment in ["settling", &eq(root(), "stopped")] {
+            assert!(settle.format.contains(fragment), "{settle:?}");
+        }
+    }
+
+    #[test]
+    fn session_gated_writes_preserve_the_current_value_on_a_mismatch() {
+        let other = HostSession::new("other").unwrap();
+        for writes in [
+            work_stopped(&WorkKey::new("other", "w").unwrap()),
+            end_session(&other),
+        ] {
+            for write in writes {
+                assert!(
+                    write.format.ends_with(&format!("{}}}", opt(write.option))),
+                    "{}: {write:?}",
+                    write.option
                 );
             }
         }
     }
 
     #[test]
-    fn no_report_consults_whether_the_window_is_on_screen() {
-        for state in State::ALL {
-            let format = report(state);
+    fn migration_imports_every_legacy_scalar() {
+        let writes = migrate();
+        let root = &writes[0].format;
+        for (legacy, layer_value) in [
+            ("working", "working"),
+            ("done", "stopped"),
+            ("waiting", "stopped"),
+            ("error", "stopped"),
+        ] {
             assert!(
-                !format.contains("window_active"),
-                "report({state}): {format}"
+                root.contains(&eq(status(), legacy)),
+                "{legacy} -> {layer_value}: {root}"
             );
-            assert!(
-                !format.contains("session_attached"),
-                "report({state}): {format}"
-            );
+        }
+        assert_eq!(writes[3].option, PANE_MODEL);
+        assert_eq!(writes[3].format, "1");
+    }
+
+    #[test]
+    fn no_format_consults_whether_the_window_is_on_screen() {
+        let key = WorkKey::new("s", "w").unwrap();
+        let session = HostSession::new("s").unwrap();
+        let mut formats = vec![project()];
+        for writes in [
+            start(),
+            seen(),
+            reset(),
+            reset_session(&session),
+            work_started(&key),
+            work_stopped(&key),
+            end_session(&session),
+            migrate(),
+        ] {
+            formats.extend(writes.into_iter().map(|write| write.format));
+        }
+        formats.extend(
+            State::ALL
+                .iter()
+                .flat_map(|s| report(*s).into_iter().map(|write| write.format)),
+        );
+        for format in formats {
+            assert!(!format.contains("window_active"), "{format}");
+            assert!(!format.contains("session_attached"), "{format}");
         }
     }
 

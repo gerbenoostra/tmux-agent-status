@@ -158,7 +158,7 @@ bell the shipped drop-in produced per event. "Shipped" below is that scalar mapp
 | S4 | child finishes while the parent turn is still running | `SubagentStop` folded into the same `prompt_id`; no separate wake turn | one ✅+🔔 at the turn's `Stop` | same |
 | S5 | model cancels a background agent with `TaskStop` | `task_id` equals the `agent_id` of `SubagentStart`; no `SubagentStop` for the cancelled agent | ✅+🔔 at `Stop` | cancels that item |
 | S6 | user kills a running task from the host UI | the killed shell's owning agent re-ran under the same `agent_id` (`SubagentStart`+`SubagentStop`), then a wake turn ended in `Stop`; deleting a backgrounded session in the agents sidebar emitted only `SessionEnd` for that session | ✅+🔔 at the following `Stop` | same, but silent until the last item stops |
-| S7 | child's own tool events | `PreToolUse`/`PostToolUse`/`PostToolBatch` for the child's tools reach the pane's hooks carrying `agent_id` and `agent_type` | each maps to `set working`, refused while `done`/`waiting` stands | counted as child activity, not a state |
+| S7 | child's own tool events | `PreToolUse`/`PostToolUse`/`PostToolBatch` for the child's tools reach the pane's hooks carrying `agent_id` and `agent_type` | each maps to `set working` - refused under an open `waiting`, shown over a pending `done` | counted as child activity, not a state |
 | S8 | exit while a task runs | `/exit` offers "Exit and stop tasks" or "Move to background and exit"; the first fires `SessionEnd` (`prompt_input_exit`) and kills the work, the second fires `SessionEnd` plus `SessionStart(source: fork)` for a daemon session that emits no further events | `finish`, no bell | same |
 | S9 | `/compact` and `/clear` with work running | `/compact`: `PreCompact` → `SessionStart(source: compact)` on the **same** session id → `PostCompact`, work survives; `/clear`: `SessionEnd(reason: clear)` then `SessionStart(source: clear)` on a **new** id; `claude --resume` → `SessionStart(source: resume)` on the same id | `compact` is unmatched so no `reset`; `clear`/`resume` reset | same |
 | S10 | aborted turn | Esc during a turn emits a plain `Stop`; an API failure emits `StopFailure` (`server_error`) after retries, and no `Stop` | ❗+🔔 on `StopFailure` | error outranks running work |
@@ -205,7 +205,8 @@ These apply to every agent page:
 
 - **The tool rings the bell itself.** The `set` commands for end states (`done`,
   `waiting`, `error`) print a terminal bell, so do not add a separate `printf '\a'`
-  hook for the same event. Agents that parse stdout still use `--json` so the
+  hook for the same event. A `done` stays silent while the pane still tracks
+  background work. Agents that parse stdout still use `--json` so the
   parser sees valid JSON.
 - **A prompt event starts a turn.** The event that means the human typed maps to
   `tmux-agent-status start`, not `set working`. It is the one write that replaces

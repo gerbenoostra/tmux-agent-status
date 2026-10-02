@@ -9,10 +9,10 @@
 008-messagedisplay	MessageDisplay	-	working	🤖	0
 009-stop	Stop	tmux-agent-status set done	done	✅	1
 010-pretooluse	PreToolUse	-	done	✅	0
-011-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
-012-posttoolbatch	PostToolBatch	-	done	✅	0
-013-subagentstop	SubagentStop	-	done	✅	0
-014-subagentstop	SubagentStop	-	done	✅	0
+011-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+012-posttoolbatch	PostToolBatch	-	working	🤖	0
+013-subagentstop	SubagentStop	-	working	🤖	0
+014-subagentstop	SubagentStop	-	working	🤖	0
 015-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 016-stop	Stop	tmux-agent-status set done	done	✅	1
 017-messagedisplay	MessageDisplay	-	done	✅	0

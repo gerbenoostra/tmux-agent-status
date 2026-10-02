@@ -92,31 +92,43 @@ subject of a bug. Read this section before changing behaviour.
   **text of the user's config file** is allowed - it is what
   `register --tmux-format` does, the same edit `docs/register.md` asks the user
   to make by hand.
-- **`@agent_pane_status` (per pane) and `@agent_status` (per window rollup)
-  are two names on purpose.** tmux option inheritance makes a pane with no
-  status read back as the window's value, so a rollup stored in the same option
-  name it reduces can no longer tell "unset" from "inherited". They can never
-  be merged into one.
+- **The pane state is a layered model, not a scalar.** Six internal pane-local
+  options hold it: `@agent_pane_root` (the turn's phase - `working`,
+  `stopped`, or `settling` when the last tracked item just stopped),
+  `@agent_pane_attention` (`waiting`/`error` until acknowledged),
+  `@agent_pane_completion` (`pending` after a clean stop nobody has seen),
+  `@agent_pane_work` (the `,token,...,` ledger of tracked work),
+  `@agent_pane_host_session` (the accepted lifecycle session) and
+  `@agent_pane_model` (the layout marker). `@agent_pane_status` (per pane) and
+  `@agent_status` (per window rollup) are the only public projections, and
+  they are two names on purpose: tmux option inheritance makes a pane with no
+  status read back as the window's value, so a rollup stored in the same
+  option name it reduces can no longer tell "unset" from "inherited". They
+  can never be merged into one.
 - **State decisions happen inside the tmux server, in one command.** Agents
   run hooks concurrently, so a value read in one tmux call can be stale by the
   time a later call writes it. `set-option -F` expands its format against the
   target before setting it, and the server runs one command at a time, so a
   format that reads the pane's own option and picks the new value is a
-  compare-and-set. Never implement this as a Rust-side read-then-write, and
-  never add a lock or state file.
+  compare-and-set. Every transition is one invocation: the layer writes, the
+  projection onto `@agent_pane_status`, the window recompute. Never implement
+  this as a Rust-side read-then-write, and never add a lock or state file.
+  The one answer a command takes back is the `set done` verdict appended to
+  its queue, which reports whether tracked work remains so the bell rings
+  only on the final clean stop.
 - **An empty value is normalised to unset atomically.** A `-F` write can only
   produce a value, so a clear produces `""`. Each touched option then gets an
   `if-shell -F '#{?OPTION,,1}' 'set-option -u ...'`, which only ever removes an
   empty value and decides on the value current at that instant. An
   unconditional unset could erase a concurrent write that landed in between.
 - **Two orderings on the same states, each named for its question.** Within a
-  pane, a later state replaces an earlier one only if it does not rank lower in
-  precedence: `error` > `done` > `waiting` > `working`. A `waiting` after a
-  finished turn must not demote a `done` nobody has seen. Across panes the
-  rollup rank is `waiting` > `error` > `done` > `working`, answering which pane
-  wants you most. `start` is the only write that does not defer to what the
-  pane holds - typing a prompt is seeing the pane, so that event clears what
-  the last turn left.
+  pane the precedence is layered rather than a rank: unacknowledged
+  `waiting`/`error` first, then activity - a `working` or `settling` root, or
+  any entry in the work ledger - then a pending `done` nobody has seen. Across
+  panes the rollup rank is `waiting` > `error` > `done` > `working`, answering
+  which pane wants you most. `start` is the only write that does not defer to
+  what the pane holds - typing a prompt is seeing the pane, so that event
+  clears what the last turn left; tracked work survives it.
 - **Acknowledgement is a focus event on one pane, never an inference.** A
   state is always written and always shown, whatever tmux thinks about the
   window being current or the session being attached - there is no

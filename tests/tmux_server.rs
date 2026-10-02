@@ -41,7 +41,21 @@ impl Server {
 
     /// Put a value in a pane's status behind the tool's back, so a test can
     /// arrange what a pane already holds without going through the policy.
+    ///
+    /// The internal layer options are cleared along with it, leaving the pane
+    /// as an older version left it: a plain scalar `@agent_pane_status` that
+    /// the next transition lazily imports.
     fn put_status(&self, pane: &str, value: &str) {
+        for option in [
+            "@agent_pane_root",
+            "@agent_pane_attention",
+            "@agent_pane_completion",
+            "@agent_pane_work",
+            "@agent_pane_host_session",
+            "@agent_pane_model",
+        ] {
+            self.tmux(&["set-option", "-p", "-u", "-t", pane, option]);
+        }
         match value {
             "" => self.tmux(&["set-option", "-p", "-u", "-t", pane, "@agent_pane_status"]),
             value => self.tmux(&["set-option", "-p", "-t", pane, "@agent_pane_status", value]),
@@ -942,10 +956,13 @@ fn an_unknown_state_is_loud() {
 }
 
 #[test]
-fn a_state_is_refused_if_it_ranks_lower_than_the_one_the_pane_holds() {
-    // The pane precedence: within a pane `error` > `done` > `waiting` >
-    // `working`, and a value this tool does not recognise is replaced by any of
-    // them. The glyph follows the pane, since it is the only pane here.
+fn a_reported_state_lands_according_to_the_layered_precedence() {
+    // Attention (`waiting`, `error`) is unacknowledged user-visible state and
+    // outranks both activity and a pending clean outcome; activity (`working`,
+    // tracked work, settling) outranks a `done` nobody has seen, so a straggler
+    // `working` from tracked work cannot be hidden by a premature ✅. A value
+    // this tool does not recognise is replaced by any of them. The glyph
+    // follows the pane, since it is the only pane here.
     let server = Server::start();
     let pane = server.first_pane();
 
@@ -962,8 +979,8 @@ fn a_state_is_refused_if_it_ranks_lower_than_the_one_the_pane_holds() {
         ("waiting", "waiting", "waiting"),
         ("waiting", "done", "done"),
         ("waiting", "error", "error"),
-        ("done", "working", "done"),
-        ("done", "waiting", "done"),
+        ("done", "working", "working"),
+        ("done", "waiting", "waiting"),
         ("done", "done", "done"),
         ("done", "error", "error"),
         ("error", "working", "error"),
@@ -1040,14 +1057,14 @@ fn the_window_shows_the_highest_ranked_state_of_its_panes() {
 
 #[test]
 fn a_refused_state_still_rings() {
-    // The glyph cannot say "blocked on you" while the pane holds a `done`
-    // nobody has looked at, so the bell is the only channel that can. It rings
-    // before tmux is touched at all.
+    // An unacknowledged `error` keeps standing over a `waiting`, so the glyph
+    // cannot say "blocked on you" - the bell is the only channel that can. It
+    // rings before tmux is touched at all.
     let server = Server::start();
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "other"]);
     let agent = server.first_pane();
-    assert_ok(&server.agent_status(&agent, &["set", "done"]));
+    assert_ok(&server.agent_status(&agent, &["set", "error"]));
 
     // From another window, so the bell would land somewhere this can read, and
     // saying so through tmux is how the test knows the command ran at all.
@@ -1062,8 +1079,8 @@ fn a_refused_state_still_rings() {
         |ran| ran.trim() == "1",
     );
 
-    assert_eq!(server.pane_statuses(&agent), ["done"]);
-    assert_eq!(server.window_status(&agent), "✅");
+    assert_eq!(server.pane_statuses(&agent), ["error"]);
+    assert_eq!(server.window_status(&agent), "❗");
     let flag = server.tmux(&[
         "display-message",
         "-p",

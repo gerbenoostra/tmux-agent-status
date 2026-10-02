@@ -113,6 +113,9 @@ fn boundary_commands_are_silent_when_reading_the_window_fails() {
         ["reset"].as_slice(),
         ["finish"].as_slice(),
         ["clear-pane"].as_slice(),
+        // `set done` rings its bell even here: a failed resolution cannot say
+        // whether tracked work remains, so it errs on the side of the bell.
+        ["set", "done"].as_slice(),
     ] {
         let out = run(args, &format!("{}:", dir.display()));
         assert_ok_and_silent(&out);
@@ -214,7 +217,13 @@ exit 1
 "#
         ),
     );
-    for args in [["clear-pane", TMUX_PANE].as_slice(), ["reset"].as_slice()] {
+    for args in [
+        ["clear-pane", TMUX_PANE].as_slice(),
+        ["reset"].as_slice(),
+        // `set done` cannot learn whether tracked work remains when the queue
+        // fails, so it rings anyway - after the failed write, silently.
+        ["set", "done"].as_slice(),
+    ] {
         let out = run(args, &format!("{}:", dir.display()));
         assert_ok_and_silent(&out);
     }
