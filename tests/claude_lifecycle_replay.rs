@@ -24,6 +24,14 @@ use support::tmux::{Server, wait_for};
 const FIXTURES: &str = "tests/fixtures/claude-code/lifecycle";
 const DROP_IN: &str = "share/agents/claude-code/hooks.json";
 
+/// The pane's shell. Without `--noprofile --norc` it would source the
+/// developer's startup files, which can put an installed `tmux-agent-status`
+/// ahead of the build under test on `PATH`; without `HISTFILE=/dev/null` the
+/// SIGHUP from `kill-server` makes it save every replayed command into the
+/// developer's `~/.bash_history`. `PATH` itself comes from the server, which
+/// `support::tmux` starts with the binary under test in front.
+const SHELL: &str = "env HISTFILE=/dev/null bash --noprofile --norc";
+
 impl Server {
     /// Run a hook command the way the host would: inside the pane, so $TMUX
     /// and $TMUX_PANE are set and the bell lands on the pane's tty.
@@ -168,7 +176,7 @@ fn fixture_records(dir: &Path) -> Vec<(String, serde_json::Value)> {
 
 /// Replay one scenario directory and return its `NNN\tevent\tcommand\tpane\twindow\tbell` rows.
 fn replay(dir: &Path, hooks: &serde_json::Value) -> Vec<String> {
-    let server = Server::start_running("bash");
+    let server = Server::start_running(SHELL);
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "any"]);
     // A second window so selecting away and back clears the bell flag between
@@ -183,13 +191,6 @@ fn replay(dir: &Path, hooks: &serde_json::Value) -> Vec<String> {
         .trim_end()
         .to_owned();
 
-    // The pane's environment comes from the tmux server, not from this test -
-    // an installed `tmux-agent-status` could otherwise shadow the build under
-    // test. Pin the just-built binary in front of the pane shell's PATH once;
-    // the hook commands themselves stay exactly as shipped.
-    let bin_dir = Path::new(support::BIN)
-        .parent()
-        .expect("the test binary has a directory");
     // Keys sent before the pane's shell is ready can be dropped, so handshake
     // first: resend until the pane echoes back.
     wait_for(
@@ -200,11 +201,6 @@ fn replay(dir: &Path, hooks: &serde_json::Value) -> Vec<String> {
             server.tmux(&["capture-pane", "-t", &pane, "-p"])
         },
         |screen| screen.lines().any(|line| line.trim() == "__tas_ready__"),
-    );
-    server.run_hook(
-        &pane,
-        &format!("export PATH={}:$PATH", bin_dir.display()),
-        999999,
     );
 
     let mut rows = Vec::new();
