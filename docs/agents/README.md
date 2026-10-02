@@ -65,7 +65,7 @@ upstream documentation or issue that says the event does not exist.
 
 | Agent | Shape | Drop-in file | Needs enabling | Subagent events | Multi-session per pane | `error` event | `waiting` repeats | Stdout parsed | Payload on stdin | `TMUX_PANE` inherited | Session start | Session end | Verified |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| [Claude Code](claude-code.md) | A (plugin) | yes, via plugin | no | `SubagentStart`/`SubagentStop`/`TaskStop` | yes | `StopFailure` | `Notification` | lenient | yes | yes | yes | yes | yes | plugin API |
+| [Claude Code](claude-code.md) | A (plugin) | yes, via plugin | no | `SubagentStart`/`SubagentStop`/`TaskStop` | yes | `StopFailure` | `Notification` | lenient | yes | yes | yes | yes | plugin API |
 | [Codex CLI](codex.md) | A | yes | hook trust (first run) | `SubagentStart`/`SubagentStop` | unknown | inferred | `PermissionRequest` | yes | yes | unknown | yes | yes | 2026-09-10 |
 | [GitHub Copilot CLI](copilot.md) | A | yes | folder trust (repo scope) | yes | unknown | `errorOccurred` | `notification` | yes | unknown | unknown | yes | yes | 2026-09-10 |
 | [Droid](droid.md) | A | yes | no | `SubagentStop` only | unknown | inferred | `Notification` | yes | yes | unknown | yes | yes | 2026-09-10 |
@@ -162,7 +162,7 @@ bell the shipped drop-in produced per event. "Shipped" below is that scalar mapp
 | S8 | exit while a task runs | `/exit` offers "Exit and stop tasks" or "Move to background and exit"; the first fires `SessionEnd` (`prompt_input_exit`) and kills the work, the second fires `SessionEnd` plus `SessionStart(source: fork)` for a daemon session that emits no further events | `finish`, no bell | same |
 | S9 | `/compact` and `/clear` with work running | `/compact`: `PreCompact` → `SessionStart(source: compact)` on the **same** session id → `PostCompact`, work survives; `/clear`: `SessionEnd(reason: clear)` then `SessionStart(source: clear)` on a **new** id; `claude --resume` → `SessionStart(source: resume)` on the same id | `compact` is unmatched so no `reset`; `clear`/`resume` reset | same |
 | S10 | aborted turn | Esc during a turn emits a plain `Stop`; an API failure emits `StopFailure` (`server_error`) after retries, and no `Stop` | ❗+🔔 on `StopFailure` | error outranks running work |
-| S11 | question open while a child finishes | `AskUserQuestion` + `PermissionRequest` + `Notification(permission_prompt)`; the child's `SubagentStop` arrived mid-prompt and its wake folded into the same `prompt_id` | 💬+🔔 held through the child's completion, ✅+🔔 at `Stop` | same |
+| S11 | question open while a child finishes | `AskUserQuestion` + `PermissionRequest` + `Notification(permission_prompt)`; the child's `SubagentStop` arrived mid-prompt; after the answer, its wake `UserPromptSubmit` reused the same `prompt_id` | 💬+🔔 held through the child's completion, 🤖 at the wake, ✅+🔔 at `Stop` | same |
 | S12 | start/stop ordering with a 3s `SubagentStart` hook | a no-op child's `SubagentStop` still ran after the start hook exited; a background agent cancelled with `TaskStop` within the sleep produced **no** `SubagentStart` or `SubagentStop` at all - a stop signal for a never-started item | n/a | stops for unknown IDs are no-ops |
 
 Notable payload facts for adapters:
