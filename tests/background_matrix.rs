@@ -71,6 +71,7 @@ fn every_registered_agent_has_a_matrix_row() {
         );
     }
 }
+
 /// The commands a scalar drop-in runs, collected from its embedded template
 /// and any `share/agents/<name>/` file, which are what `register` writes.
 fn shipped_commands(name: &str) -> Vec<String> {
