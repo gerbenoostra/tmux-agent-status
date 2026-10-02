@@ -1,0 +1,11 @@
+# file	event	command	pane	window	bell
+001-sessionstart	SessionStart	tmux-agent-status reset			0
+002-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
+003-pretooluse	PreToolUse	-	working	🤖	0
+004-permissionrequest	PermissionRequest	-	working	🤖	0
+005-notification	Notification	tmux-agent-status set waiting	waiting	💬	1
+006-posttooluse	PostToolUse	tmux-agent-status set working	waiting	💬	0
+007-posttoolbatch	PostToolBatch	-	waiting	💬	0
+008-stop	Stop	tmux-agent-status set done	done	✅	1
+009-messagedisplay	MessageDisplay	-	done	✅	0
+010-subagentstop	SubagentStop	-	done	✅	0

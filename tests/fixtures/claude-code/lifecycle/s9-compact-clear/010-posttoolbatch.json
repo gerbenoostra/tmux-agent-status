@@ -1,0 +1,1 @@
+{"event":"PostToolBatch","ts_enter":1790889109365,"ts_exit":1790889109374,"payload":{"session_id":"b0736154-d239-4faa-a99c-82819d0fd905","prompt_id":"41a051c0-eb14-434e-b496-e2f33873f764","permission_mode":"default","agent_id":"a3dc1792ca4d96cf5","agent_type":"claude","hook_event_name":"PostToolBatch"}}

@@ -1,0 +1,1 @@
+{"event":"PostToolUse","ts_enter":1790888438223,"ts_exit":1790888438229,"payload":{"session_id":"dea56df7-5e1e-421d-a426-e56cb4c3f8b7","prompt_id":"ae2426fc-bf49-4b2c-9dc3-1e6593fb9605","permission_mode":"auto","agent_id":"a28d47a50fc57b619","agent_type":"general-purpose","hook_event_name":"PostToolUse","tool_name":"Monitor","tool_use_id":"toolu_01Q7CBRYXXrUBddES4ssj4kh"}}

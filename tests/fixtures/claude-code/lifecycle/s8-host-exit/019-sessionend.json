@@ -1,0 +1,1 @@
+{"event":"SessionEnd","ts_enter":1790888810745,"ts_exit":1790888810752,"payload":{"session_id":"b28989c1-57ef-4c09-9579-c70da2b1ef59","prompt_id":"494b1d7f-3ba4-472b-8a85-a2eafa5d45c1","hook_event_name":"SessionEnd","reason":"prompt_input_exit"}}

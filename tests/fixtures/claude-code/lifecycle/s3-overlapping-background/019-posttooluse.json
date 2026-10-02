@@ -1,0 +1,1 @@
+{"event":"PostToolUse","ts_enter":1790887702554,"ts_exit":1790887702562,"payload":{"session_id":"3c83a990-59d4-4f65-a1cd-19c01cf16108","prompt_id":"e50f901a-eb4e-403a-bd5b-b04544a10fbc","permission_mode":"default","agent_id":"a89cfb16f7f3bacf7","agent_type":"general-purpose","hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"toolu_01Y2gK4imFujumAqVZjAhteg"}}

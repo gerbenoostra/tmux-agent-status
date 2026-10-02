@@ -1,0 +1,1 @@
+{"event":"SubagentStop","ts_enter":1790887655329,"ts_exit":1790887655336,"payload":{"session_id":"70de0e7e-51fc-497a-ab57-a787f14650f3","prompt_id":"feb4339e-641a-4202-9ce7-827ea5932a93","permission_mode":"default","agent_id":"a5421cb51bfffc792","agent_type":"","hook_event_name":"SubagentStop","stop_hook_active":false}}

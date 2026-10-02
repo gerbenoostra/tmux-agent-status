@@ -1,0 +1,1 @@
+{"event":"PreToolUse","ts_enter":1790888786561,"ts_exit":1790888786569,"payload":{"session_id":"b28989c1-57ef-4c09-9579-c70da2b1ef59","prompt_id":"69477e3d-e385-4d3a-b644-6cb2f4709cb4","permission_mode":"default","agent_id":"a312b3c10824bd86f","agent_type":"general-purpose","hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01HSzs9vimxxyvS5gHo6gMGP"}}

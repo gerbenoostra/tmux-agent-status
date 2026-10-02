@@ -1,0 +1,1 @@
+{"event":"PreToolUse","ts_enter":1790888781621,"ts_exit":1790888781630,"payload":{"session_id":"b28989c1-57ef-4c09-9579-c70da2b1ef59","prompt_id":"69477e3d-e385-4d3a-b644-6cb2f4709cb4","permission_mode":"default","hook_event_name":"PreToolUse","tool_name":"Agent","tool_use_id":"toolu_0134LDXmgc59J6DDQpWXhRKE"}}
