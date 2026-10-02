@@ -54,10 +54,18 @@ impl Server {
         );
     }
 
-    fn bell_flag(&self, target: &str) -> String {
-        self.tmux(&["display-message", "-p", "-t", target, "#{window_bell_flag}"])
-            .trim_end()
-            .to_owned()
+    /// The pane's state, its window's rollup and the window's bell flag, as
+    /// `pane\twindow\tbell`, read in one round trip.
+    fn observed(&self, pane: &str) -> String {
+        self.tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            pane,
+            "#{@agent_pane_status}\t#{@agent_status}\t#{window_bell_flag}",
+        ])
+        .trim_end()
+        .to_owned()
     }
 }
 
@@ -255,18 +263,13 @@ fn replay(scenario: &Scenario, hooks: &serde_json::Value) -> Vec<String> {
             }
             commands.join(" && ")
         };
-        let bell = server.bell_flag(&window);
-        // Selecting the window marks it viewed and clears the flag.
+        let observed = server.observed(&pane);
+        // Selecting the window marks it viewed and clears the bell flag.
         server.tmux(&["select-window", "-t", "t:dummy"]);
         server.tmux(&["select-window", "-t", &format!("t:{window}")]);
         rows.push(format!(
-            "{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{event}\t{command}\t{observed}",
             path.file_stem().unwrap().to_string_lossy(),
-            event,
-            command,
-            server.pane_status(&pane),
-            server.window_status(&window),
-            bell
         ));
     }
     rows
@@ -284,8 +287,25 @@ fn claude_lifecycle_fixtures_replay_through_the_shipped_drop_in() {
         serde_json::from_str(&fs::read_to_string(root.join(DROP_IN)).unwrap()).unwrap();
     let write = std::env::var_os("TAS_REPLAY_WRITE").is_some();
 
-    for scenario in lifecycle::scenarios() {
-        let rows = replay(&scenario, &hooks);
+    // Each scenario has its own server, so they replay concurrently; a
+    // failing scenario's panic names its thread.
+    let scenarios = lifecycle::scenarios();
+    let replays: Vec<Vec<String>> = std::thread::scope(|scope| {
+        let replays: Vec<_> = scenarios
+            .iter()
+            .map(|scenario| {
+                std::thread::Builder::new()
+                    .name(scenario.name())
+                    .spawn_scoped(scope, || replay(scenario, &hooks))
+                    .expect("a replay thread starts")
+            })
+            .collect();
+        replays
+            .into_iter()
+            .map(|replay| replay.join().expect("the scenario replays"))
+            .collect()
+    });
+    for (scenario, rows) in scenarios.iter().zip(replays) {
         let expected_path = scenario.expected_path();
         if write {
             let mut text = String::from(HEADER);
