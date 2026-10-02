@@ -13,41 +13,64 @@ use std::path::PathBuf;
 
 use tmux_agent_status::register::agents;
 
+mod support;
+
+/// The tiers a matrix row's last cell may name.
+const TIERS: &[&str] = &["scalar", "tracked aggregate"];
+
 fn readme() -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/agents/README.md");
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
-/// The lines of the Background work matrix's host rows.
-fn matrix_rows(readme: &str) -> Vec<&str> {
-    let section = readme
-        .split("## Background work")
-        .nth(1)
-        .expect("docs/agents/README.md has no '## Background work' section");
-    section
-        .lines()
-        .take_while(|line| !line.starts_with("## "))
-        .filter(|line| line.starts_with("| ["))
-        .collect()
+/// One host row of the Background work matrix.
+struct Row {
+    /// The registered agent name, recovered from the `[..](<name>.md)` link.
+    name: String,
+    shipped_tier: String,
 }
 
-#[test]
-fn every_registered_agent_has_a_matrix_row() {
-    let readme = readme();
-    let rows = matrix_rows(&readme);
+/// The host rows of the Background work matrix, every one checked to link a
+/// registered agent and name a known shipped tier.
+fn matrix_rows() -> Vec<Row> {
+    let rows: Vec<Row> = support::markdown::table_after(&readme(), "## Background work")
+        .into_iter()
+        .filter(|cells| cells[0].starts_with('['))
+        .map(|cells| {
+            let name = cells[0]
+                .rsplit_once("](")
+                .and_then(|(_, link)| link.strip_suffix(".md)"))
+                .unwrap_or_else(|| panic!("matrix row `{}` does not link a host page", cells[0]))
+                .to_owned();
+            assert!(
+                agents::by_name(&name).is_some(),
+                "matrix row `{name}` does not name a registered agent"
+            );
+            let shipped_tier = cells.last().expect("a row has cells").clone();
+            assert!(
+                TIERS.contains(&shipped_tier.as_str()),
+                "matrix row `{name}` ships unknown tier `{shipped_tier}`; expected one of {TIERS:?}"
+            );
+            Row { name, shipped_tier }
+        })
+        .collect();
     assert!(
         !rows.is_empty(),
         "the Background work matrix has no host rows"
     );
+    rows
+}
+
+#[test]
+fn every_registered_agent_has_a_matrix_row() {
+    let rows = matrix_rows();
     for name in agents::names() {
-        let link = format!("]({name}.md)");
         assert!(
-            rows.iter().any(|row| row.contains(&link)),
+            rows.iter().any(|row| row.name == name),
             "registered agent `{name}` has no row in the Background work matrix"
         );
     }
 }
-
 /// The commands a scalar drop-in runs, collected from its embedded template
 /// and any `share/agents/<name>/` file, which are what `register` writes.
 fn shipped_commands(name: &str) -> Vec<String> {
@@ -88,29 +111,17 @@ fn shipped_commands(name: &str) -> Vec<String> {
 
 #[test]
 fn a_scalar_host_never_feeds_stdin_to_lifecycle_commands() {
-    let readme = readme();
-    for row in matrix_rows(&readme) {
-        let cells: Vec<&str> = row
-            .trim_end_matches('|')
-            .split('|')
-            .map(str::trim)
-            .collect();
-        let shipped_tier = cells.last().copied().unwrap_or("");
+    for Row { name, shipped_tier } in matrix_rows() {
         if shipped_tier != "scalar" {
             continue;
         }
-        // The row links to docs/agents/<name>.md; recover the registered name.
-        let name = cells[1]
-            .rsplit('(')
-            .next()
-            .and_then(|s| s.strip_suffix(')'))
-            .and_then(|s| s.strip_suffix(".md"))
-            .unwrap_or("");
+        let commands = shipped_commands(&name);
+        // An extraction that finds nothing would pass every check below.
         assert!(
-            agents::by_name(name).is_some(),
-            "matrix row `{name}` does not name a registered agent"
+            !commands.is_empty(),
+            "found no `tmux-agent-status` command in `{name}`'s drop-in"
         );
-        for command in shipped_commands(name) {
+        for command in commands {
             let mut args = command
                 .trim_start_matches("tmux-agent-status")
                 .split_whitespace();
