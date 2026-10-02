@@ -15,73 +15,16 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 mod support;
+
+use support::tmux::{Server, wait_for};
 
 const FIXTURES: &str = "tests/fixtures/claude-code/lifecycle";
 const DROP_IN: &str = "share/agents/claude-code/hooks.json";
 
-/// A throwaway tmux server with one window running bash.
-struct Server {
-    socket: String,
-    path: String,
-}
-
 impl Server {
-    fn start() -> Server {
-        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let socket = format!(
-            "tmux-agent-status-replay-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        );
-        let mut server = Server {
-            socket,
-            path: String::new(),
-        };
-        server.tmux(&[
-            "-f",
-            "/dev/null",
-            "new-session",
-            "-d",
-            "-s",
-            "t",
-            "-x",
-            "120",
-            "-y",
-            "30",
-            "bash",
-        ]);
-        server.path = server.socket_path();
-        server
-    }
-
-    fn tmux(&self, args: &[&str]) -> String {
-        let out = Command::new("tmux")
-            .arg("-u")
-            .arg("-L")
-            .arg(&self.socket)
-            .args(args)
-            .env("PATH", bin_dir_first_on_path())
-            .stdin(Stdio::null())
-            .output()
-            .expect("tmux is on PATH");
-        assert!(
-            out.status.success(),
-            "tmux {args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        String::from_utf8(out.stdout).expect("tmux printed valid utf-8")
-    }
-
-    fn socket_path(&self) -> String {
-        self.tmux(&["display-message", "-p", "#{socket_path}"])
-            .trim_end()
-            .to_owned()
-    }
-
     /// Run a hook command the way the host would: inside the pane, so $TMUX
     /// and $TMUX_PANE are set and the bell lands on the pane's tty.
     fn run_hook(&self, pane: &str, command: &str, seq: usize) {
@@ -103,56 +46,10 @@ impl Server {
         );
     }
 
-    fn pane_status(&self, pane: &str) -> String {
-        self.tmux(&["display-message", "-p", "-t", pane, "#{@agent_pane_status}"])
-            .trim_end()
-            .to_owned()
-    }
-
-    fn window_status(&self, target: &str) -> String {
-        self.tmux(&["display-message", "-p", "-t", target, "#{@agent_status}"])
-            .trim_end()
-            .to_owned()
-    }
-
     fn bell_flag(&self, target: &str) -> String {
         self.tmux(&["display-message", "-p", "-t", target, "#{window_bell_flag}"])
             .trim_end()
             .to_owned()
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = Command::new("tmux")
-            .arg("-L")
-            .arg(&self.socket)
-            .args(["kill-server"])
-            .output();
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-fn bin_dir_first_on_path() -> String {
-    let dir = Path::new(support::BIN)
-        .parent()
-        .expect("the test binary has a directory");
-    let inherited = std::env::var("PATH").unwrap_or_default();
-    format!("{}:{inherited}", dir.display())
-}
-
-fn wait_for<T>(probe: impl Fn() -> T, done: impl Fn(&T) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let value = probe();
-        if done(&value) {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for a condition"
-        );
-        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -271,7 +168,7 @@ fn fixture_records(dir: &Path) -> Vec<(String, serde_json::Value)> {
 
 /// Replay one scenario directory and return its `NNN\tevent\tcommand\tpane\twindow\tbell` rows.
 fn replay(dir: &Path, hooks: &serde_json::Value) -> Vec<String> {
-    let server = Server::start();
+    let server = Server::start_running("bash");
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "any"]);
     // A second window so selecting away and back clears the bell flag between
