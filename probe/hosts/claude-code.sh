@@ -28,7 +28,7 @@ probe_install_hooks() {
         PostToolUseFailure PostToolBatch Notification MessageDisplay
         SubagentStart SubagentStop TaskCreated TaskCompleted Stop StopFailure
         TeammateIdle InstructionsLoaded ConfigChange CwdChanged
-        DirectoryAdded WorktreeCreate WorktreeRemove PreCompact PostCompact
+        DirectoryAdded FileChanged WorktreeCreate WorktreeRemove PreCompact PostCompact
         PreModelSwitch PostModelSwitch Elicitation ElicitationResult
         SessionEnd"
 
@@ -41,12 +41,15 @@ probe_install_hooks() {
         if [ "$delay" != "0" ]; then
             command="TAS_HOOK_SLEEP=$delay $command"
         fi
-        # FileChanged's matcher selects the filenames to watch; the others
-        # match everything.
+        # FileChanged's matcher is a `|`-list of literal basenames to watch,
+        # not a pattern, and the file must exist at session start; the
+        # workspace's `probe_file_changed` is created below - modify it to
+        # fire the event (on 2.1.287 the watcher arms roughly ten seconds
+        # after session start). The others match everything.
         case "$event" in
             FileChanged)
                 hooks=$(jq --arg e "$event" --arg c "$command" \
-                    '. + {($e): [{matcher: ".*", hooks: [{type: "command", command: $c}]}]}' \
+                    '. + {($e): [{matcher: "probe_file_changed", hooks: [{type: "command", command: $c}]}]}' \
                     <<<"$hooks")
                 ;;
             # The worktree events are not passive - a configured hook
@@ -66,6 +69,7 @@ probe_install_hooks() {
         esac
     done
     jq -n --argjson hooks "$hooks" '{hooks: $hooks}' >"$cfg/settings.json"
+    : >"$ws/probe_file_changed"
 
     # Credentials: on Linux Claude keeps OAuth material in
     # ~/.claude/.credentials.json; on macOS in the login keychain. An
