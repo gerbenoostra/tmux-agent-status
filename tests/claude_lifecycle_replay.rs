@@ -61,21 +61,35 @@ impl Server {
     }
 }
 
-/// The value a hook entry's `matcher` tests, per event.
-///
-/// Claude Code matches tool events on `tool_name`, `SessionStart` on `source`
-/// and `Notification` on `notification_type`; events without a listed subject
-/// here take no matcher in the shipped file, so None only matters if one is
-/// added later and the fixture replay should flag it rather than guess.
-fn match_subject<'a>(event: &str, payload: &'a serde_json::Value) -> Option<&'a str> {
-    let field = match event {
-        "PreToolUse" | "PostToolUse" | "PostToolUseFailure" | "PermissionRequest" => "tool_name",
-        "SessionStart" => "source",
-        "Notification" => "notification_type",
-        "SubagentStart" | "SubagentStop" => "agent_type",
-        _ => return None,
-    };
-    payload.get(field)?.as_str()
+/// What a hook entry's `matcher` is tested against for one event, per
+/// Claude Code's hooks reference (https://code.claude.com/docs/en/hooks).
+enum MatchSubject {
+    /// The event has no matcher support: Claude ignores the field and always
+    /// runs the entry.
+    Ignored,
+    /// The payload field whose value the matcher tests.
+    Field(&'static str),
+}
+
+/// Events the reference lists with a matcher subject this replay does not
+/// model fail the test rather than being guessed at.
+fn match_subject(event: &str) -> MatchSubject {
+    match event {
+        "PreToolUse" | "PostToolUse" | "PostToolUseFailure" | "PermissionRequest"
+        | "PermissionDenied" => MatchSubject::Field("tool_name"),
+        "SessionStart" | "ConfigChange" => MatchSubject::Field("source"),
+        "SessionEnd" => MatchSubject::Field("reason"),
+        "Notification" => MatchSubject::Field("notification_type"),
+        "SubagentStart" | "SubagentStop" => MatchSubject::Field("agent_type"),
+        "PreCompact" | "PostCompact" => MatchSubject::Field("trigger"),
+        // The reference calls the value `error_type`; the captured payloads
+        // carry it as `error`.
+        "StopFailure" => MatchSubject::Field("error"),
+        "UserPromptSubmit" | "PostToolBatch" | "Stop" | "TeammateIdle" | "TaskCreated"
+        | "TaskCompleted" | "WorktreeCreate" | "WorktreeRemove" | "MessageDisplay"
+        | "CwdChanged" => MatchSubject::Ignored,
+        other => panic!("replay does not know how Claude matches {other}"),
+    }
 }
 
 /// Claude's documented matcher rule (https://code.claude.com/docs/en/hooks):
@@ -101,7 +115,10 @@ fn matcher_applies(event: &str, matcher: &str, subject: &str) -> bool {
         exact,
         "replay cannot evaluate regex matcher `{matcher}` on {event}"
     );
-    matcher.split(separators).any(|name| name.trim() == subject)
+    matcher
+        .split(separators)
+        .map(str::trim)
+        .any(|name| !name.is_empty() && name == subject)
 }
 
 #[test]
@@ -132,6 +149,41 @@ fn stop_failure_comma_list_is_a_regex() {
     matcher_applies("StopFailure", "server_error, rate_limit", "rate_limit");
 }
 
+fn drop_in_with(event: &str, matcher: &str) -> serde_json::Value {
+    serde_json::json!({ "hooks": { event: [{
+        "matcher": matcher,
+        "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }]
+    }] } })
+}
+
+fn record(event: &str, payload: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "event": event, "payload": payload })
+}
+
+#[test]
+fn a_matcher_on_an_event_without_matcher_support_is_ignored() {
+    let hooks = drop_in_with("Stop", "anything");
+    assert_eq!(
+        commands_for(&record("Stop", serde_json::json!({})), &hooks).len(),
+        1
+    );
+}
+
+#[test]
+fn stop_failure_matches_on_the_error_code() {
+    let hooks = drop_in_with("StopFailure", "rate_limit");
+    let failure = |error| record("StopFailure", serde_json::json!({ "error": error }));
+    assert_eq!(commands_for(&failure("rate_limit"), &hooks).len(), 1);
+    assert!(commands_for(&failure("server_error"), &hooks).is_empty());
+}
+
+#[test]
+#[should_panic(expected = "does not know how Claude matches")]
+fn a_matcher_on_an_unmodelled_event_fails_the_replay() {
+    let hooks = drop_in_with("FileChanged", ".envrc");
+    commands_for(&record("FileChanged", serde_json::json!({})), &hooks);
+}
+
 /// The commands the shipped drop-in would run for one fixture record.
 fn commands_for(record: &serde_json::Value, hooks: &serde_json::Value) -> Vec<String> {
     let event = record["event"].as_str().unwrap();
@@ -140,9 +192,14 @@ fn commands_for(record: &serde_json::Value, hooks: &serde_json::Value) -> Vec<St
     for entry in hooks["hooks"][event].as_array().into_iter().flatten() {
         let applies = match entry.get("matcher").and_then(|m| m.as_str()) {
             None => true,
-            Some(matcher) => match_subject(event, payload)
-                .map(|s| matcher_applies(event, matcher, s))
-                .unwrap_or(false),
+            Some(matcher) => match match_subject(event) {
+                MatchSubject::Ignored => true,
+                // A payload without the field matches only a wildcard.
+                MatchSubject::Field(field) => {
+                    let subject = payload.get(field).and_then(|v| v.as_str());
+                    matcher_applies(event, matcher, subject.unwrap_or(""))
+                }
+            },
         };
         if !applies {
             continue;
