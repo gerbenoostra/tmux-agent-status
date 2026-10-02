@@ -21,8 +21,14 @@ repos:
   - repo: https://github.com/koalaman/shellcheck-precommit
     rev: v0.11.0
     hooks:
+      # Same split as `just lint-sh`: the installer is POSIX sh, the probe
+      # harness is bash.
       - id: shellcheck
         args: ["-s", "sh"]
+        exclude: '^probe/'
+      - id: shellcheck
+        args: ["-s", "bash"]
+        files: '^probe/'
 
   - repo: local
     hooks:
