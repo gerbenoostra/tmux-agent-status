@@ -74,6 +74,10 @@ impl Server {
             // The server inherits this, so the shipped hook finds the binary
             // under test rather than an installed one, or nothing at all.
             .env("PATH", bin_dir_first_on_path())
+            // tmux runs a pane's command as `$SHELL -c`, and a shell such as
+            // zsh reads startup files (~/.zshenv) even then, which can rewrite
+            // the PATH above. `/bin/sh -c` reads none.
+            .env("SHELL", "/bin/sh")
             .stdin(Stdio::null())
             .output()
             .expect("tmux is on PATH")
