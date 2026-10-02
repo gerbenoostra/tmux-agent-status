@@ -4,10 +4,10 @@
 003-configchange	ConfigChange	-	working	🤖	0
 004-pretooluse	PreToolUse	-	working	🤖	0
 005-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-006-posttoolbatch	PostToolBatch	-	working	🤖	0
-007-subagentstart	SubagentStart	-	working	🤖	0
-008-stop	Stop	tmux-agent-status set done	done	✅	1
-009-messagedisplay	MessageDisplay	-	done	✅	0
+006-subagentstart	SubagentStart	-	working	🤖	0
+007-posttoolbatch	PostToolBatch	-	working	🤖	0
+008-messagedisplay	MessageDisplay	-	working	🤖	0
+009-stop	Stop	tmux-agent-status set done	done	✅	1
 010-posttoolbatch	PostToolBatch	-	done	✅	0
 011-subagentstop	SubagentStop	-	done	✅	0
 012-pretooluse	PreToolUse	-	done	✅	0

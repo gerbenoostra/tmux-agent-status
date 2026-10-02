@@ -12,8 +12,8 @@
 011-messagedisplay	MessageDisplay	-	working	🤖	0
 012-messagedisplay	MessageDisplay	-	working	🤖	0
 013-messagedisplay	MessageDisplay	-	working	🤖	0
-014-stop	Stop	tmux-agent-status set done	done	✅	1
-015-messagedisplay	MessageDisplay	-	done	✅	0
+014-messagedisplay	MessageDisplay	-	working	🤖	0
+015-stop	Stop	tmux-agent-status set done	done	✅	1
 016-pretooluse	PreToolUse	-	done	✅	0
 017-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
 018-posttoolbatch	PostToolBatch	-	done	✅	0

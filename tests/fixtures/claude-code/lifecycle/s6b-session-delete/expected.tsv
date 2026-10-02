@@ -3,8 +3,8 @@
 002-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 003-pretooluse	PreToolUse	-	working	🤖	0
 004-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-005-posttoolbatch	PostToolBatch	-	working	🤖	0
-006-subagentstart	SubagentStart	-	working	🤖	0
+005-subagentstart	SubagentStart	-	working	🤖	0
+006-posttoolbatch	PostToolBatch	-	working	🤖	0
 007-stop	Stop	tmux-agent-status set done	done	✅	1
 008-messagedisplay	MessageDisplay	-	done	✅	0
 009-subagentstop	SubagentStop	-	done	✅	0

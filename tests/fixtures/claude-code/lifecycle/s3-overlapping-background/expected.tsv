@@ -6,12 +6,12 @@
 005-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
 006-pretooluse	PreToolUse	-	working	🤖	0
 007-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-008-posttoolbatch	PostToolBatch	-	working	🤖	0
-009-subagentstart	SubagentStart	-	working	🤖	0
+008-subagentstart	SubagentStart	-	working	🤖	0
+009-posttoolbatch	PostToolBatch	-	working	🤖	0
 010-pretooluse	PreToolUse	-	working	🤖	0
 011-posttoolbatch	PostToolBatch	-	working	🤖	0
-012-stop	Stop	tmux-agent-status set done	done	✅	1
-013-messagedisplay	MessageDisplay	-	done	✅	0
+012-messagedisplay	MessageDisplay	-	working	🤖	0
+013-stop	Stop	tmux-agent-status set done	done	✅	1
 014-pretooluse	PreToolUse	-	done	✅	0
 015-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
 016-posttoolbatch	PostToolBatch	-	done	✅	0

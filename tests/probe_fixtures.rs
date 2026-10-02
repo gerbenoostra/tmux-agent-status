@@ -8,10 +8,12 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 mod support;
 
 use support::lifecycle::{self, read_record};
+use support::tempdir::TempDir;
 
 /// Top-level payload keys a fixture may carry. Anything outside this list is
 /// either content (prompt, message, tool bodies) or a local path - both are
@@ -214,4 +216,50 @@ fn task_stop_cancels_by_the_subagent_start_id() {
         started[0].is_string() && cancelled.iter().all(|id| *id == started[0]),
         "TaskStop ids {cancelled:?} do not match SubagentStart {started:?}"
     );
+}
+
+/// Hooks can complete out of entry order, so the sanitizer numbers fixtures
+/// by `ts_enter`, not by the order the probe log happened to append them.
+#[test]
+fn sanitizer_orders_records_by_hook_entry_time() {
+    let dir = TempDir::new("sanitize-order");
+    let raw = dir.write(
+        "raw.jsonl",
+        concat!(
+            r#"{"event":"PostToolBatch","ts_enter":200,"ts_exit":210,"stdin":"{\"hook_event_name\":\"PostToolBatch\"}"}"#,
+            "\n",
+            r#"{"event":"SubagentStart","ts_enter":100,"ts_exit":300,"stdin":"{\"hook_event_name\":\"SubagentStart\"}"}"#,
+            "\n",
+        ),
+    );
+    let out = TempDir::new("sanitize-order-out");
+
+    let ran =
+        Command::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("probe/sanitize-fixtures.sh"))
+            .arg(&raw)
+            .arg(out.path())
+            .output()
+            .expect("the sanitizer runs");
+    assert!(
+        ran.status.success(),
+        "sanitize-fixtures.sh failed: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+
+    let names = out.entries();
+    assert_eq!(
+        names,
+        ["001-subagentstart.json", "002-posttoolbatch.json"],
+        "fixtures must be numbered by hook entry time, not log append order"
+    );
+    let events: Vec<String> = names
+        .iter()
+        .map(|name| {
+            read_record(&out.join(name))["event"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(events, ["SubagentStart", "PostToolBatch"]);
 }

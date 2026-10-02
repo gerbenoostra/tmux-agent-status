@@ -12,6 +12,12 @@ raw=$1
 out=$2
 mkdir -p "$out"
 
+# Hooks can finish out of entry order, so fixture numbering follows entry
+# time, not append order; equal millisecond timestamps retain append order.
+sorted=$(mktemp "${TMPDIR:-/tmp}/tas-sanitize.XXXXXX")
+trap 'rm -f "$sorted"' EXIT
+jq -sc 'to_entries | sort_by(.value.ts_enter, .key) | .[].value' "$raw" >"$sorted"
+
 i=0
 while IFS= read -r line; do
     i=$((i + 1))
@@ -19,6 +25,6 @@ while IFS= read -r line; do
     event=$(jq -r '.event' <<<"$rec" | tr '[:upper:]' '[:lower:]')
     printf -v n '%03d' "$i"
     printf '%s\n' "$rec" >"$out/$n-$event.json"
-done <"$raw"
+done <"$sorted"
 
 echo "wrote $i fixtures to $out"
