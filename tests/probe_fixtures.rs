@@ -146,6 +146,17 @@ fn every_fixture_is_a_sanitized_probe_record() {
             }
         }
 
+        // StopFailure's `error` is a code; a failed tool's `error` is free
+        // text and must have been stripped.
+        if let Some(error) = payload.get("error") {
+            let code = error.as_str().unwrap_or("");
+            assert!(
+                !code.is_empty() && code.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{}: `error` must be a snake_case code, not `{error}`",
+                file.display()
+            );
+        }
+
         let mut strings = Vec::new();
         leaves(payload, &mut strings);
         for s in strings {
@@ -197,4 +208,41 @@ fn every_scenario_has_an_expected_replay() {
             dir.display()
         );
     }
+}
+
+fn read_record(path: &Path) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// A tracked adapter cancels a background agent by the `task_id` of
+/// `PostToolUse(TaskStop)`, which must equal the `agent_id` its
+/// `SubagentStart` opened. The S5 capture is the evidence; this keeps the
+/// sanitizer from silently dropping either half of it.
+#[test]
+fn task_stop_cancels_by_the_subagent_start_id() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(FIXTURES)
+        .join("s5-model-cancellation");
+    let mut started = Vec::new();
+    let mut cancelled = Vec::new();
+    for file in fixture_files().iter().filter(|f| f.starts_with(&dir)) {
+        let payload = read_record(file)["payload"].clone();
+        match (
+            payload["hook_event_name"].as_str(),
+            payload["tool_name"].as_str(),
+        ) {
+            (Some("SubagentStart"), _) => started.push(payload["agent_id"].clone()),
+            (Some("PostToolUse"), Some("TaskStop")) => {
+                cancelled.push(payload["tool_input"]["task_id"].clone());
+                cancelled.push(payload["tool_response"]["task_id"].clone());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(started.len(), 1, "S5 has one SubagentStart: {started:?}");
+    assert_eq!(cancelled.len(), 2, "S5 has one TaskStop: {cancelled:?}");
+    assert!(
+        started[0].is_string() && cancelled.iter().all(|id| *id == started[0]),
+        "TaskStop ids {cancelled:?} do not match SubagentStart {started:?}"
+    );
 }

@@ -1,1 +1,1 @@
-{"event":"StopFailure","ts_enter":1790889741943,"ts_exit":1790889741951,"payload":{"session_id":"0d63f843-db2f-422b-9bb4-318920d59fef","prompt_id":"ca3de318-d4e2-4141-9786-b451af6fa301","hook_event_name":"StopFailure"}}
+{"event":"StopFailure","ts_enter":1790889741943,"ts_exit":1790889741951,"payload":{"session_id":"0d63f843-db2f-422b-9bb4-318920d59fef","prompt_id":"ca3de318-d4e2-4141-9786-b451af6fa301","hook_event_name":"StopFailure","error":"server_error"}}

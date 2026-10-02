@@ -4,10 +4,13 @@
 # hook payload as a string. The fixture keeps the envelope plus a `payload`
 # holding only fields an adapter could act on: identity (session, prompt,
 # agent, task), the event vocabulary (hook_event_name, source, reason,
-# notification_type, tool_name), and state flags (stop_hook_active,
-# permission_mode). Everything content-bearing or path-bearing is dropped:
-# prompts, messages, command lines, transcripts, working directories,
-# output files, tool input text and tool response bodies.
+# notification_type, tool_name, an error code), state flags
+# (stop_hook_active, permission_mode), the ID-bearing subset of tool_input and
+# tool_response (a TaskStop's task_id, an Agent launch's agentId), and the
+# background_tasks snapshot's ids, types and statuses. Everything
+# content-bearing or path-bearing is dropped: prompts, messages, command
+# lines, transcripts, working directories, output files, tool input text,
+# tool response bodies and tool failure messages.
 
 def keep($keys): with_entries(select(.key as $k | $keys | index($k)));
 
@@ -26,9 +29,16 @@ def san_payload:
         "tool_name",
         "tool_use_id",
         "trigger",
-        "name"
+        "name",
+        "error",
+        "tool_input",
+        "tool_response",
+        "background_tasks"
     ])
-    | (if ((.error? // "") | tostring | test("/")) then del(.error) else . end)
+    # `error` is a code such as `server_error` on StopFailure, but a failed
+    # tool's free-text message on PostToolUseFailure; only the code is kept.
+    | (if has("error") and ((.error | type) != "string" or (.error | test("^[a-z_]+$") | not))
+       then del(.error) else . end)
     | (if .tool_input | type == "object"
        then .tool_input |= keep(["task_id", "run_in_background", "subagent_type", "isolation"])
        else . end)
