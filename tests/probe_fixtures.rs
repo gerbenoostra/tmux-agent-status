@@ -219,7 +219,8 @@ fn task_stop_cancels_by_the_subagent_start_id() {
 }
 
 /// Hooks can complete out of entry order, so the sanitizer numbers fixtures
-/// by `ts_enter`, not by the order the probe log happened to append them.
+/// by `ts_enter`, not by the order the probe log happened to append them. A
+/// re-run replaces exactly the generated files and leaves everything else.
 #[test]
 fn sanitizer_orders_records_by_hook_entry_time() {
     let dir = TempDir::new("sanitize-order");
@@ -233,6 +234,8 @@ fn sanitizer_orders_records_by_hook_entry_time() {
         ),
     );
     let out = TempDir::new("sanitize-order-out");
+    out.write("999-stale.json", "{}\n");
+    out.write("notes.json", "{}\n");
 
     let ran =
         Command::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("probe/sanitize-fixtures.sh"))
@@ -249,10 +252,15 @@ fn sanitizer_orders_records_by_hook_entry_time() {
     let names = out.entries();
     assert_eq!(
         names,
-        ["001-subagentstart.json", "002-posttoolbatch.json"],
-        "fixtures must be numbered by hook entry time, not log append order"
+        [
+            "001-subagentstart.json",
+            "002-posttoolbatch.json",
+            "notes.json"
+        ],
+        "generated fixtures are replaced and unrelated files preserved"
     );
-    let events: Vec<String> = names
+    let generated = &names[..2];
+    let events: Vec<String> = generated
         .iter()
         .map(|name| {
             read_record(&out.join(name))["event"]
