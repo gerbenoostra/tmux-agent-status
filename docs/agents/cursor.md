@@ -49,3 +49,6 @@ cp /path/to/share/agents/cursor/hooks.json ~/.cursor/hooks.json
   turn is still running, so it maps to `working`. Mapping it to `error` would
   paint ❗ and ring the bell several times during a healthy turn. Cursor
   publishes no turn-abort event, so its `error` column stays empty.
+- **Background work is unprobed here.** Whether Cursor's `subagentStop` fires for
+  background children at all is disputed; until a probe settles it the pane stays
+  scalar - see [Background work](README.md#background-work).

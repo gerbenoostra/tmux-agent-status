@@ -47,3 +47,6 @@ cp /path/to/share/agents/codex/hooks.json ~/.codex/hooks.json
   fires, or until you start a new session in that pane.
 - **`TMUX_PANE` inheritance is undocumented.** Use `--pane #{pane_id}` or set
   `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
+- **Background work is unprobed here.** Codex documents `SubagentStart`/`SubagentStop`
+  with a shared `agent_id`, but whether background children outlive the parent turn
+  in practice is untested - see [Background work](README.md#background-work).

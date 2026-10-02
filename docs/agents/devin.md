@@ -75,10 +75,14 @@ adding a second one; JSON's last key silently wins.
   call is an ordinary part of a turn that is still running, so it maps to
   `working` like any other tool event. An aborted turn keeps `working` until
   `SessionEnd`, or until the next session's `reset`.
-- **Subagents.** There is no subagent stop event; `run_subagent` and
-  `read_subagent` are ordinary tool calls, so they map to `working` through
-  `PostToolUse`, which is correct - the parent turn has not ended. Only the
-  parent's `Stop` means `done`.
+- **Background `run_subagent` outlives the parent turn.** A background spawn
+  returns an `agent_id` in `tool_response.output`, and the worker can keep
+  running after the parent's `Stop`. But the worker's completion `Stop` uses
+  the root session and prompt IDs and carries only `last_assistant_message` -
+  nothing identifies which subagent finished, and the automatic parent wake
+  turn emits no `UserPromptSubmit`. So `done` can paint while a worker still
+  runs, and no stop event can attribute completion; Devin stays scalar. See
+  [Background work](README.md#background-work).
 - **Stdout is parsed as JSON** on `PreToolUse`, `PermissionRequest`,
   `UserPromptSubmit`, `SessionStart` and `Stop`, so every entry in the drop-in
   uses `--json`. The status commands write nothing to stdout themselves;
