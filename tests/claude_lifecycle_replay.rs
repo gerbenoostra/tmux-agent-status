@@ -173,13 +173,33 @@ fn match_subject<'a>(event: &str, payload: &'a serde_json::Value) -> Option<&'a 
     payload.get(field)?.as_str()
 }
 
-/// The shipped matchers are `|`-alternations of literal strings, which Claude
-/// evaluates as a regex search; for literals that is substring membership of
-/// any branch. Anything fancier in a future drop-in needs a real regex here.
+/// Claude's documented matcher rule (https://code.claude.com/docs/en/hooks):
+/// `*` or empty matches everything; a matcher of only letters, digits, `_`,
+/// `-`, spaces, `,` and `|` is a list of exact names split on `|` or `,`;
+/// anything else is an unanchored regex. The shipped matchers are exact
+/// lists, and this replay has no regex engine, so a regex matcher fails the
+/// test instead of being guessed at.
 fn matcher_applies(matcher: &str, subject: &str) -> bool {
-    matcher
-        .split('|')
-        .any(|branch| !branch.is_empty() && subject.contains(branch))
+    if matcher.is_empty() || matcher == "*" {
+        return true;
+    }
+    let exact = matcher
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "_- ,|".contains(c));
+    assert!(exact, "replay cannot evaluate regex matcher `{matcher}`");
+    matcher.split(['|', ',']).any(|name| name.trim() == subject)
+}
+
+#[test]
+fn matchers_are_exact_names_not_substrings() {
+    assert!(matcher_applies(
+        "AskUserQuestion|ExitPlanMode",
+        "ExitPlanMode"
+    ));
+    assert!(matcher_applies("Edit, Write", "Write"));
+    assert!(matcher_applies("*", "anything"));
+    assert!(!matcher_applies("Task", "TaskStop"));
+    assert!(!matcher_applies("startup|resume|clear|fork", "compact"));
 }
 
 /// The commands the shipped drop-in would run for one fixture record.
