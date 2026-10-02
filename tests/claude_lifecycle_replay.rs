@@ -176,30 +176,55 @@ fn match_subject<'a>(event: &str, payload: &'a serde_json::Value) -> Option<&'a 
 /// Claude's documented matcher rule (https://code.claude.com/docs/en/hooks):
 /// `*` or empty matches everything; a matcher of only letters, digits, `_`,
 /// `-`, spaces, `,` and `|` is a list of exact names split on `|` or `,`;
-/// anything else is an unanchored regex. The shipped matchers are exact
-/// lists, and this replay has no regex engine, so a regex matcher fails the
-/// test instead of being guessed at.
-fn matcher_applies(matcher: &str, subject: &str) -> bool {
+/// anything else is an unanchored regex. `FileChanged` and `StopFailure` are
+/// narrower: only letters, digits, `_` and `|` are exact, and only `|`
+/// separates names. The shipped matchers are exact lists, and this replay has
+/// no regex engine, so a regex matcher fails the test instead of being guessed
+/// at.
+fn matcher_applies(event: &str, matcher: &str, subject: &str) -> bool {
     if matcher.is_empty() || matcher == "*" {
         return true;
     }
+    let (exact_extra, separators): (&str, &[char]) = match event {
+        "FileChanged" | "StopFailure" => ("_|", &['|']),
+        _ => ("_- ,|", &['|', ',']),
+    };
     let exact = matcher
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "_- ,|".contains(c));
-    assert!(exact, "replay cannot evaluate regex matcher `{matcher}`");
-    matcher.split(['|', ',']).any(|name| name.trim() == subject)
+        .all(|c| c.is_ascii_alphanumeric() || exact_extra.contains(c));
+    assert!(
+        exact,
+        "replay cannot evaluate regex matcher `{matcher}` on {event}"
+    );
+    matcher.split(separators).any(|name| name.trim() == subject)
 }
 
 #[test]
 fn matchers_are_exact_names_not_substrings() {
     assert!(matcher_applies(
+        "PreToolUse",
         "AskUserQuestion|ExitPlanMode",
         "ExitPlanMode"
     ));
-    assert!(matcher_applies("Edit, Write", "Write"));
-    assert!(matcher_applies("*", "anything"));
-    assert!(!matcher_applies("Task", "TaskStop"));
-    assert!(!matcher_applies("startup|resume|clear|fork", "compact"));
+    assert!(matcher_applies("PreToolUse", "Edit, Write", "Write"));
+    assert!(matcher_applies("PreToolUse", "*", "anything"));
+    assert!(!matcher_applies("PreToolUse", "Task", "TaskStop"));
+    assert!(!matcher_applies(
+        "SessionStart",
+        "startup|resume|clear|fork",
+        "compact"
+    ));
+    assert!(matcher_applies(
+        "StopFailure",
+        "server_error|rate_limit",
+        "rate_limit"
+    ));
+}
+
+#[test]
+#[should_panic(expected = "regex matcher")]
+fn stop_failure_comma_list_is_a_regex() {
+    matcher_applies("StopFailure", "server_error, rate_limit", "rate_limit");
 }
 
 /// The commands the shipped drop-in would run for one fixture record.
@@ -211,7 +236,7 @@ fn commands_for(record: &serde_json::Value, hooks: &serde_json::Value) -> Vec<St
         let applies = match entry.get("matcher").and_then(|m| m.as_str()) {
             None => true,
             Some(matcher) => match_subject(event, payload)
-                .map(|s| matcher_applies(matcher, s))
+                .map(|s| matcher_applies(event, matcher, s))
                 .unwrap_or(false),
         };
         if !applies {
