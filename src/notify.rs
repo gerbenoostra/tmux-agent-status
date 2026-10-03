@@ -251,9 +251,11 @@ mod tests {
     }
 
     #[test]
-    fn work_key_tokens_cannot_collide_across_id_boundaries() {
-        // `s\0w` and `s` + `\0w` encode differently, so no pair of raw IDs
-        // maps to the same token as another pair.
+    fn work_key_tokens_are_distinct_within_one_session() {
+        // Under one session prefix, distinct work IDs encode distinctly, even
+        // one starting with the NUL separator. Across sessions a NUL inside a
+        // session ID can make two tokens coincide; that is harmless because
+        // the ledger only ever holds the accepted session's keys.
         let a = WorkKey::new("s", "w").unwrap();
         let b = WorkKey::new("s", "\0w").unwrap();
         assert_ne!(a.encoded(), b.encoded());
