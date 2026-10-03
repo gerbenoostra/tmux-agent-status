@@ -8,8 +8,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tmux_agent_status::state::State;
-
 mod support;
 
 fn repo_root() -> PathBuf {
@@ -72,20 +70,27 @@ fn walk(value: &serde_json::Value, path: &Path) {
     }
 }
 
-/// The command a docs table row must carry for the state it names.
+/// Whether a docs table row's command is the right one for what its first
+/// cell names.
 ///
-/// `start`, `reset` and `finish` are their own commands; every other row is a state and
-/// so a `set`. This is the rule that catches a turn-end row wired to `finish`,
-/// which writes the glyph but never rings the bell.
-fn expected_command(state: &str) -> Option<String> {
-    match state {
-        "start" => Some("tmux-agent-status start".to_string()),
-        "reset" => Some("tmux-agent-status reset".to_string()),
-        "finish" => Some("tmux-agent-status finish".to_string()),
-        state if State::ALL.iter().any(|s| s.name() == state) => {
-            Some(format!("tmux-agent-status set {state}"))
-        }
-        _ => None,
+/// `start`, `reset` and `finish` are their own commands - the session-scoped
+/// `--agent <name> --stdin` forms count - and a state row is a `set`. A
+/// `notify` row carries lifecycle payloads rather than a state, so it is held
+/// only to naming the page's own agent. This is the rule that catches a
+/// turn-end row wired to `finish`, which writes the glyph but never rings the
+/// bell.
+fn command_fits_row(agent: &str, state: &str, command: &str, page: &Path) -> bool {
+    use support::command::HookCommand;
+    if !command.starts_with("tmux-agent-status ") {
+        return false;
+    }
+    match support::command::parse_command(&page.display().to_string(), command) {
+        HookCommand::Set(s) => s.as_str() == state,
+        HookCommand::Start => state == "start",
+        HookCommand::Reset { .. } => state == "reset",
+        HookCommand::Finish { .. } => state == "finish",
+        HookCommand::Notify { agent: named, .. } => named == agent,
+        HookCommand::ClearPane => false,
     }
 }
 
@@ -176,19 +181,14 @@ fn every_json_drop_in_matches_its_docs_table() {
 
         let mut documented: Vec<String> = Vec::new();
         for (state, command) in docs_table(&page) {
-            let expected = expected_command(&state).unwrap_or_else(|| {
-                panic!(
-                    "{}: row `{state}` is not one of the four states, `start`, `reset` or `finish`",
-                    page.display()
-                )
-            });
-            assert_eq!(
-                command,
-                expected,
-                "{}: the `{state}` row must run `{expected}`",
+            assert!(
+                command_fits_row(&agent, &state, &command, &page),
+                "{}: the `{state}` row runs `{command}`",
                 page.display()
             );
-            documented.push(command);
+            documented.push(
+                support::command::parse_command(&page.display().to_string(), &command).as_str(),
+            );
         }
         documented.sort();
         documented.dedup();

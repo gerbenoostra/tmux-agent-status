@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use pico_args::Arguments;
 use tmux_agent_status::command;
-use tmux_agent_status::notify;
+use tmux_agent_status::notify::{self, NotifyAction};
 use tmux_agent_status::register;
 use tmux_agent_status::state::{State, UnknownState};
 
@@ -117,19 +117,83 @@ fn run_start(mut pargs: Arguments) -> Result<ExitCode, MainError> {
 }
 
 fn run_reset(mut pargs: Arguments) -> Result<ExitCode, MainError> {
+    let agent = session_args(&mut pargs)?;
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     reject_extra_with_prefix(pargs, "reset")?;
+    // The payload is drained before the hook runs - see `run_notify` for why.
+    // An unreadable, unknown-agent, incomplete or wrong-event payload degrades
+    // to the generic reset rather than to silence: the command is named
+    // `reset` either way.
+    let action = agent.and_then(|agent| {
+        session_payload().and_then(|payload| match notify::dispatch(&agent, &payload) {
+            Some(action @ NotifyAction::ResetSession { .. }) => Some(action),
+            _ => None,
+        })
+    });
     let pane = pane.as_deref();
-    Ok(run_hook(|| command::reset(pane), json))
+    Ok(run_hook(
+        || match &action {
+            Some(action) => command::apply(action, pane),
+            None => command::reset(pane),
+        },
+        json,
+    ))
 }
 
 fn run_finish(mut pargs: Arguments) -> Result<ExitCode, MainError> {
+    let agent = session_args(&mut pargs)?;
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     reject_extra_with_prefix(pargs, "finish")?;
+    let action = agent.and_then(|agent| {
+        session_payload().and_then(|payload| match notify::dispatch(&agent, &payload) {
+            Some(action @ NotifyAction::EndSession { .. }) => Some(action),
+            _ => None,
+        })
+    });
     let pane = pane.as_deref();
-    Ok(run_hook(|| command::finish(pane), json))
+    Ok(run_hook(
+        || match &action {
+            Some(action) => command::apply(action, pane),
+            None => command::finish(pane),
+        },
+        json,
+    ))
+}
+
+/// The `--agent <name> --stdin` pair `reset` and `finish` accept for a
+/// session-scoped payload, or `None` when neither flag is given.
+///
+/// The flags only mean something together: the payload is how the agent names
+/// the session, and a lone `--stdin` would read a payload nobody can map.
+/// Half a pair is a hook-config bug, so it is a usage error, not a quiet
+/// fallback.
+fn session_args(pargs: &mut Arguments) -> Result<Option<String>, MainError> {
+    let from_stdin = pargs.contains("--stdin");
+    let agent = opt_value(pargs, "--agent")?;
+    match (from_stdin, agent) {
+        (false, None) => Ok(None),
+        (true, Some(agent)) => Ok(Some(agent)),
+        (true, None) => Err(MainError::from("--stdin requires --agent")),
+        (false, Some(_)) => Err(MainError::from("--agent requires --stdin")),
+    }
+}
+
+/// What `--stdin` carried, drained whatever it turns out to hold.
+///
+/// A terminal or unreadable stdin is no payload at all, which the caller turns
+/// into the generic command rather than a block: the agent writing into the
+/// pipe must never take an EPIPE, and a hand-typed `reset --stdin` must not
+/// hang waiting for EOF.
+fn session_payload() -> Option<String> {
+    if std::io::stdin().is_terminal() {
+        debug("--stdin on a terminal: no payload, running the generic command");
+        return None;
+    }
+    let mut buf = String::new();
+    let _ = std::io::stdin().read_to_string(&mut buf);
+    Some(buf)
 }
 
 fn run_clear_pane(mut pargs: Arguments) -> Result<ExitCode, MainError> {
@@ -425,6 +489,11 @@ usage:
                               clear this pane's state and recompute the window
   tmux-agent-status finish [--pane <id>] [--json]
                               silently resolve this pane's session to done
+  tmux-agent-status reset --agent <name> --stdin
+  tmux-agent-status finish --agent <name> --stdin
+                              read the session payload from stdin; a readable
+                              one scopes the reset or finish to that session,
+                              anything else runs the generic command
   tmux-agent-status clear-pane [<pane>] [--pane <id>] [--json]
                               clear the non-sticky state of that one pane,
                               defaulting to $TMUX_PANE

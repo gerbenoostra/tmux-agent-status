@@ -132,13 +132,67 @@ const AGENTS: &[AgentMapping] = &[AgentMapping {
 /// recognised lifecycle signal.
 pub fn dispatch(agent: &str, payload: &str) -> Option<NotifyAction> {
     let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let mapping = AGENTS.iter().find(|m| m.name == agent)?;
-    let event = value.get(mapping.event_field)?.as_str()?;
-    mapping
-        .table
-        .iter()
-        .find(|(name, _)| *name == event)
-        .map(|(_, state)| NotifyAction::Report(*state))
+    match agent {
+        "claude-code" => claude_code(&value),
+        _ => {
+            let mapping = AGENTS.iter().find(|m| m.name == agent)?;
+            let event = value.get(mapping.event_field)?.as_str()?;
+            mapping
+                .table
+                .iter()
+                .find(|(name, _)| *name == event)
+                .map(|(_, state)| NotifyAction::Report(*state))
+        }
+    }
+}
+
+/// Claude Code's probed lifecycle events.
+///
+/// `session_id` identifies the host session every event is scoped to and
+/// `agent_id` identifies a tracked work item within it. A cancelled agent emits
+/// no `SubagentStop`; its completion signal is a successful `PostToolUse` for
+/// `TaskStop`, where `tool_input.task_id` and `tool_response.task_id` carry the
+/// same ID as the start event's `agent_id`. `PostToolUse` arriving at all is
+/// the observed success predicate - the payload has no success boolean - so a
+/// failed stop, which fires `PostToolUseFailure` instead, is a drop here.
+///
+/// Everything not listed, and every payload whose IDs are missing, malformed or
+/// disagreeing, is a silent drop: hooks must never block the host.
+fn claude_code(payload: &serde_json::Value) -> Option<NotifyAction> {
+    let session_id = payload.get("session_id")?.as_str()?;
+    match payload.get("hook_event_name")?.as_str()? {
+        "SessionStart" => Some(NotifyAction::ResetSession {
+            session: HostSession::new(session_id)?,
+        }),
+        "SessionEnd" => Some(NotifyAction::EndSession {
+            session: HostSession::new(session_id)?,
+        }),
+        "SubagentStart" => Some(NotifyAction::WorkStarted {
+            key: WorkKey::new(session_id, payload.get("agent_id")?.as_str()?)?,
+        }),
+        "SubagentStop" => Some(NotifyAction::WorkStopped {
+            key: WorkKey::new(session_id, payload.get("agent_id")?.as_str()?)?,
+        }),
+        "PostToolUse" => claude_task_stop(payload, session_id),
+        _ => None,
+    }
+}
+
+/// A `PostToolUse` for `TaskStop` whose input and response agree on a usable
+/// `task_id` is the stop of that work item. The pair must be equal: an input
+/// the tool refused, or a response about another task, must not remove work.
+fn claude_task_stop(payload: &serde_json::Value, session_id: &str) -> Option<NotifyAction> {
+    if payload.get("tool_name")?.as_str()? != "TaskStop" {
+        return None;
+    }
+    let requested = payload.get("tool_input")?.get("task_id")?.as_str()?;
+    let stopped = payload.get("tool_response")?.get("task_id")?.as_str()?;
+    if requested != stopped {
+        return None;
+    }
+    Some(NotifyAction::WorkStopped {
+        key: WorkKey::new(session_id, stopped)?,
+    })
 }
 
 #[cfg(test)]

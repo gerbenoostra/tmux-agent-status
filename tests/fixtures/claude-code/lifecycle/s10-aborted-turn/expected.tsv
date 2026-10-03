@@ -1,10 +1,10 @@
 # file	event	command	pane	window	bell
-001-sessionstart	SessionStart	tmux-agent-status reset			0
+001-sessionstart	SessionStart	tmux-agent-status reset --agent claude-code --stdin < 001-sessionstart			0
 002-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 003-configchange	ConfigChange	-	working	🤖	0
 004-pretooluse	PreToolUse	-	working	🤖	0
 005-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-006-subagentstart	SubagentStart	-	working	🤖	0
+006-subagentstart	SubagentStart	tmux-agent-status notify --agent claude-code --stdin < 006-subagentstart	working	🤖	0
 007-posttoolbatch	PostToolBatch	-	working	🤖	0
 008-posttoolbatch	PostToolBatch	-	working	🤖	0
 009-messagedisplay	MessageDisplay	-	working	🤖	0
@@ -13,18 +13,18 @@
 012-messagedisplay	MessageDisplay	-	working	🤖	0
 013-messagedisplay	MessageDisplay	-	working	🤖	0
 014-messagedisplay	MessageDisplay	-	working	🤖	0
-015-stop	Stop	tmux-agent-status set done	done	✅	1
-016-pretooluse	PreToolUse	-	done	✅	0
-017-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
-018-posttoolbatch	PostToolBatch	-	done	✅	0
-019-subagentstop	SubagentStop	-	done	✅	0
+015-stop	Stop	tmux-agent-status set done	working	🤖	0
+016-pretooluse	PreToolUse	-	working	🤖	0
+017-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+018-posttoolbatch	PostToolBatch	-	working	🤖	0
+019-subagentstop	SubagentStop	tmux-agent-status notify --agent claude-code --stdin < 019-subagentstop	working	🤖	0
 020-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
-021-subagentstop	SubagentStop	-	working	🤖	0
+021-subagentstop	SubagentStop	tmux-agent-status notify --agent claude-code --stdin < 021-subagentstop	working	🤖	0
 022-messagedisplay	MessageDisplay	-	working	🤖	0
 023-stop	Stop	tmux-agent-status set done	done	✅	1
-024-subagentstop	SubagentStop	-	done	✅	0
-025-subagentstart	SubagentStart	-	done	✅	0
-026-subagentstop	SubagentStop	-	done	✅	0
+024-subagentstop	SubagentStop	tmux-agent-status notify --agent claude-code --stdin < 024-subagentstop	done	✅	0
+025-subagentstart	SubagentStart	tmux-agent-status notify --agent claude-code --stdin < 025-subagentstart	working	🤖	0
+026-subagentstop	SubagentStop	tmux-agent-status notify --agent claude-code --stdin < 026-subagentstop	working	🤖	0
 027-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 028-messagedisplay	MessageDisplay	-	working	🤖	0
 029-messagedisplay	MessageDisplay	-	working	🤖	0
@@ -34,11 +34,11 @@
 033-messagedisplay	MessageDisplay	-	working	🤖	0
 034-stop	Stop	tmux-agent-status set done	done	✅	1
 035-messagedisplay	MessageDisplay	-	done	✅	0
-036-subagentstop	SubagentStop	-	done	✅	0
+036-subagentstop	SubagentStop	tmux-agent-status notify --agent claude-code --stdin < 036-subagentstop	done	✅	0
 037-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 038-stop	Stop	tmux-agent-status set done	done	✅	1
 039-messagedisplay	MessageDisplay	-	done	✅	0
-040-subagentstop	SubagentStop	-	done	✅	0
+040-subagentstop	SubagentStop	tmux-agent-status notify --agent claude-code --stdin < 040-subagentstop	done	✅	0
 041-configchange	ConfigChange	-	done	✅	0
 042-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 043-stopfailure	StopFailure	tmux-agent-status set error	error	❗	1

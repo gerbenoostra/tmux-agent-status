@@ -131,7 +131,7 @@ while a child is still running.
 
 | Agent | Probed version | Probe date | Lifecycle eligibility | Shipped tier |
 | --- | --- | --- | --- | --- |
-| [Claude Code](claude-code.md) | 2.1.287 | 2026-10-01 | tracked aggregate | scalar |
+| [Claude Code](claude-code.md) | 2.1.287 | 2026-10-01 | tracked aggregate | tracked aggregate |
 | [Codex CLI](codex.md) | - | - | not probed - binary not installed; `agent_id` is documented on both subagent events | scalar |
 | [GitHub Copilot CLI](copilot.md) | - | - | not probed - an organization policy blocked the probe; `agentId` is documented on both subagent events | scalar |
 | [Cursor](cursor.md) | - | - | not probed - `subagent_id` is documented, but background `subagentStop` reportedly never fires | scalar |
@@ -147,23 +147,22 @@ while a child is still running.
 Probed on 2.1.287 with `just probe-lifecycle claude-code`, which runs a scratch session on a
 disposable tmux server and logs every hook event with its payload. The sanitized captures live
 in `tests/fixtures/claude-code/lifecycle/<scenario>/`; each `expected.tsv` pins the glyph and
-bell the shipped drop-in produced per event. "Shipped" below is that scalar mapping;
-"aggregate" is what a tracked lifecycle would project.
+bell the shipped drop-in produced per event, replayed through the shipped hook commands.
 
-| # | Scenario | Observed | Shipped | Aggregate |
-| --- | --- | --- | --- | --- |
-| S1 | permission prompt approved, then clean finish | `PermissionRequest` + `Notification(permission_prompt)`, then `Stop` | 💬+🔔, then ✅+🔔 | same |
-| S2 | one background agent outlives the parent turn | `SubagentStart`, parent `Stop`, child's tool events, `SubagentStop`, wake `UserPromptSubmit`, final `Stop` | ✅+🔔 while the child runs, 🤖 at the wake turn, ✅+🔔 again | 🤖 until the last stop, ✅+🔔 once |
-| S3 | two background agents, overlapping wakes | second `SubagentStart` during the first wake turn; a `shell` task in `background_tasks` never got lifecycle events; an `agent_id` was reused for a continuation | ✅+🔔 on every turn end | 🤖 until the last tracked item stops |
-| S4 | child finishes while the parent turn is still running | `SubagentStop` folded into the same `prompt_id`; no separate wake turn | one ✅+🔔 at the turn's `Stop` | same |
-| S5 | model cancels a background agent with `TaskStop` | `task_id` equals the `agent_id` of `SubagentStart`; no `SubagentStop` for the cancelled agent | ✅+🔔 at `Stop` | cancels that item |
-| S6 | user kills a running task from the host UI | the killed shell's owning agent re-ran under the same `agent_id` (`SubagentStart`+`SubagentStop`), then a wake turn ended in `Stop`; deleting a backgrounded session in the agents sidebar emitted only `SessionEnd` for that session | ✅+🔔 at the following `Stop` | same, but silent until the last item stops |
-| S7 | child's own tool events | `PreToolUse`/`PostToolUse`/`PostToolBatch` for the child's tools reach the pane's hooks carrying `agent_id` and `agent_type` | each maps to `set working`, refused while `done`/`waiting` stands | counted as child activity, not a state |
-| S8 | exit while a task runs | `/exit` offers "Exit and stop tasks" or "Move to background and exit"; the first fires `SessionEnd` (`prompt_input_exit`) and kills the work, the second fires `SessionEnd` plus `SessionStart(source: fork)` for a daemon session that emits no further events | `finish`, no bell | same |
-| S9 | `/compact` and `/clear` with work running | `/compact`: `PreCompact` → `SessionStart(source: compact)` on the **same** session id → `PostCompact`, work survives; `/clear`: `SessionEnd(reason: clear)` then `SessionStart(source: clear)` on a **new** id; `claude --resume` → `SessionStart(source: resume)` on the same id | `compact` is unmatched so no `reset`; `clear`/`resume` reset | same |
-| S10 | aborted turn | Esc during a turn emits a plain `Stop`; an API failure emits `StopFailure` (`server_error`) after retries, and no `Stop` | ❗+🔔 on `StopFailure` | error outranks running work |
-| S11 | question open while a child finishes | `AskUserQuestion` + `PermissionRequest` + `Notification(permission_prompt)`; the child's `SubagentStop` arrived mid-prompt; after the answer, its wake `UserPromptSubmit` reused the same `prompt_id` | 💬+🔔 held through the child's completion, 🤖 at the wake, ✅+🔔 at `Stop` | same |
-| S12 | start/stop ordering with a 3s `SubagentStart` hook | a no-op child's `SubagentStop` still ran after the start hook exited; a background agent cancelled with `TaskStop` within the sleep produced **no** `SubagentStart` or `SubagentStop` at all - a stop signal for a never-started item | n/a | stops for unknown IDs are no-ops |
+| # | Scenario | Observed | Shipped |
+| --- | --- | --- | --- |
+| S1 | permission prompt approved, then clean finish | `PermissionRequest` + `Notification(permission_prompt)`, then `Stop` | 💬+🔔, then ✅+🔔 |
+| S2 | one background agent outlives the parent turn | `SubagentStart`, parent `Stop`, child's tool events, `SubagentStop`, wake `UserPromptSubmit`, final `Stop` | 🤖 until the last item stops, ✅+🔔 once |
+| S3 | two background agents, overlapping wakes | second `SubagentStart` during the first wake turn; a `shell` task in `background_tasks` never got lifecycle events; an `agent_id` was reused for a continuation | 🤖 until the last tracked item stops |
+| S4 | child finishes while the parent turn is still running | `SubagentStop` folded into the same `prompt_id`; no separate wake turn | one ✅+🔔 at the turn's `Stop` |
+| S5 | model cancels a background agent with `TaskStop` | `task_id` equals the `agent_id` of `SubagentStart`; no `SubagentStop` for the cancelled agent | the `TaskStop` removes that item |
+| S6 | user kills a running task from the host UI | the killed shell's owning agent re-ran under the same `agent_id` (`SubagentStart`+`SubagentStop`), then a wake turn ended in `Stop`; deleting a backgrounded session in the agents sidebar emitted only `SessionEnd` for that session | silent until the last item stops, then ✅+🔔 |
+| S7 | child's own tool events | `PreToolUse`/`PostToolUse`/`PostToolBatch` for the child's tools reach the pane's hooks carrying `agent_id` and `agent_type` | counted as child activity, not a state |
+| S8 | exit while a task runs | `/exit` offers "Exit and stop tasks" or "Move to background and exit"; the first fires `SessionEnd` (`prompt_input_exit`) and kills the work, the second fires `SessionEnd` plus `SessionStart(source: fork)` for a daemon session that emits no further events | `SessionEnd` resolves the accepted session, no bell |
+| S9 | `/compact` and `/clear` with work running | `/compact`: `PreCompact` → `SessionStart(source: compact)` on the **same** session id → `PostCompact`, work survives; `/clear`: `SessionEnd(reason: clear)` then `SessionStart(source: clear)` on a **new** id; `claude --resume` → `SessionStart(source: resume)` on the same id | `compact` is unmatched so no `reset`; `clear`/`resume` reset |
+| S10 | aborted turn | Esc during a turn emits a plain `Stop`; an API failure emits `StopFailure` (`server_error`) after retries, and no `Stop` | Esc's `Stop` is a clean stop that waits out tracked work; `StopFailure` is ❗+🔔 |
+| S11 | question open while a child finishes | `AskUserQuestion` + `PermissionRequest` + `Notification(permission_prompt)`; the child's `SubagentStop` arrived mid-prompt; after the answer, its wake `UserPromptSubmit` reused the same `prompt_id` | 💬+🔔 held through the child's completion, 🤖 at the wake, ✅+🔔 at `Stop` |
+| S12 | start/stop ordering with a 3s `SubagentStart` hook | a no-op child's `SubagentStop` still ran after the start hook exited; a background agent cancelled with `TaskStop` within the sleep produced **no** `SubagentStart` or `SubagentStop` at all - a stop signal for a never-started item | stops for unknown IDs are no-ops |
 
 Notable payload facts for adapters:
 

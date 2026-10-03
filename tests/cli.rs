@@ -437,7 +437,7 @@ fn notify_debug_logs_dropped_payloads() {
 }
 
 #[cfg(unix)]
-fn notify_stdin_with_terminal(json: bool) {
+fn hook_stdin_with_terminal(args: &[&str], json: bool) {
     // Allocate a pseudo-terminal and hand the slave fd to the child as stdin.
     // The binary must detect the terminal and return without reading.
     //
@@ -464,7 +464,7 @@ fn notify_stdin_with_terminal(json: bool) {
     assert_eq!(rc, 0, "openpty failed");
 
     let slave_file = unsafe { File::from_raw_fd(slave) };
-    let mut args = vec!["notify", "--agent", "mistral-vibe", "--stdin"];
+    let mut args = args.to_vec();
     if json {
         args.push("--json");
     }
@@ -504,13 +504,125 @@ fn notify_stdin_with_terminal(json: bool) {
 #[cfg(unix)]
 #[test]
 fn notify_stdin_with_terminal_is_a_no_op() {
-    notify_stdin_with_terminal(false);
+    hook_stdin_with_terminal(&["notify", "--agent", "mistral-vibe", "--stdin"], false);
 }
 
 #[cfg(unix)]
 #[test]
 fn notify_stdin_with_terminal_supports_json() {
-    notify_stdin_with_terminal(true);
+    hook_stdin_with_terminal(&["notify", "--agent", "mistral-vibe", "--stdin"], true);
+}
+
+#[cfg(unix)]
+#[test]
+fn reset_stdin_with_terminal_runs_the_generic_command() {
+    // A hand-typed `reset --stdin` has no payload arriving and must not hang
+    // waiting for one: no readable payload is the generic command's case.
+    hook_stdin_with_terminal(&["reset", "--agent", "claude-code", "--stdin"], false);
+    hook_stdin_with_terminal(&["finish", "--agent", "claude-code", "--stdin"], false);
+}
+
+/// A payload piped to `reset`/`finish --agent --stdin`, run to exit.
+fn run_with_stdin(args: &[&str], payload: &str) -> Output {
+    let mut child = command(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary spawns");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin is piped")
+        .write_all(payload.as_bytes())
+        .expect("the payload is written");
+    child.wait_with_output().expect("the binary runs")
+}
+
+#[test]
+fn reset_and_finish_take_agent_and_stdin_as_a_pair() {
+    // Each flag alone is a hook-config bug: the payload is how the agent names
+    // the session, and a bare --stdin would read one nobody can map.
+    for args in [
+        ["reset", "--stdin"].as_slice(),
+        ["reset", "--agent", "claude-code"].as_slice(),
+        ["finish", "--stdin"].as_slice(),
+        ["finish", "--agent", "claude-code"].as_slice(),
+        ["reset", "--agent"].as_slice(),
+        ["finish", "--agent"].as_slice(),
+    ] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(stderr(&out).contains("requires"), "{args:?}");
+    }
+}
+
+#[test]
+fn session_commands_drain_stdin_and_stay_silent() {
+    // No tmux in the test environment, so pane resolution short-circuits and
+    // every payload - mapped session event, wrong event, unknown agent or
+    // garbage - exits 0 with no output. The dispatch itself is covered against
+    // a real server in claude_adapter.rs.
+    let session_start = r#"{"session_id":"s","hook_event_name":"SessionStart","source":"startup"}"#;
+    for (subcommand, payload) in [
+        ("reset", session_start),
+        (
+            "reset",
+            r#"{"session_id":"s","hook_event_name":"SessionEnd"}"#,
+        ),
+        ("finish", session_start),
+        (
+            "finish",
+            r#"{"session_id":"s","hook_event_name":"SessionEnd"}"#,
+        ),
+        ("reset", "not-json"),
+        ("finish", "not-json"),
+    ] {
+        let args = [subcommand, "--agent", "claude-code", "--stdin"];
+        let out = run_with_stdin(&args, payload);
+        assert!(out.status.success(), "{args:?}: {}", stderr(&out));
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert!(stderr(&out).is_empty(), "{args:?}");
+    }
+
+    // An unknown agent cannot map the payload, so the generic command runs.
+    let out = run_with_stdin(
+        &["reset", "--agent", "no-such-agent", "--stdin"],
+        session_start,
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+
+    // Still a hook: extra free arguments are a usage error, stdin or not.
+    let out = run(&["reset", "--agent", "claude-code", "--stdin", "junk"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("unexpected arguments: reset junk"));
+}
+
+#[test]
+fn disabled_session_commands_still_drain_stdin() {
+    // Same promise as notify: a payload larger than the pipe buffer blocks
+    // the agent's write until someone reads it.
+    let payload = format!(
+        r#"{{"session_id":"s","hook_event_name":"SessionStart","pad":"{}"}}"#,
+        "x".repeat(256 * 1024)
+    );
+    let mut child = command(&["reset", "--agent", "claude-code", "--stdin"])
+        .env("TMUX_AGENT_STATUS_DISABLED", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary spawns");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin is piped")
+        .write_all(payload.as_bytes())
+        .expect("a disabled reset must still read what the agent sends");
+    let out = child.wait_with_output().expect("the binary runs");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(out.stdout.is_empty());
+    assert!(stderr(&out).is_empty());
 }
 
 #[test]

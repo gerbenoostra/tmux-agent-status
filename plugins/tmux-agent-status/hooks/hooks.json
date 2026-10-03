@@ -3,12 +3,65 @@
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|fork",
-        "hooks": [{ "type": "command", "command": "tmux-agent-status reset" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status reset --agent claude-code --stdin"
+          }
+        ]
       }
     ],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status start" }] }],
-    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set working" }] }],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status finish --agent claude-code --stdin"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "tmux-agent-status start" }]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status notify --agent claude-code --stdin"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status notify --agent claude-code --stdin"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "tmux-agent-status set working" }
+        ]
+      },
+      {
+        "matcher": "TaskStop",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-agent-status notify --agent claude-code --stdin"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "AskUserQuestion|ExitPlanMode",
@@ -21,7 +74,13 @@
         "hooks": [{ "type": "command", "command": "tmux-agent-status set waiting" }]
       }
     ],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }] }],
-    "StopFailure": [{ "hooks": [{ "type": "command", "command": "tmux-agent-status set error" }] }]
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }] }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [{ "type": "command", "command": "tmux-agent-status set error" }]
+      }
+    ]
   }
 }

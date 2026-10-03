@@ -282,21 +282,24 @@ pub fn work_started(key: &WorkKey) -> Vec<Layer> {
 ///
 /// When the removal empties the ledger under a `stopped` root, the root enters
 /// `settling`: the pane stays on `working` through the host's automatic turn,
-/// whose own clean stop is what exposes `done`.
+/// whose own clean stop is what exposes `done`. The root write goes first, so
+/// its format still sees the old ledger: "the last item stopped" means the
+/// token was in it and taking it out left nothing. A stop whose token was
+/// never there - a helper's `SubagentStop`, a redelivered event - must not
+/// settle a root whose `done` is already shown.
 pub fn work_stopped(key: &WorkKey) -> Vec<Layer> {
     let ledger = work();
     let session_matches = accepted(key.session());
     let removed = format!("#{{s|,{key},|,|:{ledger}}}", key = key.encoded());
+    let removed_the_last = all(&[
+        session_matches.clone(),
+        format!("#{{!=:{removed},{ledger}}}"),
+        any(&[eq(removed.clone(), ""), eq(removed.clone(), "#,")]),
+        eq(root(), "stopped"),
+    ]);
     vec![
-        layer(PANE_WORK, gate(session_matches.clone(), &removed, ledger)),
-        layer(
-            PANE_ROOT,
-            gate(
-                all(&[session_matches, work_gone(), eq(root(), "stopped")]),
-                "settling",
-                root(),
-            ),
-        ),
+        layer(PANE_ROOT, gate(removed_the_last, "settling", root())),
+        layer(PANE_WORK, gate(session_matches, &removed, ledger)),
     ]
 }
 
@@ -397,14 +400,18 @@ mod tests {
     }
 
     #[test]
-    fn a_work_stop_settles_only_a_stopped_root_and_an_empty_ledger() {
+    fn a_work_stop_settles_only_when_it_removed_the_last_token() {
         let key = WorkKey::new("s", "w").unwrap();
         let writes = work_stopped(&key);
-        let settle = &writes[1];
+        // The root layer comes first: it decides on the ledger as it was
+        // before the removal write, so a stop that removed nothing - an
+        // unmatched or duplicate stop - cannot settle a stopped root.
+        let settle = &writes[0];
         assert_eq!(settle.option, PANE_ROOT);
-        for fragment in ["settling", &eq(root(), "stopped")] {
+        for fragment in ["settling", &eq(root(), "stopped"), "#{!=:"] {
             assert!(settle.format.contains(fragment), "{settle:?}");
         }
+        assert_eq!(writes[1].option, PANE_WORK);
     }
 
     #[test]

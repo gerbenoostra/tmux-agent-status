@@ -304,6 +304,15 @@ fn duplicate_and_unmatched_work_events_are_no_ops() {
 
     server.apply(&pane, &work_stopped("s1", "a"));
     assert_eq!(server.layer(&pane, "@agent_pane_root"), "settling");
+
+    // Nor does a stray stop on an emptied ledger: once the automatic turn's
+    // clean stop shows ✅, an unmatched `SubagentStop` - which Claude emits
+    // for helpers that never had a start - must leave it alone.
+    server.apply(&pane, &done());
+    assert_eq!(server.pane_status(&pane), "done");
+    server.apply(&pane, &work_stopped("s1", "b"));
+    assert_eq!(server.layer(&pane, "@agent_pane_root"), "stopped");
+    assert_eq!(server.pane_status(&pane), "done");
 }
 
 #[test]

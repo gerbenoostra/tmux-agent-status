@@ -1030,6 +1030,92 @@ mod tests {
         assert!(entries.len() > 1, "ours was not added: {out}");
     }
 
+    /// The `settings.json` hooks block a pre-lifecycle version of this tool
+    /// installed, plus a hook of the user's own on an event we own.
+    const CLAUDE_SCALAR_SETTINGS: &str = r#"{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|fork",
+        "hooks": [{ "type": "command", "command": "tmux-agent-status reset" }]
+      },
+      { "hooks": [{ "type": "command", "command": "theirs" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status set done" }] }
+    ]
+  }
+}
+"#;
+
+    /// Every command string a hooks object runs, wherever it is nested.
+    fn hook_commands(value: &Value) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut walk = Vec::new();
+        walk.push(value.clone());
+        while let Some(item) = walk.pop() {
+            match item {
+                Value::Object(map) => {
+                    if let Some(command) = map.get("command").and_then(Value::as_str) {
+                        found.push(command.to_owned());
+                    }
+                    walk.extend(map.into_values());
+                }
+                Value::Array(items) => walk.extend(items),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn a_claude_settings_merge_upgrades_the_scalar_hooks() {
+        let claude = agent("claude-code");
+        let out = written(claude.merge(CLAUDE_SCALAR_SETTINGS).unwrap());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+
+        // The superseded groups are gone, the lifecycle forms are in, each
+        // exactly once - and the user's own hook on the same event survived.
+        let commands = hook_commands(&parsed["hooks"]);
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|c| c.as_str() == "tmux-agent-status reset --agent claude-code --stdin")
+                .count(),
+            1,
+            "{out}"
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|c| c.as_str() == "tmux-agent-status finish --agent claude-code --stdin")
+                .count(),
+            1,
+            "{out}"
+        );
+        for stale in ["tmux-agent-status reset", "tmux-agent-status finish"] {
+            assert!(
+                !commands.iter().any(|c| c == stale),
+                "the superseded `{stale}` survived: {out}"
+            );
+        }
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|c| c.as_str() == "tmux-agent-status notify --agent claude-code --stdin")
+                .count(),
+            3,
+            "SubagentStart, SubagentStop and the TaskStop PostToolUse each get one: {out}"
+        );
+        assert!(commands.iter().any(|c| c == "theirs"), "{out}");
+
+        // And the result is a fixpoint: a second merge writes nothing.
+        assert_eq!(claude.merge(&out), Ok(Plan::AlreadyRegistered));
+    }
+
     #[test]
     fn a_stale_entry_of_ours_is_replaced_rather_than_duplicated() {
         let before = r#"{"hooks": {"SessionStart": [
