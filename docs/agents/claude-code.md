@@ -69,9 +69,10 @@ last `Stop`, not the child's, is what exposes ✅ and rings, once.
   and `Monitor` timers fire no lifecycle events, so a root `Stop` can show ✅ while they run.
   Killing a task from the tasks UI emits no stop event of its own; if the killed item's
   `SubagentStop` never arrives, the pane holds 🤖 until the session boundary clears it.
-- **Upgrading mid-session stays scalar.** A session already running when these hooks are installed
-  has no accepted session until its next `SessionStart`, so its work events are ignored and the
-  pane behaves as before for the rest of that session.
+- **Upgrading mid-session tracks nothing until the next `SessionStart`.** A session whose hooks
+  went live without a `SessionStart` has no accepted session, so its work events and its
+  `SessionEnd` are ignored; the root events still behave as before. Quitting such a session
+  mid-turn therefore leaves 🤖 until the next `SessionStart` resets the pane.
 - **One session per pane is tracked.** The agents sidebar emits `SessionStart`/`SessionEnd` pairs
   for other session ids in the same pane; the latest `SessionStart` wins - it resets the pane and
   accepts that session - and lifecycle events naming any other session are ignored.
