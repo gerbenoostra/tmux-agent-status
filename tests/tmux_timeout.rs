@@ -1,0 +1,42 @@
+//! The bound on test-side tmux calls names the call that blocked.
+
+use std::process::Command;
+use std::time::{Duration, Instant};
+
+mod support;
+
+use support::tmux::try_output_within;
+
+#[test]
+fn a_command_that_outlives_its_limit_is_killed_and_named() {
+    let mut command = Command::new("sleep");
+    command.arg("30");
+    let started = Instant::now();
+
+    let err = try_output_within(command, Duration::from_millis(200)).expect_err("sleep outlives");
+
+    assert!(started.elapsed() < Duration::from_secs(10), "not killed");
+    assert!(err.contains("`sleep 30`"), "{err}");
+    assert!(err.contains("200ms"), "{err}");
+}
+
+#[test]
+fn a_command_within_its_limit_returns_its_output() {
+    let mut command = Command::new("sh");
+    command.args(["-c", "echo out; echo err >&2; exit 3"]);
+
+    let out = try_output_within(command, Duration::from_secs(30)).expect("sh finishes");
+
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(out.stdout, b"out\n");
+    assert_eq!(out.stderr, b"err\n");
+}
+
+#[test]
+fn a_command_that_cannot_start_is_named() {
+    let command = Command::new("tmux-agent-status-no-such-program");
+
+    let err = try_output_within(command, Duration::from_secs(1)).expect_err("no such program");
+
+    assert!(err.contains("tmux-agent-status-no-such-program"), "{err}");
+}
