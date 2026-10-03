@@ -41,7 +41,21 @@ impl Server {
 
     /// Put a value in a pane's status behind the tool's back, so a test can
     /// arrange what a pane already holds without going through the policy.
+    ///
+    /// The internal layer options are cleared along with it, leaving the pane
+    /// as an older version left it: a plain scalar `@agent_pane_status` that
+    /// the next transition lazily imports.
     fn put_status(&self, pane: &str, value: &str) {
+        for option in [
+            "@agent_pane_root",
+            "@agent_pane_attention",
+            "@agent_pane_completion",
+            "@agent_pane_work",
+            "@agent_pane_host_session",
+            "@agent_pane_model",
+        ] {
+            self.tmux(&["set-option", "-p", "-u", "-t", pane, option]);
+        }
         match value {
             "" => self.tmux(&["set-option", "-p", "-u", "-t", pane, "@agent_pane_status"]),
             value => self.tmux(&["set-option", "-p", "-t", pane, "@agent_pane_status", value]),
@@ -331,7 +345,8 @@ fn every_state_reaches_the_window_as_its_own_glyph() {
         ("waiting", "💬"),
     ] {
         // Reported onto an empty pane: a pane that already holds a state can
-        // refuse a lower one, which `a_state_is_refused_if_it_ranks_lower` covers.
+        // refuse a lower one, which
+        // `a_reported_state_lands_according_to_the_layered_precedence` covers.
         assert_ok(&server.agent_status(&pane, &["reset"]));
         assert_ok(&server.agent_status(&pane, &["set", state]));
         assert_eq!(server.window_status(&pane), glyph, "state {state}");
@@ -942,10 +957,13 @@ fn an_unknown_state_is_loud() {
 }
 
 #[test]
-fn a_state_is_refused_if_it_ranks_lower_than_the_one_the_pane_holds() {
-    // The pane precedence: within a pane `error` > `done` > `waiting` >
-    // `working`, and a value this tool does not recognise is replaced by any of
-    // them. The glyph follows the pane, since it is the only pane here.
+fn a_reported_state_lands_according_to_the_layered_precedence() {
+    // Attention (`waiting`, `error`) outranks activity, and an `error` also a
+    // clean stop. With no tracked work, a `done` nobody has seen refuses a
+    // later `working` or `waiting`: the turn already ended, so either is a
+    // straggler or an idle nag. A value this tool does not recognise is
+    // replaced by any of them. The glyph follows the pane, since it is the
+    // only pane here.
     let server = Server::start();
     let pane = server.first_pane();
 

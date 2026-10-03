@@ -34,7 +34,7 @@ fn normalise(mut entries: Vec<HookEntry>, source: &str) -> Vec<HookEntry> {
     entries
 }
 
-const EXPECTED_EVENTS: usize = 8;
+const EXPECTED_EVENTS: usize = 11;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -1,17 +1,42 @@
 //! The only impure module: the tmux calls.
 //!
-//! It knows the two option names and the commands that read and write them,
-//! and nothing about ranks, glyphs or stickiness: every value it writes is a
-//! format from `formats`, chosen by `command`.
+//! It knows the option names and the commands that read and write them,
+//! and nothing about ranks, glyphs or the transition table: every value it
+//! writes is a format from `formats`, chosen by `command`.
+//!
+//! The two public options are `@agent_pane_status` (per pane) and
+//! `@agent_status` (per window rollup). The other pane-local options are the
+//! internal layers the public state is projected from; tmux option inheritance
+//! makes a pane with no status read back as the window's value, so the rollup
+//! can never share a name with a pane option.
 
 use std::io;
 use std::process::{Command, Stdio};
 
-/// Per pane, written from `$TMUX_PANE`. Never referenced by the format string.
+/// Per pane: the projected public state. Never referenced by the format
+/// string, except as the legacy scalar an un-migrated pane still holds.
 pub const PANE_OPTION: &str = "@agent_pane_status";
 
 /// Per window, the rollup. The only thing the format string reads.
 pub const WINDOW_OPTION: &str = "@agent_status";
+
+/// Per pane: the parent turn's phase - `working`, `stopped` or `settling`.
+pub const PANE_ROOT: &str = "@agent_pane_root";
+
+/// Per pane: unacknowledged attention - `waiting` or `error`.
+pub const PANE_ATTENTION: &str = "@agent_pane_attention";
+
+/// Per pane: `pending` records a clean stop nobody has seen yet.
+pub const PANE_COMPLETION: &str = "@agent_pane_completion";
+
+/// Per pane: the tracked-work ledger, `,token,...,` or unset.
+pub const PANE_WORK: &str = "@agent_pane_work";
+
+/// Per pane: the hex-encoded host session lifecycle events must match.
+pub const PANE_HOST_SESSION: &str = "@agent_pane_host_session";
+
+/// Per pane: `1` once the layered state has been initialised.
+pub const PANE_MODEL: &str = "@agent_pane_model";
 
 /// A pane id as tmux prints it: `%` and a number.
 ///
@@ -21,7 +46,7 @@ pub const WINDOW_OPTION: &str = "@agent_status";
 pub struct PaneId(String);
 
 impl PaneId {
-    fn parse(text: &str) -> Option<PaneId> {
+    pub(crate) fn parse(text: &str) -> Option<PaneId> {
         let number = text.strip_prefix('%')?;
         let valid = !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit());
         valid.then(|| PaneId(text.to_owned()))
@@ -29,37 +54,6 @@ impl PaneId {
 
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-/// A pane of the window, and whether its status option holds anything.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Pane {
-    pub id: PaneId,
-    pub has_status: bool,
-}
-
-/// The window a hook addresses, as one read saw it.
-///
-/// Only which panes to write is taken from here. Whether a write lands, and
-/// what it writes, is decided again by the server when it runs: this read can
-/// be stale by then.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Window {
-    /// The pane the target resolved to.
-    pub pane: PaneId,
-    /// Every pane of its window, that one included.
-    pub panes: Vec<Pane>,
-}
-
-impl Window {
-    /// The addressed pane, if it holds a status.
-    pub fn addressed_with_status(&self) -> Option<&PaneId> {
-        self.panes
-            .iter()
-            .find(|pane| pane.id == self.pane)
-            .filter(|pane| pane.has_status)
-            .map(|pane| &pane.id)
     }
 }
 
@@ -103,74 +97,50 @@ pub fn resolve_pane(explicit: Option<&str>) -> Option<String> {
     current_pane()
 }
 
-/// The pane `target` resolves to and the panes of its window, in one call.
+/// The pane `target` resolves to.
 ///
-/// A pane target resolves to the window that holds it, which is how one
-/// `$TMUX_PANE` addresses all of its siblings.
-pub fn window(target: &str) -> io::Result<Window> {
-    let listing = format!("#{{pane_id}}\t#{{{PANE_OPTION}}}");
-    let out = run(&[
-        cmd(&["display-message", "-p", "-t", target, "#{pane_id}"]),
-        cmd(&["list-panes", "-t", target, "-F", &listing]),
-    ])?;
-    parse_window(&out).ok_or_else(|| {
+/// This is the one read a command performs, and only the pane's id comes back:
+/// no aggregate state is ever read into a write decision. A pane that has
+/// closed since its hook fired fails here, which the caller's silent exit
+/// turns into a no-op.
+pub fn pane(target: &str) -> io::Result<PaneId> {
+    let out = run(&[cmd(&["display-message", "-p", "-t", target, "#{pane_id}"])])?;
+    out.lines().next().and_then(PaneId::parse).ok_or_else(|| {
         io::Error::other(format!(
-            "tmux printed an unexpected description of {target}: {out}"
+            "tmux printed an unexpected answer for {target}: {out}"
         ))
     })
 }
 
-/// The addressed pane's id on the first line, then `pane<TAB>status` per pane.
-///
-/// The status is whatever the user's option holds and may contain tabs itself,
-/// so the pane is taken from the left. Every line is ours to have asked for, so
-/// one that does not parse is a tmux that did not answer the question.
-fn parse_window(out: &str) -> Option<Window> {
-    let mut lines = out.lines();
-    let pane = PaneId::parse(lines.next()?)?;
-    let panes = lines
-        .map(|line| {
-            let (id, status) = line.split_once('\t')?;
-            Some(Pane {
-                id: PaneId::parse(id)?,
-                has_status: !status.is_empty(),
-            })
-        })
-        .collect::<Option<_>>()?;
-    Some(Window { pane, panes })
-}
-
-/// Set the pane's status to what `format` expands to on that pane.
-pub fn set_pane_status(pane: &PaneId, format: &str) -> Cmd {
+/// Set a pane option to what `format` expands to on that pane.
+pub fn set_pane_option(pane: &PaneId, option: &str, format: &str) -> Cmd {
     cmd(&[
         "set-option",
         "-p",
         "-F",
         "-t",
         pane.as_str(),
-        PANE_OPTION,
+        option,
         format,
     ])
 }
 
-/// Unset the pane's status if it holds nothing.
+/// Unset `option` on `pane` when `condition` expands true on that pane.
 ///
 /// A format can only expand to a value, so a write that clears leaves an empty
-/// string; this turns it back into an unset option, which reads back empty
-/// rather than inheriting. It decides on what the pane holds when it runs, so a
-/// write that lands in between is never removed.
-pub fn unset_pane_status_if_empty(pane: &PaneId) -> Cmd {
+/// string; the conditional unset turns that back into an unset option and
+/// decides on the value current at the instant it runs, so a write that lands
+/// in between is never removed.
+pub fn unset_pane_option_if(pane: &PaneId, option: &str, condition: &str) -> Cmd {
     // The nested command does not inherit the `-t` of `if-shell` - verified on
     // 3.6a - so it names the pane again.
-    let unset = format!("set-option -p -u -t {} {PANE_OPTION}", pane.as_str());
-    cmd(&[
-        "if-shell",
-        "-F",
-        "-t",
-        pane.as_str(),
-        &format!("#{{?{PANE_OPTION},,1}}"),
-        &unset,
-    ])
+    let unset = format!("set-option -p -u -t {} {option}", pane.as_str());
+    cmd(&["if-shell", "-F", "-t", pane.as_str(), condition, &unset])
+}
+
+/// Unset `option` on `pane` if it holds nothing.
+pub fn unset_pane_option_if_empty(pane: &PaneId, option: &str) -> Cmd {
+    unset_pane_option_if(pane, option, &format!("#{{?{option},,1}}"))
 }
 
 /// Set the glyph of the pane's window to what `format` expands to there.
@@ -198,6 +168,15 @@ pub fn unset_window_status_if_empty(pane: &PaneId) -> Cmd {
         &format!("#{{?{WINDOW_OPTION},,1}}"),
         &unset,
     ])
+}
+
+/// Print `1` when the pane's tracked-work ledger is empty, nothing otherwise.
+///
+/// Appended as the last command of a queue so the verdict reflects the writes
+/// the same serialized run just performed; the caller reads its stdout.
+pub fn work_verdict(pane: &PaneId) -> Cmd {
+    let verdict = format!("#{{?{PANE_WORK},,1}}");
+    cmd(&["display-message", "-p", "-t", pane.as_str(), &verdict])
 }
 
 /// Run `commands` as one tmux invocation and return what they printed.
@@ -266,56 +245,37 @@ mod tests {
     }
 
     #[test]
-    fn parse_window_reads_the_pane_then_every_pane_of_its_window() {
-        let window = parse_window("%1\n%0\tdone\n%1\t\n").unwrap();
-        assert_eq!(window.pane, id("%1"));
-        assert_eq!(
-            window.panes,
-            [
-                Pane {
-                    id: id("%0"),
-                    has_status: true
-                },
-                Pane {
-                    id: id("%1"),
-                    has_status: false
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn a_value_with_tabs_is_still_a_status() {
-        let window = parse_window("%0\n%0\twaiting\textra\n").unwrap();
-        assert!(window.panes[0].has_status);
-    }
-
-    #[test]
-    fn addressed_with_status_is_the_addressed_pane_only_and_only_with_a_status() {
-        let window = parse_window("%1\n%0\tdone\n%1\twaiting\n").unwrap();
-        assert_eq!(window.addressed_with_status(), Some(&id("%1")));
-        let window = parse_window("%1\n%0\tdone\n%1\t\n").unwrap();
-        assert_eq!(window.addressed_with_status(), None);
-    }
-
-    #[test]
-    fn parse_window_rejects_output_it_did_not_ask_for() {
-        for out in ["", "badline", "%0\nbadline", "%0\n%x\tdone", "t:0\n%0\t"] {
-            assert_eq!(parse_window(out), None, "{out:?}");
-        }
-    }
-
-    #[test]
     fn no_argument_ends_in_a_command_separator() {
         // tmux splits a command list on an argument that ends in `;`.
         let pane = id("%3");
         for command in [
-            set_pane_status(&pane, "#{x}"),
-            unset_pane_status_if_empty(&pane),
+            set_pane_option(&pane, PANE_OPTION, "#{x}"),
+            unset_pane_option_if_empty(&pane, PANE_OPTION),
+            unset_pane_option_if(&pane, PANE_WORK, "#{==:#{@agent_pane_work},}"),
             set_window_status(&pane, "#{x}"),
             unset_window_status_if_empty(&pane),
+            work_verdict(&pane),
         ] {
             assert!(command.iter().all(|arg| !arg.ends_with(';')), "{command:?}");
+        }
+    }
+
+    #[test]
+    fn option_names_cannot_break_a_format() {
+        // The option names are spliced into formats and nested command
+        // strings; a `;` or `,` in one would inject a command or break an
+        // argument list.
+        for option in [
+            PANE_OPTION,
+            WINDOW_OPTION,
+            PANE_ROOT,
+            PANE_ATTENTION,
+            PANE_COMPLETION,
+            PANE_WORK,
+            PANE_HOST_SESSION,
+            PANE_MODEL,
+        ] {
+            assert!(!option.contains([';', ',', '#', '{', '}', ' ']), "{option}");
         }
     }
 }

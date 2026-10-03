@@ -24,11 +24,13 @@ The following agent states are distinguished:
 
 If one window contains multiple agents, the most demanding status is shown: `waiting` > `error` > `done` > `working`.
 
-An agent runs several things at once, so its events arrive interleaved. Within one pane the glyph
-keeps the most important state you have not seen yet, `error` > `done` > `waiting` > `working`, and
-ignores a lower one until you focus that pane or type the next prompt. A tool call finishing in
-parallel cannot hide an open permission prompt. The flip side: if the agent asks for something after
-a turn you have not acknowledged, the entry keeps its ✅, but the bell still rings.
+An agent runs several things at once, so its events arrive interleaved. Within one pane the
+precedence is layered rather than a single rank: an unanswered `waiting` or `error` is always
+shown, then any activity - a running turn, or background work the agent still tracks - then a
+clean outcome nobody has seen. A tool call finishing in parallel cannot hide an open permission
+prompt, and work that outlives a turn keeps the pane on 🤖 until it too stops. Without tracked work,
+a clean outcome you have not seen keeps its ✅ against a later `working` or `waiting`: the turn has
+ended, so that is a straggler event or an idle nag. The bell still rings for the `waiting`.
 
 For windows with no agent this tool is a no-op.
 
@@ -66,17 +68,29 @@ Setup has two steps:
 
 The flow is:
 1. Your coding agent's lifecycle hooks call the `tmux-agent-status`.
-2. It writes a tmux option per pane indicating the agent status (`error`, `done`, `waiting`, or `working`)
+2. It writes pane-local tmux options tracking the turn's phase, unacknowledged attention, a pending
+   outcome and the ledger of work the agent still runs - and projects them to the pane's public
+   state (`error`, `done`, `waiting`, or `working`). Every state-dependent decision is a tmux format
+   the server expands inside one command invocation, so hooks arriving concurrently cannot race a
+   read-then-write.
 3. All pane states are summarized into a single single glyph on the window (`error` > `done` > `waiting` > `working`)
-4. It rings the terminal bell on any states that ends a turn (`done`, `error`, `waiting`).
+4. It rings the terminal bell on any state that ends a turn (`done`, `error`, `waiting`). A `done`
+   that arrives while tracked work is still running stays silent - the clean stop after the last
+   item is the one that rings.
 5. A state is always written and always shown, whatever tmux thinks about the window being current
    or the session being attached.
-6. When a pane gains focus, its non-sticky state is reset (only `working` stays), and the window
-   glyph is recomputed from what its other panes still hold.
+6. When a pane gains focus, its unacknowledged attention and pending outcome are reset (a running
+   turn and tracked work stay), and the window glyph is recomputed from what its other panes still
+   hold.
 
-We use two tmux options, separating status from final glyph:
+Per pane the state is a layered model in internal options - `@agent_pane_root` (the turn's phase:
+`working`, `stopped`, or `settling` while the last tracked item just stopped), `@agent_pane_attention`
+(`waiting`/`error`), `@agent_pane_completion` (`pending`), `@agent_pane_work` (the `,token,...,`
+ledger), `@agent_pane_host_session` and `@agent_pane_model`. Only two options are the public surface,
+separating status from final glyph:
 
-- **`@agent_pane_status`**, per pane, holds the state name of the agent in that pane. Written from `$TMUX_PANE` by `set`.
+- **`@agent_pane_status`**, per pane, holds the state name the layers project to. Written from
+  `$TMUX_PANE` by `set`.
 - **`@agent_status`**, per window, holds the glyph. The maximum by rank over that window's panes,
   recomputed after every write. This is what's interpolated in the format string.
 
@@ -88,9 +102,10 @@ the pane that gained focus, as can be seen in
 terminal focus and needs `focus-events on`; `session-window-changed` and `window-pane-changed` are
 the fallback for switching windows and panes inside tmux when that option is off.
 
-Therefore, focusing a pane drops that pane's `waiting`, `error` and `done`; `working` survives, as
-the agent is still running. Acknowledgement is scoped to the one pane that gained focus - a sibling
-pane keeps its state, whether it is on screen in a split or hidden behind a zoomed pane.
+Therefore, focusing a pane drops that pane's `waiting`, `error` and `done`; `working` and any
+tracked work survive, as the agent is still running. Acknowledgement is scoped to the one pane that
+gained focus - a sibling pane keeps its state, whether it is on screen in a split or hidden behind
+a zoomed pane.
 
 A turn that ends on the pane you are **already** focused on still paints its glyph and rings the
 bell: it stays until you type the next prompt, or move focus away and back. A turn that ends while
@@ -104,7 +119,8 @@ later re-attach clears nothing, on that pane or any other).
 The tool deliberately stays as independent and small as possible. It doesn't require any daemon processes, nor
 spawns subprocesses. It should also not interfere with your other agent or custom tmux configuration.
 
-The only footprint within tmux are the two variables `@agent_pane_status` and `@agent_status`.
+The only footprint within tmux is a handful of pane-local options; `@agent_pane_status` and
+`@agent_status` are the only public ones to read.
 
 Then you can use the format string in a way you like.
 

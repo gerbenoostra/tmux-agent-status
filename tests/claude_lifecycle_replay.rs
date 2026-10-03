@@ -9,9 +9,8 @@
 //!
 //! Every record yields one row: `NNN event command pane window bell`, held in
 //! the scenario's `expected.tsv`. With `TAS_REPLAY_WRITE=1` (only `1`) the rows are
-//! written instead of asserted. The rows document what the *shipped* mapping
-//! does - including the defect where a parent `Stop` shows ✅ and rings while
-//! a tracked child is still running.
+//! written instead of asserted. A command taking `--stdin` is fed the record's
+//! `payload` from a file, recorded in the command column as `< NNN-event`.
 
 use std::fs;
 use std::path::Path;
@@ -20,6 +19,7 @@ use std::time::Duration;
 mod support;
 
 use support::lifecycle::{self, Scenario, read_record};
+use support::tempdir::TempDir;
 use support::tmux::{Server, wait_for};
 
 const DROP_IN: &str = "share/agents/claude-code/hooks.json";
@@ -265,26 +265,50 @@ fn replay(scenario: &Scenario, hooks: &serde_json::Value) -> Vec<String> {
     );
 
     let mut rows = Vec::new();
+    let payloads = TempDir::new(&format!("replay-{}", scenario.name()));
     for (seq, path) in scenario.records.iter().enumerate() {
         let record = read_record(path);
         let event = record["event"].as_str().unwrap();
+        let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
         let commands = commands_for(&record, hooks);
         let command = if commands.is_empty() {
             "-".to_owned()
         } else {
-            for (i, command) in commands.iter().enumerate() {
-                server.run_hook(&pane, command, seq * 100 + i);
+            // Hook commands that take `--stdin` get the record's payload piped
+            // in, the way the host delivers it. Written to a file rather than
+            // inlined into a shell string, so payload quoting cannot decide
+            // what the command does.
+            let mut stdin_file = None;
+            if commands.iter().any(|command| command.contains("--stdin")) {
+                let file = payloads.write(
+                    &format!("{stem}.payload.json"),
+                    &serde_json::to_string(&record["payload"]).unwrap(),
+                );
+                stdin_file = Some(format!("'{}'", file.display()));
             }
-            commands.join(" && ")
+            for (i, command) in commands.iter().enumerate() {
+                let run = match &stdin_file {
+                    Some(file) if command.contains("--stdin") => {
+                        format!("{command} < {file}")
+                    }
+                    _ => command.clone(),
+                };
+                server.run_hook(&pane, &run, seq * 100 + i);
+            }
+            commands
+                .iter()
+                .map(|command| match &stdin_file {
+                    Some(_) if command.contains("--stdin") => format!("{command} < {stem}"),
+                    _ => command.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join(" && ")
         };
         let observed = server.observed(&pane);
         // Selecting the window marks it viewed and clears the bell flag.
         server.tmux(&["select-window", "-t", "t:dummy"]);
         server.tmux(&["select-window", "-t", &format!("t:{window}")]);
-        rows.push(format!(
-            "{}\t{event}\t{command}\t{observed}",
-            path.file_stem().unwrap().to_string_lossy(),
-        ));
+        rows.push(format!("{stem}\t{event}\t{command}\t{observed}"));
     }
     rows
 }

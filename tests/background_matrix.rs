@@ -9,8 +9,9 @@
 //! the single-callback form, not the lifecycle commands.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use tmux_agent_status::notify::{NotifyAction, dispatch};
 use tmux_agent_status::register::agents;
 
 mod support;
@@ -137,4 +138,40 @@ fn a_scalar_host_never_feeds_stdin_to_lifecycle_commands() {
             // `notify --agent <name> --stdin` is the shape-B route and stays legal.
         }
     }
+}
+
+/// A scalar host's `notify` adapter may only ever produce the plain
+/// `Report` actions: `WorkStarted`/`WorkStopped`/`ResetSession`/`EndSession`
+/// would pretend it can identify tracked work it has no events for. Every
+/// captured payload under `tests/fixtures/<host>/` replays to a `Report` or a
+/// drop.
+#[test]
+fn a_scalar_host_s_notify_payloads_replay_to_report_or_nothing() {
+    let mut checked = 0;
+    for Row { name, shipped_tier } in matrix_rows() {
+        if shipped_tier != "scalar" {
+            continue;
+        }
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(&name);
+        if !dir.is_dir() {
+            continue;
+        }
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let payload = fs::read_to_string(&path).unwrap();
+            let action = dispatch(&name, &payload);
+            assert!(
+                matches!(action, None | Some(NotifyAction::Report(_))),
+                "{}: a scalar host produced a lifecycle action: {action:?}",
+                path.display()
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no scalar host fixtures were replayed");
 }

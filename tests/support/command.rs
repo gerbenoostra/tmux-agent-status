@@ -6,23 +6,26 @@ use tmux_agent_status::state::State;
 pub enum HookCommand {
     Set(String),
     Start,
-    Reset,
-    Finish,
+    /// `reset`, or `reset --agent <name> --stdin` for a host whose session
+    /// payload scopes the reset.
+    Reset {
+        agent: Option<String>,
+    },
+    /// `finish`, or `finish --agent <name> --stdin`, same idea as `Reset`.
+    Finish {
+        agent: Option<String>,
+    },
     ClearPane,
-    Notify { agent: String },
+    Notify {
+        agent: String,
+        stdin: bool,
+    },
 }
 
 impl HookCommand {
     /// The full command as it would appear in a shipped file.
     pub fn as_str(&self) -> String {
-        match self {
-            HookCommand::Set(state) => format!("tmux-agent-status set {state}"),
-            HookCommand::Start => "tmux-agent-status start".to_string(),
-            HookCommand::Reset => "tmux-agent-status reset".to_string(),
-            HookCommand::Finish => "tmux-agent-status finish".to_string(),
-            HookCommand::ClearPane => "tmux-agent-status clear-pane".to_string(),
-            HookCommand::Notify { agent } => format!("tmux-agent-status notify --agent {agent}"),
-        }
+        format!("tmux-agent-status {}", self.arguments())
     }
 
     /// Only the arguments after `tmux-agent-status `.
@@ -30,11 +33,24 @@ impl HookCommand {
         match self {
             HookCommand::Set(state) => format!("set {state}"),
             HookCommand::Start => "start".to_string(),
-            HookCommand::Reset => "reset".to_string(),
-            HookCommand::Finish => "finish".to_string(),
+            HookCommand::Reset { agent } => session_command("reset", agent),
+            HookCommand::Finish { agent } => session_command("finish", agent),
             HookCommand::ClearPane => "clear-pane".to_string(),
-            HookCommand::Notify { agent } => format!("notify --agent {agent}"),
+            HookCommand::Notify { agent, stdin } => {
+                let mut command = format!("notify --agent {agent}");
+                if *stdin {
+                    command.push_str(" --stdin");
+                }
+                command
+            }
         }
+    }
+}
+
+fn session_command(subcommand: &str, agent: &Option<String>) -> String {
+    match agent {
+        Some(agent) => format!("{subcommand} --agent {agent} --stdin"),
+        None => subcommand.to_string(),
     }
 }
 
@@ -68,11 +84,22 @@ pub fn parse_command(source: &str, command: &str) -> HookCommand {
             HookCommand::Set(state.to_string())
         }
         ["start"] => HookCommand::Start,
-        ["reset"] => HookCommand::Reset,
-        ["finish"] => HookCommand::Finish,
+        ["reset"] => HookCommand::Reset { agent: None },
+        ["reset", "--agent", agent, "--stdin"] => HookCommand::Reset {
+            agent: Some(agent.to_string()),
+        },
+        ["finish"] => HookCommand::Finish { agent: None },
+        ["finish", "--agent", agent, "--stdin"] => HookCommand::Finish {
+            agent: Some(agent.to_string()),
+        },
         ["clear-pane"] => HookCommand::ClearPane,
-        ["notify", "--agent", agent, ..] => HookCommand::Notify {
+        ["notify", "--agent", agent] => HookCommand::Notify {
             agent: agent.to_string(),
+            stdin: false,
+        },
+        ["notify", "--agent", agent, "--stdin"] => HookCommand::Notify {
+            agent: agent.to_string(),
+            stdin: true,
         },
         _ => panic!("{source}: unrecognised tmux-agent-status command: {command}"),
     }

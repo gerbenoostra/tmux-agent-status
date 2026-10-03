@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::path::Path;
-use tmux_agent_status::notify::dispatch;
+use tmux_agent_status::notify::{NotifyAction, dispatch};
 use tmux_agent_status::state::State;
 
 fn expected_state(name: &str) -> Option<State> {
@@ -33,7 +33,7 @@ fn every_fixture_maps_to_its_expected_state() {
         }
         let payload = fs::read_to_string(&path).unwrap();
         let name = path.file_stem().unwrap().to_str().unwrap();
-        let expected = expected_state(name);
+        let expected = expected_state(name).map(NotifyAction::Report);
         let actual = dispatch("mistral-vibe", &payload);
         assert_eq!(actual, expected, "{}", path.display());
         checked += 1;

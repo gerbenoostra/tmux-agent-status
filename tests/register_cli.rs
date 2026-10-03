@@ -304,6 +304,105 @@ fn with_no_claude_on_the_path_the_settings_merge_is_the_route() {
     assert!(settings.contains("tmux-agent-status"), "{settings}");
 }
 
+/// The `settings.json` a pre-lifecycle version of this tool left behind: the
+/// plain `reset` and `finish` groups, plus a hook of the user's own.
+const CLAUDE_SCALAR_SETTINGS: &str = r#"{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|fork",
+        "hooks": [{ "type": "command", "command": "tmux-agent-status reset" }]
+      },
+      { "hooks": [{ "type": "command", "command": "theirs" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "tmux-agent-status finish" }] }
+    ]
+  }
+}
+"#;
+
+#[test]
+fn a_settings_merge_upgrades_the_scalar_claude_hooks_exactly_once() {
+    let home = TempDir::new("cli-claude-upgrade");
+    // No `claude` on PATH, so the merge route is the only route.
+    let empty = home.join("bin");
+    fs::create_dir_all(&empty).expect("the bin directory");
+    fs::create_dir_all(home.join(".claude")).expect("the directory");
+    let settings = home.join(".claude/settings.json");
+    fs::write(&settings, CLAUDE_SCALAR_SETTINGS).expect("the config");
+
+    // A dry run plans the upgrade and writes nothing.
+    let dry = command(&home, &["--dry-run", "--agents=claude-code"])
+        .env("PATH", only(&empty))
+        .output()
+        .expect("the binary runs");
+    assert_eq!(code(&dry), 0, "{}", stderr(&dry));
+    assert!(
+        stdout(&dry).contains("--dry-run: nothing above was written."),
+        "{}",
+        stdout(&dry)
+    );
+    assert_eq!(
+        fs::read_to_string(&settings).expect("the file"),
+        CLAUDE_SCALAR_SETTINGS,
+        "a dry run edited the file"
+    );
+    assert!(residue(home.path()).is_empty());
+
+    let out = command(&home, &["-y", "--agents=claude-code"])
+        .env("PATH", only(&empty))
+        .output()
+        .expect("the binary runs");
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+
+    let upgraded = fs::read_to_string(&settings).expect("the file");
+    assert!(
+        upgraded.contains("tmux-agent-status reset --agent claude-code --stdin"),
+        "{upgraded}"
+    );
+    assert!(
+        upgraded.contains("tmux-agent-status finish --agent claude-code --stdin"),
+        "{upgraded}"
+    );
+    assert!(
+        upgraded.contains("tmux-agent-status notify --agent claude-code --stdin"),
+        "{upgraded}"
+    );
+    assert!(
+        !upgraded.contains("\"tmux-agent-status reset\""),
+        "{upgraded}"
+    );
+    assert!(
+        !upgraded.contains("\"tmux-agent-status finish\""),
+        "{upgraded}"
+    );
+    assert!(
+        upgraded.contains("\"theirs\""),
+        "the user's hook was lost: {upgraded}"
+    );
+    // An edit was made, so a backup exists.
+    assert_eq!(residue(home.path()).len(), 1);
+
+    // A second run is a semantic no-op: no rewrite, no backup.
+    let second = command(&home, &["-y", "--agents=claude-code"])
+        .env("PATH", only(&empty))
+        .output()
+        .expect("the binary runs");
+    assert_eq!(code(&second), 0, "{}", stderr(&second));
+    assert!(
+        stdout(&second).contains("already registered"),
+        "{}",
+        stdout(&second)
+    );
+    assert_eq!(
+        fs::read_to_string(&settings).expect("the file"),
+        upgraded,
+        "the second run rewrote the file"
+    );
+    assert_eq!(residue(home.path()).len(), 1, "a second backup appeared");
+}
+
 // 21. The Claude route does not fall back on failure: with a stub `claude` that
 // exits non-zero, the step fails and `~/.claude/settings.json` is untouched.
 #[test]

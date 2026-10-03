@@ -92,31 +92,47 @@ subject of a bug. Read this section before changing behaviour.
   **text of the user's config file** is allowed - it is what
   `register --tmux-format` does, the same edit `docs/register.md` asks the user
   to make by hand.
-- **`@agent_pane_status` (per pane) and `@agent_status` (per window rollup)
-  are two names on purpose.** tmux option inheritance makes a pane with no
-  status read back as the window's value, so a rollup stored in the same option
-  name it reduces can no longer tell "unset" from "inherited". They can never
-  be merged into one.
+- **The pane state is a layered model, not a scalar.** Six internal pane-local
+  options hold it: `@agent_pane_root` (the turn's phase - `working`,
+  `stopped`, or `settling` when the last tracked item just stopped),
+  `@agent_pane_attention` (`waiting`/`error` until acknowledged),
+  `@agent_pane_completion` (`pending` after a clean stop nobody has seen),
+  `@agent_pane_work` (the `,token,...,` ledger of tracked work),
+  `@agent_pane_host_session` (the accepted lifecycle session) and
+  `@agent_pane_model` (the layout marker). `@agent_pane_status` (per pane) and
+  `@agent_status` (per window rollup) are the only public projections, and
+  they are two names on purpose: tmux option inheritance makes a pane with no
+  status read back as the window's value, so a rollup stored in the same
+  option name it reduces can no longer tell "unset" from "inherited". They
+  can never be merged into one.
 - **State decisions happen inside the tmux server, in one command.** Agents
   run hooks concurrently, so a value read in one tmux call can be stale by the
   time a later call writes it. `set-option -F` expands its format against the
   target before setting it, and the server runs one command at a time, so a
   format that reads the pane's own option and picks the new value is a
-  compare-and-set. Never implement this as a Rust-side read-then-write, and
-  never add a lock or state file.
+  compare-and-set. Every transition is one invocation: the layer writes, the
+  projection onto `@agent_pane_status`, the window recompute. Never implement
+  this as a Rust-side read-then-write, and never add a lock or state file.
+  The one answer a command takes back is the `set done` verdict appended to
+  its queue, which reports whether tracked work remains so the bell rings
+  only on the final clean stop.
 - **An empty value is normalised to unset atomically.** A `-F` write can only
   produce a value, so a clear produces `""`. Each touched option then gets an
   `if-shell -F '#{?OPTION,,1}' 'set-option -u ...'`, which only ever removes an
   empty value and decides on the value current at that instant. An
   unconditional unset could erase a concurrent write that landed in between.
 - **Two orderings on the same states, each named for its question.** Within a
-  pane, a later state replaces an earlier one only if it does not rank lower in
-  precedence: `error` > `done` > `waiting` > `working`. A `waiting` after a
-  finished turn must not demote a `done` nobody has seen. Across panes the
-  rollup rank is `waiting` > `error` > `done` > `working`, answering which pane
-  wants you most. `start` is the only write that does not defer to what the
-  pane holds - typing a prompt is seeing the pane, so that event clears what
-  the last turn left.
+  pane the precedence is layered rather than a rank: unacknowledged
+  `waiting`/`error` first, then activity - a `working` or `settling` root, or
+  any entry in the work ledger - then a pending `done` nobody has seen. A
+  shown `done` (stopped root, pending completion, empty ledger) refuses a
+  later `working` or `waiting`: only tracked work may put activity or
+  attention over a clean stop, so an untracked straggler cannot strand 🤖
+  and an idle nag cannot turn ✅ into 💬. Across
+  panes the rollup rank is `waiting` > `error` > `done` > `working`, answering
+  which pane wants you most. `start` is the only write that does not defer to
+  what the pane holds - typing a prompt is seeing the pane, so that event
+  clears what the last turn left; tracked work survives it.
 - **Acknowledgement is a focus event on one pane, never an inference.** A
   state is always written and always shown, whatever tmux thinks about the
   window being current or the session being attached - there is no
@@ -246,10 +262,10 @@ installation.
 
 ## Debugging tmux hooks
 Your tmux is configured with three hooks, all calling `tmux-agent-status clear-pane <pane>` for the
-pane that gained focus, which clears that pane's non-sticky states (`working` survives) and
-recomputes the window glyph. `pane-focus-in` sees terminal focus and needs `focus-events on`;
-`session-window-changed` and `window-pane-changed` are the fallback for switching windows and panes
-when that option is off. The pane argument is optional and positional: the hooks pass `#{pane_id}`,
+pane that gained focus, which acknowledges that pane's attention and pending outcome (activity
+survives) and recomputes the window glyph. `pane-focus-in` sees terminal focus and needs
+`focus-events on`; `session-window-changed` and `window-pane-changed` are the fallback for switching
+windows and panes when that option is off. The pane argument is optional and positional: the hooks pass `#{pane_id}`,
 which expands to an empty value when no pane is available.
 For manual calls the pane resolves in this order: an explicit argument (`--pane` or the positional),
 `$TMUX_AGENT_STATUS_PANE`, `$TMUX_PANE`.
@@ -314,7 +330,8 @@ the development symlink:
 3. Confirm `tmux-agent-status --version` resolves to that installed binary and prints the new
    version.
 4. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
-5. Confirm each state reaches `@agent_status` and that focusing its pane clears non-sticky states.
+5. Confirm each state reaches `@agent_status` and that focusing its pane acknowledges attention and
+   outcome while activity stays.
 
 For Nix, the checkout itself can be tested without changing another configuration:
 
@@ -345,3 +362,24 @@ entry changes with the checkout contents.
 - The squash body is the PR description - because release-please interprets conventional-looking
   paragraphs as separate changes; not the original commit messages (unchecked inner subjects can
   alter the changelog and version bump).
+- Unacknowledged `waiting`/`error` outranks activity, and focus then reveals 🤖 - because the user
+  can act now; not activity over attention (it says "wait" when action is possible) or a combined
+  glyph (the contract is four states).
+- A clean stop while tracked work remains is silent and pending; the stop that removes the last
+  item puts the root in `settling`, and only the host's next root stop shows ✅ and rings - because
+  Claude Code runs an automatic wake turn after background completion and publishes no start event
+  for it; not ✅ or a bell at the final work stop (announces completion mid-turn), nor a bell at
+  both stops (two signals for one outcome).
+- With no tracked work, a shown ✅ refuses a later `working` or `waiting` (the `waiting` still
+  rings) - because an untracked straggler would strand 🤖 past focus and an idle nag would turn
+  every finished turn into 💬; not letting every event override a clean stop.
+- Tracked work is a ledger of hex tokens of host-session plus work ID in one fixed pane option, with
+  exact add and remove decided by tmux formats - because duplicate and unmatched events must be
+  no-ops and hooks race; not a counter (duplicates and unmatched stops drift it), a Rust-side ID set
+  (read-then-write race), one dynamic option per ID (a missing stop leaks it and reset cannot
+  enumerate it) or a state file.
+- `start` keeps tracked work; a lifecycle-aware session start resets the pane and accepts its host
+  session, and every lifecycle event from another session, including session end, is ignored -
+  because work outlives turns and delayed events from an old session must not touch current work;
+  not a pane generation (a delayed stop carries none), letting an unmatched session end finish the
+  pane, or a payload-less `finish` forcing ✅ (it cannot prove the work ended).
