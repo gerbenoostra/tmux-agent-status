@@ -262,7 +262,7 @@ installation.
 
 ## Debugging tmux hooks
 Your tmux is configured with three hooks, all calling `tmux-agent-status clear-pane <pane>` for the
-pane that gained focus, which clears that pane's non-sticky states (`working` survives) and
+pane that gained focus, which acknowledges that pane's attention and pending outcome (activity survives) and
 recomputes the window glyph. `pane-focus-in` sees terminal focus and needs `focus-events on`;
 `session-window-changed` and `window-pane-changed` are the fallback for switching windows and panes
 when that option is off. The pane argument is optional and positional: the hooks pass `#{pane_id}`,
@@ -330,7 +330,7 @@ the development symlink:
 3. Confirm `tmux-agent-status --version` resolves to that installed binary and prints the new
    version.
 4. Start a fresh tmux server or reload the shipped snippet, then exercise the configured agent hooks.
-5. Confirm each state reaches `@agent_status` and that focusing its pane clears non-sticky states.
+5. Confirm each state reaches `@agent_status` and that focusing its pane acknowledges attention and outcome while activity stays.
 
 For Nix, the checkout itself can be tested without changing another configuration:
 

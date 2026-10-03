@@ -487,8 +487,8 @@ usage:
   tmux-agent-status set <state> [--pane <id>] [--json]
                               write this pane's state and recompute the window
   tmux-agent-status start [--pane <id>] [--json]
-                              begin a turn: replace whatever this pane holds
-                              with working
+                              begin a turn: acknowledge what the last turn
+                              left and show working; tracked work survives
   tmux-agent-status reset [--pane <id>] [--json]
                               clear this pane's state and recompute the window
   tmux-agent-status finish [--pane <id>] [--json]
@@ -499,7 +499,7 @@ usage:
                               one scopes the reset or finish to that session,
                               anything else runs the generic command
   tmux-agent-status clear-pane [<pane>] [--pane <id>] [--json]
-                              clear the non-sticky state of that one pane,
+                              acknowledge that one pane's attention and outcome,
                               defaulting to $TMUX_PANE
   tmux-agent-status notify --agent <name> [<payload>] [--json]
                               map a JSON payload from a shape-B agent
