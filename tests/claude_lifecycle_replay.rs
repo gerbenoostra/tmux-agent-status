@@ -242,7 +242,7 @@ fn replay(scenario: &Scenario, hooks: &serde_json::Value) -> Vec<String> {
     server.tmux(&["set-option", "-g", "bell-action", "any"]);
     // A second window so selecting away and back clears the bell flag between
     // events without an attached client.
-    server.tmux(&["new-window", "-d", "-n", "dummy", "sleep 300"]);
+    server.tmux(&["new-window", "-d", "-n", "dummy", support::tmux::IDLE]);
     let pane = server
         .tmux(&["list-panes", "-t", "t:0", "-F", "#{pane_id}"])
         .trim_end()

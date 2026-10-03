@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 mod support;
 
 use support::tempdir::TempDir;
+use support::tmux::{TMUX_TIMEOUT, output_within, try_output_within};
 
 /// A tmux server on a socket of its own, started on a given config.
 struct Server {
@@ -45,14 +46,15 @@ impl Server {
             "100",
             "-y",
             "20",
-            "sleep 300",
+            support::tmux::IDLE,
         ]);
         server.socket_path = Some(server.option(&["display-message", "-p", "#{socket_path}"]));
         server
     }
 
     fn run(&self, args: &[&str]) -> String {
-        let out = Command::new("tmux")
+        let mut command = Command::new("tmux");
+        command
             // A client with no UTF-8 locale renders the glyphs as underscores,
             // and a build sandbox has no locale at all.
             .arg("-u")
@@ -60,9 +62,8 @@ impl Server {
             .arg(&self.socket)
             .args(args)
             .env("PATH", bin_dir_first_on_path())
-            .stdin(Stdio::null())
-            .output()
-            .expect("tmux is on PATH");
+            .stdin(Stdio::null());
+        let out = output_within(command, TMUX_TIMEOUT);
         assert!(
             out.status.success(),
             "tmux {args:?} failed: {}",
@@ -84,12 +85,14 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = Command::new("tmux")
+        // Never panics: a panic in `drop` while unwinding aborts the binary.
+        let mut command = Command::new("tmux");
+        command
             .args(["-L", &self.socket, "kill-server"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+            .stdin(Stdio::null());
+        if let Err(stalled) = try_output_within(command, TMUX_TIMEOUT) {
+            eprintln!("{stalled}");
+        }
         // tmux never unlinks its own socket, so whoever names a server must
         // remove the file. Do not assert: the server may not have started.
         if let Some(ref path) = self.socket_path {
