@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/gerbenoostra/tmux-agent-status/compare/v0.1.2...v0.2.0) (2026-10-03)
+
+
+### Features
+
+* keep background work visible until it finishes ([#35](https://github.com/gerbenoostra/tmux-agent-status/issues/35)) ([df9a7c1](https://github.com/gerbenoostra/tmux-agent-status/commit/df9a7c1fbc627da6b7d7278c8b66f24fca9e8e4e))
+
+
+### Bug Fixes
+
+* detect a stale latest-release redirect in install.sh ([#32](https://github.com/gerbenoostra/tmux-agent-status/issues/32)) ([48dc80e](https://github.com/gerbenoostra/tmux-agent-status/commit/48dc80ee58c1a15afd8209366cab1ef3f0d257fd)), closes [#28](https://github.com/gerbenoostra/tmux-agent-status/issues/28)
+* harden register safe writes ([#27](https://github.com/gerbenoostra/tmux-agent-status/issues/27)) ([2161d41](https://github.com/gerbenoostra/tmux-agent-status/commit/2161d41aff86e4f6f2d767ef03ca40d5cb7d0897))
+* keep the pre-push CI snapshot off the pushing worktree ([#33](https://github.com/gerbenoostra/tmux-agent-status/issues/33)) ([95a9f20](https://github.com/gerbenoostra/tmux-agent-status/commit/95a9f208ceee529875e0725551a611277e571699))
+
 ## [0.1.2](https://github.com/gerbenoostra/tmux-agent-status/compare/v0.1.1...v0.1.2) (2026-09-28)
 
 
