@@ -362,3 +362,24 @@ entry changes with the checkout contents.
 - The squash body is the PR description - because release-please interprets conventional-looking
   paragraphs as separate changes; not the original commit messages (unchecked inner subjects can
   alter the changelog and version bump).
+- Unacknowledged `waiting`/`error` outranks activity, and focus then reveals 🤖 - because the user
+  can act now; not activity over attention (it says "wait" when action is possible) or a combined
+  glyph (the contract is four states).
+- A clean stop while tracked work remains is silent and pending; the stop that removes the last
+  item puts the root in `settling`, and only the host's next root stop shows ✅ and rings - because
+  Claude Code runs an automatic wake turn after background completion and publishes no start event
+  for it; not ✅ or a bell at the final work stop (announces completion mid-turn), nor a bell at
+  both stops (two signals for one outcome).
+- With no tracked work, a shown ✅ refuses a later `working` or `waiting` (the `waiting` still
+  rings) - because an untracked straggler would strand 🤖 past focus and an idle nag would turn
+  every finished turn into 💬; not letting every event override a clean stop.
+- Tracked work is a ledger of hex tokens of host-session plus work ID in one fixed pane option, with
+  exact add and remove decided by tmux formats - because duplicate and unmatched events must be
+  no-ops and hooks race; not a counter (duplicates and unmatched stops drift it), a Rust-side ID set
+  (read-then-write race), one dynamic option per ID (a missing stop leaks it and reset cannot
+  enumerate it) or a state file.
+- `start` keeps tracked work; a lifecycle-aware session start resets the pane and accepts its host
+  session, and every lifecycle event from another session, including session end, is ignored -
+  because work outlives turns and delayed events from an old session must not touch current work;
+  not a pane generation (a delayed stop carries none), letting an unmatched session end finish the
+  pane, or a payload-less `finish` forcing ✅ (it cannot prove the work ended).

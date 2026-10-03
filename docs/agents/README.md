@@ -252,3 +252,15 @@ Every agent page repeats:
 
 Set `TMUX_AGENT_STATUS_DISABLED=1` to turn every hook command into a no-op that exits 0.
 Set `TMUX_AGENT_STATUS_DEBUG=1` to log dropped `notify` events to stderr (shape B agents only).
+
+## Decisions
+
+- A host ships the tracked-aggregate tier only after a disposable real-agent probe shows paired
+  start and stop events with a stable work ID, a post-completion root stop, and work that dies with
+  the host; every other host stays scalar - because published hook contracts have known omissions;
+  not every documented pair, a counter for ID-less stops, a latch until session reset (🤖 for the
+  rest of the session), process watchers, transcript parsing or timeouts (none prove completion).
+- Lifecycle payloads are mapped by the binary, and session events go through
+  `reset --agent <name> --stdin` and `finish --agent <name> --stdin`, so an unreadable payload
+  degrades to the generic command - because the work ID exists only in the payload; not shell or `jq` glue, a static ID in the hook command, or
+  session events via `notify` (it cannot tell which hook fired when the payload is unreadable).
