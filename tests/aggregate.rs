@@ -353,6 +353,43 @@ fn an_error_survives_a_clean_stop_until_acknowledged() {
 }
 
 #[test]
+fn attention_acknowledged_after_the_final_work_stop() {
+    // A question still open when the last item stops: the pane keeps 💬,
+    // focus reveals the settling 🤖, and the automatic turn's stop shows ✅.
+    let server = Server::start();
+    let pane = server.first_pane();
+    server.apply(&pane, &reset_session("s1"));
+    server.apply(&pane, &work_started("s1", "a"));
+    server.apply(&pane, &NotifyAction::Report(State::Waiting));
+
+    server.apply(&pane, &work_stopped("s1", "a"));
+    assert_eq!(server.layer(&pane, "@agent_pane_root"), "settling");
+    assert_eq!(server.pane_status(&pane), "waiting");
+    server.run_command(&pane, command::clear_pane);
+    assert_eq!(server.pane_status(&pane), "working");
+    server.apply(&pane, &done());
+    assert_eq!(server.pane_status(&pane), "done");
+}
+
+#[test]
+fn focus_after_work_and_the_automatic_turn_ended_reveals_nothing() {
+    // ❗ hides both the work and the automatic turn finishing; focus
+    // acknowledges everything visible, so it reveals blank, not a hidden ✅.
+    let server = Server::start();
+    let pane = server.first_pane();
+    server.apply(&pane, &reset_session("s1"));
+    server.apply(&pane, &work_started("s1", "a"));
+    server.apply(&pane, &NotifyAction::Report(State::Error));
+
+    server.apply(&pane, &work_stopped("s1", "a"));
+    server.apply(&pane, &done());
+    assert_eq!(server.pane_status(&pane), "error");
+    server.run_command(&pane, command::clear_pane);
+    assert_eq!(server.pane_status(&pane), "");
+    assert_eq!(server.window_status(&pane), "");
+}
+
+#[test]
 fn start_preserves_work_and_clears_what_the_last_turn_left() {
     let server = Server::start();
     let pane = server.first_pane();
