@@ -21,7 +21,7 @@ use tmux_agent_status::state::State;
 
 /// What an idle pane runs. The tool resolves panes from `$TMUX_PANE` and never
 /// inspects processes, so a pane does not have to look like an agent.
-const IDLE: &str = "sleep 300";
+const IDLE: &str = support::tmux::IDLE;
 
 /// The pane's shell for the bell tests; see `claude_lifecycle_replay.rs` for
 /// why the startup files are skipped.

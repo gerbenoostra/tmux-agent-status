@@ -405,7 +405,7 @@ fn session_commands_dispatch_the_payload_or_run_generic() {
     if !support::tmux_or_skip() {
         return;
     }
-    let server = Server::start_running("sleep 300");
+    let server = Server::start_running(support::tmux::IDLE);
     let pane = server
         .tmux(&["list-panes", "-t", "t", "-F", "#{pane_id}"])
         .lines()
