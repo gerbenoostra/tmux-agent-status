@@ -28,7 +28,9 @@ An agent runs several things at once, so its events arrive interleaved. Within o
 precedence is layered rather than a single rank: an unanswered `waiting` or `error` is always
 shown, then any activity - a running turn, or background work the agent still tracks - then a
 clean outcome nobody has seen. A tool call finishing in parallel cannot hide an open permission
-prompt, and work that outlives a turn keeps the pane on 🤖 until it too stops.
+prompt, and work that outlives a turn keeps the pane on 🤖 until it too stops. Without tracked work,
+a clean outcome you have not seen keeps its ✅ against a later `working` or `waiting`: the turn has
+ended, so that is a straggler event or an idle nag. The bell still rings for the `waiting`.
 
 For windows with no agent this tool is a no-op.
 

@@ -124,7 +124,11 @@ subject of a bug. Read this section before changing behaviour.
 - **Two orderings on the same states, each named for its question.** Within a
   pane the precedence is layered rather than a rank: unacknowledged
   `waiting`/`error` first, then activity - a `working` or `settling` root, or
-  any entry in the work ledger - then a pending `done` nobody has seen. Across
+  any entry in the work ledger - then a pending `done` nobody has seen. A
+  shown `done` (stopped root, pending completion, empty ledger) refuses a
+  later `working` or `waiting`: only tracked work may put activity or
+  attention over a clean stop, so an untracked straggler cannot strand 🤖
+  and an idle nag cannot turn ✅ into 💬. Across
   panes the rollup rank is `waiting` > `error` > `done` > `working`, answering
   which pane wants you most. `start` is the only write that does not defer to
   what the pane holds - typing a prompt is seeing the pane, so that event

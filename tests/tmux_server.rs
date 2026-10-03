@@ -957,12 +957,12 @@ fn an_unknown_state_is_loud() {
 
 #[test]
 fn a_reported_state_lands_according_to_the_layered_precedence() {
-    // Attention (`waiting`, `error`) is unacknowledged user-visible state and
-    // outranks both activity and a pending clean outcome; activity (`working`,
-    // tracked work, settling) outranks a `done` nobody has seen, so a straggler
-    // `working` from tracked work cannot be hidden by a premature ✅. A value
-    // this tool does not recognise is replaced by any of them. The glyph
-    // follows the pane, since it is the only pane here.
+    // Attention (`waiting`, `error`) outranks activity, and an `error` also a
+    // clean stop. With no tracked work, a `done` nobody has seen refuses a
+    // later `working` or `waiting`: the turn already ended, so either is a
+    // straggler or an idle nag. A value this tool does not recognise is
+    // replaced by any of them. The glyph follows the pane, since it is the
+    // only pane here.
     let server = Server::start();
     let pane = server.first_pane();
 
@@ -979,8 +979,8 @@ fn a_reported_state_lands_according_to_the_layered_precedence() {
         ("waiting", "waiting", "waiting"),
         ("waiting", "done", "done"),
         ("waiting", "error", "error"),
-        ("done", "working", "working"),
-        ("done", "waiting", "waiting"),
+        ("done", "working", "done"),
+        ("done", "waiting", "done"),
         ("done", "done", "done"),
         ("done", "error", "error"),
         ("error", "working", "error"),
@@ -1057,14 +1057,14 @@ fn the_window_shows_the_highest_ranked_state_of_its_panes() {
 
 #[test]
 fn a_refused_state_still_rings() {
-    // An unacknowledged `error` keeps standing over a `waiting`, so the glyph
-    // cannot say "blocked on you" - the bell is the only channel that can. It
-    // rings before tmux is touched at all.
+    // The glyph cannot say "blocked on you" while the pane holds a `done`
+    // nobody has looked at, so the bell is the only channel that can. It rings
+    // before tmux is touched at all.
     let server = Server::start();
     server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
     server.tmux(&["set-option", "-g", "bell-action", "other"]);
     let agent = server.first_pane();
-    assert_ok(&server.agent_status(&agent, &["set", "error"]));
+    assert_ok(&server.agent_status(&agent, &["set", "done"]));
 
     // From another window, so the bell would land somewhere this can read, and
     // saying so through tmux is how the test knows the command ran at all.
@@ -1079,8 +1079,8 @@ fn a_refused_state_still_rings() {
         |ran| ran.trim() == "1",
     );
 
-    assert_eq!(server.pane_statuses(&agent), ["error"]);
-    assert_eq!(server.window_status(&agent), "❗");
+    assert_eq!(server.pane_statuses(&agent), ["done"]);
+    assert_eq!(server.window_status(&agent), "✅");
     let flag = server.tmux(&[
         "display-message",
         "-p",

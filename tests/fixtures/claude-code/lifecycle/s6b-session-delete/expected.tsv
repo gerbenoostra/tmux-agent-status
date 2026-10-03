@@ -10,17 +10,17 @@
 009-subagentstop	SubagentStop	-	done	✅	0
 010-posttoolbatch	PostToolBatch	-	done	✅	0
 011-pretooluse	PreToolUse	-	done	✅	0
-012-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-013-posttoolbatch	PostToolBatch	-	working	🤖	0
-014-pretooluse	PreToolUse	-	working	🤖	0
-015-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-016-posttoolbatch	PostToolBatch	-	working	🤖	0
-017-pretooluse	PreToolUse	-	working	🤖	0
-018-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-019-posttoolbatch	PostToolBatch	-	working	🤖	0
-020-subagentstop	SubagentStop	-	working	🤖	0
-021-pretooluse	PreToolUse	-	working	🤖	0
-022-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+012-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+013-posttoolbatch	PostToolBatch	-	done	✅	0
+014-pretooluse	PreToolUse	-	done	✅	0
+015-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+016-posttoolbatch	PostToolBatch	-	done	✅	0
+017-pretooluse	PreToolUse	-	done	✅	0
+018-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+019-posttoolbatch	PostToolBatch	-	done	✅	0
+020-subagentstop	SubagentStop	-	done	✅	0
+021-pretooluse	PreToolUse	-	done	✅	0
+022-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
 023-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 024-posttoolbatch	PostToolBatch	-	working	🤖	0
 025-subagentstop	SubagentStop	-	working	🤖	0

@@ -604,7 +604,8 @@ fn every_legacy_scalar_imports_before_the_transition_that_arrives() {
             &[NotifyAction::Report(State::Working)],
             "working",
         ),
-        ("done", &[NotifyAction::Report(State::Working)], "working"),
+        ("done", &[NotifyAction::Report(State::Working)], "done"),
+        ("done", &[NotifyAction::Report(State::Waiting)], "done"),
         (
             "waiting",
             &[NotifyAction::Report(State::Working)],
@@ -700,6 +701,49 @@ fn a_turn_without_tracked_work_behaves_as_today() {
     server.clear_bell(&pane);
     server.run_in_pane(&pane, "tmux-agent-status set done", 3);
     assert_eq!(server.bell_flag(&pane), "1", "a repeated done rings");
+
+    // An idle nag after the clean stop keeps the ✅ but still rings.
+    server.clear_bell(&pane);
+    server.run_in_pane(&pane, "tmux-agent-status set waiting", 4);
+    assert_eq!(server.pane_status(&pane), "done");
+    assert_eq!(
+        server.bell_flag(&pane),
+        "1",
+        "a refused waiting still rings"
+    );
+
+    // A straggler tool event of untracked work cannot strand 🤖 over it.
+    server.clear_bell(&pane);
+    server.run_in_pane(&pane, "tmux-agent-status set working", 5);
+    assert_eq!(server.pane_status(&pane), "done");
+    assert_eq!(server.bell_flag(&pane), "0", "working never rings");
+    server.run_in_pane(&pane, "tmux-agent-status clear-pane \"$TMUX_PANE\"", 6);
+    assert_eq!(server.pane_status(&pane), "");
+}
+
+#[test]
+fn only_tracked_work_puts_activity_or_attention_over_a_clean_stop() {
+    // With tracked work the clean stop is not shown, so a child's tool event
+    // and a question both land.
+    let server = Server::start();
+    let pane = server.first_pane();
+    server.apply(&pane, &reset_session("s1"));
+    server.apply(&pane, &work_started("s1", "a"));
+    server.apply(&pane, &done());
+
+    server.apply(&pane, &NotifyAction::Report(State::Working));
+    assert_eq!(server.layer(&pane, "@agent_pane_root"), "working");
+    server.apply(&pane, &NotifyAction::Report(State::Waiting));
+    assert_eq!(server.pane_status(&pane), "waiting");
+
+    // A settling root is the host's automatic turn running: its question is
+    // shown, though its stop leaves a pending completion and an empty ledger.
+    server.run_command(&pane, command::clear_pane);
+    server.apply(&pane, &done());
+    server.apply(&pane, &work_stopped("s1", "a"));
+    assert_eq!(server.layer(&pane, "@agent_pane_root"), "settling");
+    server.apply(&pane, &NotifyAction::Report(State::Waiting));
+    assert_eq!(server.pane_status(&pane), "waiting");
 }
 
 #[test]

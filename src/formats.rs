@@ -156,16 +156,41 @@ pub fn project() -> String {
     )
 }
 
+/// `1` while the pane shows a clean stop nobody has seen and nothing is
+/// active: a stopped root, a pending completion and no tracked work.
+fn done_shown() -> String {
+    all(&[
+        eq(root(), "stopped"),
+        eq(completion(), "pending"),
+        work_gone(),
+    ])
+}
+
 /// The layer writes for `set <state>` and `Report(state)`.
+///
+/// A `working` or `waiting` that arrives on a shown ✅ is refused: the turn
+/// already ended cleanly, so it is a straggler tool event that nothing would
+/// ever end, or an idle nag with no question behind it. Only tracked work can
+/// put activity or attention over a clean stop. `waiting` still rings.
+///
+/// The `waiting` attention write runs before its root write, so a `settling`
+/// or `working` root it is about to stop is not mistaken for a shown ✅.
 pub fn report(state: State) -> Vec<Layer> {
     match state {
-        State::Working => vec![layer(PANE_ROOT, "working")],
+        State::Working => vec![layer(
+            PANE_ROOT,
+            gate(done_shown(), &root(), "working".to_owned()),
+        )],
         State::Waiting => vec![
-            layer(PANE_ROOT, "stopped"),
             layer(
                 PANE_ATTENTION,
-                gate(eq(attention(), "error"), "error", "waiting".to_owned()),
+                gate(
+                    done_shown(),
+                    &attention(),
+                    gate(eq(attention(), "error"), "error", "waiting".to_owned()),
+                ),
             ),
+            layer(PANE_ROOT, "stopped"),
         ],
         State::Error => vec![layer(PANE_ROOT, "stopped"), layer(PANE_ATTENTION, "error")],
         State::Done => finish(),

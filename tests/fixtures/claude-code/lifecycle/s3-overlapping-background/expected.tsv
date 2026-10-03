@@ -13,9 +13,9 @@
 012-messagedisplay	MessageDisplay	-	working	🤖	0
 013-stop	Stop	tmux-agent-status set done	done	✅	1
 014-pretooluse	PreToolUse	-	done	✅	0
-015-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-016-posttoolbatch	PostToolBatch	-	working	🤖	0
-017-subagentstop	SubagentStop	-	working	🤖	0
+015-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+016-posttoolbatch	PostToolBatch	-	done	✅	0
+017-subagentstop	SubagentStop	-	done	✅	0
 018-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 019-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
 020-posttoolbatch	PostToolBatch	-	working	🤖	0
@@ -30,9 +30,9 @@
 029-subagentstop	SubagentStop	-	done	✅	0
 030-subagentstart	SubagentStart	-	done	✅	0
 031-pretooluse	PreToolUse	-	done	✅	0
-032-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
-033-posttoolbatch	PostToolBatch	-	working	🤖	0
-034-subagentstop	SubagentStop	-	working	🤖	0
+032-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+033-posttoolbatch	PostToolBatch	-	done	✅	0
+034-subagentstop	SubagentStop	-	done	✅	0
 035-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
 036-messagedisplay	MessageDisplay	-	working	🤖	0
 037-messagedisplay	MessageDisplay	-	working	🤖	0
