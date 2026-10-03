@@ -1,0 +1,1 @@
+{"event":"PreToolUse","ts_enter":1790895587538,"ts_exit":1790895587548,"payload":{"session_id":"886906b2-ab29-432a-9149-0ab3d9a5bef2","prompt_id":"d7b6ac0d-1ea0-4658-8519-6ef7eb9fb904","permission_mode":"default","hook_event_name":"PreToolUse","tool_name":"TaskStop","tool_input":{"task_id":"a4d93d471e8175623"},"tool_use_id":"toolu_019MJDzHeLs4TavvwQAkE6jo"}}

@@ -1,0 +1,1 @@
+{"event":"Stop","ts_enter":1790888861793,"ts_exit":1790888861802,"payload":{"session_id":"ed0d60db-686c-4fb3-9930-0cbda7dab48f","prompt_id":"4fa59676-0c7c-421f-961d-fb835c04821f","permission_mode":"default","hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[{"id":"bkukkjrwe","type":"shell","status":"running"}]}}

@@ -1,0 +1,36 @@
+# file	event	command	pane	window	bell
+001-sessionstart	SessionStart	tmux-agent-status reset			0
+002-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
+003-pretooluse	PreToolUse	-	working	🤖	0
+004-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+005-subagentstart	SubagentStart	-	working	🤖	0
+006-posttoolbatch	PostToolBatch	-	working	🤖	0
+007-stop	Stop	tmux-agent-status set done	done	✅	1
+008-messagedisplay	MessageDisplay	-	done	✅	0
+009-subagentstop	SubagentStop	-	done	✅	0
+010-posttoolbatch	PostToolBatch	-	done	✅	0
+011-pretooluse	PreToolUse	-	done	✅	0
+012-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+013-posttoolbatch	PostToolBatch	-	done	✅	0
+014-pretooluse	PreToolUse	-	done	✅	0
+015-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+016-posttoolbatch	PostToolBatch	-	done	✅	0
+017-pretooluse	PreToolUse	-	done	✅	0
+018-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+019-posttoolbatch	PostToolBatch	-	done	✅	0
+020-subagentstop	SubagentStop	-	done	✅	0
+021-pretooluse	PreToolUse	-	done	✅	0
+022-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+023-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
+024-posttoolbatch	PostToolBatch	-	working	🤖	0
+025-subagentstop	SubagentStop	-	working	🤖	0
+026-messagedisplay	MessageDisplay	-	working	🤖	0
+027-messagedisplay	MessageDisplay	-	working	🤖	0
+028-messagedisplay	MessageDisplay	-	working	🤖	0
+029-messagedisplay	MessageDisplay	-	working	🤖	0
+030-messagedisplay	MessageDisplay	-	working	🤖	0
+031-stop	Stop	tmux-agent-status set done	done	✅	1
+032-subagentstop	SubagentStop	-	done	✅	0
+033-sessionstart	SessionStart	tmux-agent-status reset			0
+034-sessionstart	SessionStart	tmux-agent-status reset			0
+035-sessionend	SessionEnd	tmux-agent-status finish	done	✅	0

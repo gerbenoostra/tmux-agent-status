@@ -46,3 +46,6 @@ cp /path/to/share/agents/copilot/tmux-agent-status.json .github/hooks/
 - **Stdout parsing.** Copilot CLI parses hook stdout as JSON per event, so
   every entry in the shipped file uses `--json`. The status commands write nothing
   to stdout themselves; `--json` prints `{}` so the parser never sees empty stdout.
+- **Background work is unprobed here.** `subagentStart`/`subagentStop` document a
+  shared `agentId`, but whether a background child outlives the parent turn is
+  untested - see [Background work](README.md#background-work).

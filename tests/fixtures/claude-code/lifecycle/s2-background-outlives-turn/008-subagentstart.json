@@ -1,0 +1,1 @@
+{"event":"SubagentStart","ts_enter":1790887646645,"ts_exit":1790887646657,"payload":{"session_id":"70de0e7e-51fc-497a-ab57-a787f14650f3","prompt_id":"7dead60f-554f-4f91-ab47-0d772e0ccd7a","agent_id":"a355b3112d455e7d6","agent_type":"general-purpose","hook_event_name":"SubagentStart"}}

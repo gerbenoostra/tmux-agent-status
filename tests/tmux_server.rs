@@ -1,91 +1,20 @@
 //! Everything that only a real tmux server can answer.
 //!
-//! Each test gets its own `tmux -L` socket, because `cargo test` is threaded
-//! and two tests sharing a socket would interleave. Each server is killed by a
-//! guard, so a panicking test cannot leak one.
+//! Each test gets its own throwaway server from `support::tmux`.
 
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
 
 mod support;
+
+use support::tmux::{Server, wait_for};
 
 /// What an idle pane runs. The tool resolves panes from `$TMUX_PANE` and never
 /// inspects processes, so a pane does not have to look like an agent.
 const IDLE: &str = "sleep 300";
 
-/// A throwaway tmux server holding one session `t`.
-struct Server {
-    socket: String,
-    path: String,
-}
-
 impl Server {
     fn start() -> Server {
         Self::start_running(IDLE)
-    }
-
-    fn start_running(command: &str) -> Server {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let socket = format!(
-            "tmux-agent-status-test-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
-        let mut server = Server {
-            socket,
-            path: String::new(),
-        };
-        // -f /dev/null: the user's own tmux.conf must not decide what a test sees.
-        server.tmux(&[
-            "-f",
-            "/dev/null",
-            "new-session",
-            "-d",
-            "-s",
-            "t",
-            "-x",
-            "100",
-            "-y",
-            "20",
-            command,
-        ]);
-        server.path = server.socket_path();
-        server
-    }
-
-    /// Run a tmux command on this server and return its stdout, asserting success.
-    fn tmux(&self, args: &[&str]) -> String {
-        let out = self.try_tmux(args);
-        assert!(
-            out.status.success(),
-            "tmux {args:?} failed: {}",
-            support::stderr_of(&out)
-        );
-        String::from_utf8(out.stdout).expect("tmux printed valid utf-8")
-    }
-
-    fn try_tmux(&self, args: &[&str]) -> Output {
-        Command::new("tmux")
-            // -u: a client with no UTF-8 locale renders the glyphs as
-            // underscores, and a build sandbox has no locale at all. The stored
-            // option is unaffected; this is only about what a client sees.
-            .arg("-u")
-            .arg("-L")
-            .arg(&self.socket)
-            .args(args)
-            // The server inherits this, so the shipped hook finds the binary
-            // under test rather than an installed one, or nothing at all.
-            .env("PATH", bin_dir_first_on_path())
-            .stdin(Stdio::null())
-            .output()
-            .expect("tmux is on PATH")
-    }
-
-    fn socket_path(&self) -> String {
-        self.tmux(&["display-message", "-p", "#{socket_path}"])
-            .trim_end()
-            .to_owned()
     }
 
     /// Run the binary as a hook would: inside this server, from this pane.
@@ -231,24 +160,10 @@ impl Server {
         .to_owned()
     }
 
-    /// One pane's own state, empty when it holds none.
-    fn pane_status(&self, pane: &str) -> String {
-        self.tmux(&["display-message", "-p", "-t", pane, "#{@agent_pane_status}"])
-            .trim_end()
-            .to_owned()
-    }
-
     /// Source the shipped snippet, the way a user's `tmux.conf` does. The path is
     /// relative to the crate root, which is where `cargo test` runs.
     fn source_snippet(&self) {
         self.tmux(&["source-file", "share/tmux/tmux-agent-status.conf"]);
-    }
-
-    /// The window rollup, empty when the option is unset.
-    fn window_status(&self, target: &str) -> String {
-        self.tmux(&["display-message", "-p", "-t", target, "#{@agent_status}"])
-            .trim_end()
-            .to_owned()
     }
 
     /// A second server whose only pane is a client attached to this one.
@@ -257,7 +172,7 @@ impl Server {
     /// so the rendering and focus tests need this sandwich; option-value tests
     /// do not.
     fn attach(&self) -> Server {
-        let host = Server::start_running(&format!("tmux -L {} attach -t t", self.socket));
+        let host = Server::start_running(&format!("tmux -L {} attach -t t", self.socket()));
         wait_for(
             || self.tmux(&["list-clients", "-F", "#{client_name}"]),
             |clients| !clients.trim().is_empty(),
@@ -298,24 +213,6 @@ impl Server {
         ]);
         expanded.trim_end().to_owned()
     }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        // Best effort: a server that already exited is not a failure. tmux
-        // leaves the socket file behind, so the guard takes that too.
-        let _ = self.try_tmux(&["kill-server"]);
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-/// `PATH` with the binary under test in front.
-fn bin_dir_first_on_path() -> String {
-    let dir = std::path::Path::new(support::BIN)
-        .parent()
-        .expect("the test binary has a directory");
-    let inherited = std::env::var("PATH").unwrap_or_default();
-    format!("{}:{inherited}", dir.display())
 }
 
 fn assert_ok(out: &Output) {
@@ -1255,20 +1152,5 @@ fn rollup_rank(state: &str) -> u8 {
         "done" => 2,
         "working" => 1,
         _ => 0,
-    }
-}
-
-fn wait_for(read: impl Fn() -> String, done: impl Fn(&str) -> bool) -> String {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let value = read();
-        if done(&value) {
-            return value;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting; last read: {value:?}"
-        );
-        std::thread::sleep(Duration::from_millis(50));
     }
 }

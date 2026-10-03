@@ -65,7 +65,7 @@ upstream documentation or issue that says the event does not exist.
 
 | Agent | Shape | Drop-in file | Needs enabling | Subagent events | Multi-session per pane | `error` event | `waiting` repeats | Stdout parsed | Payload on stdin | `TMUX_PANE` inherited | Session start | Session end | Verified |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| [Claude Code](claude-code.md) | A (plugin) | yes, via plugin | no | no | no | `StopFailure` | `Notification` | lenient | yes | yes | yes | yes | yes | plugin API |
+| [Claude Code](claude-code.md) | A (plugin) | yes, via plugin | no | `SubagentStart`/`SubagentStop`/`TaskStop` | yes | `StopFailure` | `Notification` | lenient | yes | yes | yes | yes | plugin API |
 | [Codex CLI](codex.md) | A | yes | hook trust (first run) | `SubagentStart`/`SubagentStop` | unknown | inferred | `PermissionRequest` | yes | yes | unknown | yes | yes | 2026-09-10 |
 | [GitHub Copilot CLI](copilot.md) | A | yes | folder trust (repo scope) | yes | unknown | `errorOccurred` | `notification` | yes | unknown | unknown | yes | yes | 2026-09-10 |
 | [Droid](droid.md) | A | yes | no | `SubagentStop` only | unknown | inferred | `Notification` | yes | yes | unknown | yes | yes | 2026-09-10 |
@@ -118,6 +118,67 @@ across the surveyed agents means `--pane` / `TMUX_AGENT_STATUS_PANE` should be u
 defensively.
 - **Session start / end**: whether events map onto `reset` and `finish`. Agents
 without both keep the known limit that a crashed agent can strand `working`.
+
+## Background work
+
+Some agents keep work running after the parent turn ends - background subagents, detached
+shells, monitors. Ideally the pane then holds its state until the last tracked work item
+stops and announces clean completion once. That requires the host to publish a start event
+and a stop event carrying the same stable work ID; a host that does is eligible for a
+**tracked aggregate** integration. A host whose completion signal carries no ID - or none at
+all - stays **scalar**: the parent turn's end wins immediately and the glyph can announce ✅
+while a child is still running.
+
+| Agent | Probed version | Probe date | Lifecycle eligibility | Shipped tier |
+| --- | --- | --- | --- | --- |
+| [Claude Code](claude-code.md) | 2.1.287 | 2026-10-01 | tracked aggregate | scalar |
+| [Codex CLI](codex.md) | - | - | not probed - binary not installed; `agent_id` is documented on both subagent events | scalar |
+| [GitHub Copilot CLI](copilot.md) | - | - | not probed - an organization policy blocked the probe; `agentId` is documented on both subagent events | scalar |
+| [Cursor](cursor.md) | - | - | not probed - `subagent_id` is documented, but background `subagentStop` reportedly never fires | scalar |
+| [Devin CLI](devin.md) | 3000.11.3 | 2026-10 | scalar - the worker's stop carries no ID | scalar |
+| [Droid](droid.md) | - | - | not probed - documented `SubagentStop` carries no task ID and there is no start event | scalar |
+| [Gemini CLI](gemini.md) | - | - | not probed - no subagent start/end hooks are documented | scalar |
+| [Grok CLI](grok.md) | - | - | not probed - needs an authenticated run; subagent IDs are documented inconsistently | scalar |
+| [Kiro](kiro.md) | - | - | not probed - documented synchronous native children: the parent waits for them | scalar |
+| [Mistral Vibe](mistral-vibe.md) | 2.25.8 | 2026-10 | scalar - spawn carries no hook-visible child ID | scalar |
+
+### Claude Code: observed lifecycle scenarios
+
+Probed on 2.1.287 with `just probe-lifecycle claude-code`, which runs a scratch session on a
+disposable tmux server and logs every hook event with its payload. The sanitized captures live
+in `tests/fixtures/claude-code/lifecycle/<scenario>/`; each `expected.tsv` pins the glyph and
+bell the shipped drop-in produced per event. "Shipped" below is that scalar mapping;
+"aggregate" is what a tracked lifecycle would project.
+
+| # | Scenario | Observed | Shipped | Aggregate |
+| --- | --- | --- | --- | --- |
+| S1 | permission prompt approved, then clean finish | `PermissionRequest` + `Notification(permission_prompt)`, then `Stop` | 💬+🔔, then ✅+🔔 | same |
+| S2 | one background agent outlives the parent turn | `SubagentStart`, parent `Stop`, child's tool events, `SubagentStop`, wake `UserPromptSubmit`, final `Stop` | ✅+🔔 while the child runs, 🤖 at the wake turn, ✅+🔔 again | 🤖 until the last stop, ✅+🔔 once |
+| S3 | two background agents, overlapping wakes | second `SubagentStart` during the first wake turn; a `shell` task in `background_tasks` never got lifecycle events; an `agent_id` was reused for a continuation | ✅+🔔 on every turn end | 🤖 until the last tracked item stops |
+| S4 | child finishes while the parent turn is still running | `SubagentStop` folded into the same `prompt_id`; no separate wake turn | one ✅+🔔 at the turn's `Stop` | same |
+| S5 | model cancels a background agent with `TaskStop` | `task_id` equals the `agent_id` of `SubagentStart`; no `SubagentStop` for the cancelled agent | ✅+🔔 at `Stop` | cancels that item |
+| S6 | user kills a running task from the host UI | the killed shell's owning agent re-ran under the same `agent_id` (`SubagentStart`+`SubagentStop`), then a wake turn ended in `Stop`; deleting a backgrounded session in the agents sidebar emitted only `SessionEnd` for that session | ✅+🔔 at the following `Stop` | same, but silent until the last item stops |
+| S7 | child's own tool events | `PreToolUse`/`PostToolUse`/`PostToolBatch` for the child's tools reach the pane's hooks carrying `agent_id` and `agent_type` | each maps to `set working`, refused while `done`/`waiting` stands | counted as child activity, not a state |
+| S8 | exit while a task runs | `/exit` offers "Exit and stop tasks" or "Move to background and exit"; the first fires `SessionEnd` (`prompt_input_exit`) and kills the work, the second fires `SessionEnd` plus `SessionStart(source: fork)` for a daemon session that emits no further events | `finish`, no bell | same |
+| S9 | `/compact` and `/clear` with work running | `/compact`: `PreCompact` → `SessionStart(source: compact)` on the **same** session id → `PostCompact`, work survives; `/clear`: `SessionEnd(reason: clear)` then `SessionStart(source: clear)` on a **new** id; `claude --resume` → `SessionStart(source: resume)` on the same id | `compact` is unmatched so no `reset`; `clear`/`resume` reset | same |
+| S10 | aborted turn | Esc during a turn emits a plain `Stop`; an API failure emits `StopFailure` (`server_error`) after retries, and no `Stop` | ❗+🔔 on `StopFailure` | error outranks running work |
+| S11 | question open while a child finishes | `AskUserQuestion` + `PermissionRequest` + `Notification(permission_prompt)`; the child's `SubagentStop` arrived mid-prompt; after the answer, its wake `UserPromptSubmit` reused the same `prompt_id` | 💬+🔔 held through the child's completion, 🤖 at the wake, ✅+🔔 at `Stop` | same |
+| S12 | start/stop ordering with a 3s `SubagentStart` hook | a no-op child's `SubagentStop` still ran after the start hook exited; a background agent cancelled with `TaskStop` within the sleep produced **no** `SubagentStart` or `SubagentStop` at all - a stop signal for a never-started item | n/a | stops for unknown IDs are no-ops |
+
+Notable payload facts for adapters:
+
+- `SubagentStop` also fires for internal helpers (title generation) with an empty `agent_type`
+  and no matching `SubagentStart` - a stop may arrive for an unknown ID.
+- Entries in `background_tasks` can be `shell` tasks with no lifecycle events; only
+  `SubagentStart`-tracked items are countable.
+- The wake turn submits a `UserPromptSubmit` whose `prompt` is a `<task-notification>` block,
+  and `Notification(idle_prompt)` can fire minutes after the last event, even mid-turn during
+  API retries.
+- `WorktreeCreate`/`WorktreeRemove` are not passive: a configured `WorktreeCreate` hook that
+  returns no path makes the spawning `Agent` call fail - the probe answers it with a scratch
+  directory.
+- The agents sidebar can spawn extra `SessionStart`/`SessionEnd` pairs for other session ids
+  in the same pane.
 
 ## `register` delivery details
 

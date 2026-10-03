@@ -53,3 +53,6 @@ may well work here too.
 - **Project hook trust.** Project-scoped hooks require `/hooks-trust` the first
   time the project is opened.
 - **Stdout is lenient.** Non-JSON stdout is informational for passive events.
+- **Background work is unprobed here.** Grok's root `Stop` lists `backgroundTasks[]`
+  with stable IDs and its subagent events look promising, but no real run has
+  confirmed them yet - see [Background work](README.md#background-work).

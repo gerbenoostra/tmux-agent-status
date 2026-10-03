@@ -1,0 +1,1 @@
+{"event":"StopFailure","ts_enter":1790889524945,"ts_exit":1790889524953,"payload":{"session_id":"0d63f843-db2f-422b-9bb4-318920d59fef","prompt_id":"deb2b374-b9cc-4039-aa87-23d90b961405","hook_event_name":"StopFailure","error":"server_error"}}

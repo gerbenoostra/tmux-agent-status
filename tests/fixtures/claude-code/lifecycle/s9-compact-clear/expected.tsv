@@ -1,0 +1,44 @@
+# file	event	command	pane	window	bell
+001-sessionstart	SessionStart	tmux-agent-status reset			0
+002-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
+003-configchange	ConfigChange	-	working	🤖	0
+004-pretooluse	PreToolUse	-	working	🤖	0
+005-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+006-subagentstart	SubagentStart	-	working	🤖	0
+007-posttoolbatch	PostToolBatch	-	working	🤖	0
+008-messagedisplay	MessageDisplay	-	working	🤖	0
+009-stop	Stop	tmux-agent-status set done	done	✅	1
+010-posttoolbatch	PostToolBatch	-	done	✅	0
+011-subagentstop	SubagentStop	-	done	✅	0
+012-pretooluse	PreToolUse	-	done	✅	0
+013-posttooluse	PostToolUse	tmux-agent-status set working	done	✅	0
+014-posttoolbatch	PostToolBatch	-	done	✅	0
+015-precompact	PreCompact	-	done	✅	0
+016-subagentstop	SubagentStop	-	done	✅	0
+017-subagentstop	SubagentStop	-	done	✅	0
+018-sessionstart	SessionStart	-	done	✅	0
+019-postcompact	PostCompact	-	done	✅	0
+020-userpromptsubmit	UserPromptSubmit	tmux-agent-status start	working	🤖	0
+021-pretooluse	PreToolUse	-	working	🤖	0
+022-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+023-posttoolbatch	PostToolBatch	-	working	🤖	0
+024-pretooluse	PreToolUse	-	working	🤖	0
+025-posttoolusefailure	PostToolUseFailure	-	working	🤖	0
+026-posttoolbatch	PostToolBatch	-	working	🤖	0
+027-pretooluse	PreToolUse	-	working	🤖	0
+028-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+029-posttoolbatch	PostToolBatch	-	working	🤖	0
+030-pretooluse	PreToolUse	-	working	🤖	0
+031-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+032-posttoolbatch	PostToolBatch	-	working	🤖	0
+033-pretooluse	PreToolUse	-	working	🤖	0
+034-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+035-posttoolbatch	PostToolBatch	-	working	🤖	0
+036-pretooluse	PreToolUse	-	working	🤖	0
+037-posttooluse	PostToolUse	tmux-agent-status set working	working	🤖	0
+038-posttoolbatch	PostToolBatch	-	working	🤖	0
+039-messagedisplay	MessageDisplay	-	working	🤖	0
+040-stop	Stop	tmux-agent-status set done	done	✅	1
+041-sessionend	SessionEnd	tmux-agent-status finish	done	✅	0
+042-sessionstart	SessionStart	tmux-agent-status reset			0
+043-subagentstop	SubagentStop	-			0

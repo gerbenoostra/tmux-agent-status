@@ -1,6 +1,8 @@
 {
   lib,
   rustPlatform,
+  bash,
+  jq,
   tmux,
   unixtools,
 }:
@@ -26,8 +28,11 @@ rustPlatform.buildRustPackage {
   # The lock ownership tests shell out to `ps` and `hostname`, which the build
   # sandbox's minimal $PATH does not otherwise carry. `unixtools` picks the
   # right implementation per platform (the real `ps`/`hostname` on Darwin,
-  # `procps`/`inetutils` on Linux).
+  # `procps`/`inetutils` on Linux). The sanitizer test invokes its Bash
+  # script through `bash`, so the check sandbox needs bash and jq on PATH.
   nativeCheckInputs = [
+    bash
+    jq
     tmux
     unixtools.hostname
     unixtools.ps

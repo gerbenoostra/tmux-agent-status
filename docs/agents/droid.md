@@ -50,3 +50,7 @@ cp /path/to/share/agents/droid/hooks.json ~/.factory/hooks.json
   `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
 - For disabling hooks and logging dropped events, see the
   [shared opt-out and debug settings](README.md#opt-out-and-debug).
+- **Background work carries no stop ID.** `SubagentStop` publishes result fields
+  (`task_name`, `task_result`, `task_error`) but no task ID, and there is no
+  `SubagentStart`; a name is not a unique work ID - see
+  [Background work](README.md#background-work).

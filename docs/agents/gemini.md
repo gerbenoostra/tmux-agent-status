@@ -1,22 +1,27 @@
 # Gemini CLI
 
-Shape B agent with a manual settings.json step. As of the survey date, Gemini CLI
-only supports hooks defined inside user or project `settings.json`; the
-extension-hooks drop-in proposal is tracked in the upstream feature request.
+Shape B agent with a manual settings.json step. Gemini's hook system has shipped:
+the documented events are `SessionStart`, `SessionEnd`, `BeforeAgent`,
+`AfterAgent`, `BeforeModel`, `AfterModel`, `BeforeToolSelection`, `BeforeTool`,
+`AfterTool`, `PreCompress` and `Notification`. Lifecycle matchers are exact
+strings (`startup`, `resume`, `clear`), tool matchers are regular expressions.
 
 ## Supported states
 
 | State | Gemini event | Command | Notes |
 | --- | --- | --- | --- |
-| reset | `SessionStart` (planned) | `notify --stdin` | payload schema unconfirmed |
-| working | `PreToolUse` / `PostToolUse` (planned) | `notify --stdin` | payload schema unconfirmed |
-| done | `SessionEnd` (planned) | `notify --stdin` | not confirmed as shipped |
-| waiting | — | — | no event documented |
+| reset | `SessionStart` | `notify --stdin` | fires on startup, resume and `/clear` |
+| start | `BeforeAgent` | `notify --stdin` | after prompt submit, before planning |
+| working | `BeforeTool` / `AfterTool` | `notify --stdin` | matcher is a regex over the tool name |
+| done | `AfterAgent` | `notify --stdin` | the agent loop ends |
+| waiting | `Notification` | `notify --stdin` | notification kinds unconfirmed |
 | error | — | — | no event documented |
+| finish | `SessionEnd` | `notify --stdin` | fires on exit and `/clear` |
 
-The payload schema is not public, so the current binary mapping drops every
+The payload schema is not verified, so the current binary mapping drops every
 payload for `--agent gemini` and exits 0. This keeps the hook config valid while
-the upstream API stabilises.
+the upstream API stabilises. There is no subagent start/end pair, so Gemini
+stays scalar - see [Background work](README.md#background-work).
 
 ## Manual settings.json step
 
@@ -51,8 +56,11 @@ in `src/notify.rs` will be updated and the matrix above will change.
 ## Quirks
 
 - **No drop-in file today.** The snippet above is a manual merge into
-  `settings.json` because the extension-hooks proposal is not yet shipped.
+  `settings.json`; extension hook loading is still an upstream proposal.
+- **The snippet predates the current event names.** It names `PreToolUse` and
+  `PostToolUse`, while Gemini's shipped events are `BeforeTool`/`AfterTool`
+  with `BeforeAgent`/`AfterAgent` around the loop. The mapping drops every
+  payload anyway, so nothing is lost either way; a real probe still has to
+  confirm which names fire and what the payloads carry.
 - **Payload schema unconfirmed.** `tmux-agent-status notify --agent gemini` drops
   all payloads. Set `TMUX_AGENT_STATUS_DEBUG=1` to see which payloads arrive.
-- **Event names are planned, not verified.** `SessionEnd` in particular is not
-  confirmed as a shipped event.

@@ -34,3 +34,6 @@ cp share/agents/kiro/tmux-agent-status.json ~/.kiro/hooks/tmux-agent-status.json
 - **Multi-subagent TUI.** Kiro can run several subagents in one pane, but the
   hook table has no per-subagent stop event. The last event wins, which is a
   known limit for shape A agents.
+- **Native subagents are synchronous.** The parent waits for all parallel
+  children, so a child cannot outlive the turn and there is nothing extra to
+  track - see [Background work](README.md#background-work).

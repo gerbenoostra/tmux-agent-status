@@ -48,8 +48,20 @@ See [docs/install.md](../install.md) for where `share/agents/` lands for Nix, pr
   types to this event, and several of them - `agent_completed`, `auth_success`,
   `elicitation_complete`, `quota_auto_resume_*` - do not mean it is blocked on you. A `waiting` is
   not replaced by a later `working`, so an unnarrowed matcher would leave 💬 up for the rest of the
-  turn. `idle_prompt` is left out too: probed on 2.1.273, it does not fire while a permission
-  prompt is open, and fires around eighteen minutes after a turn has already ended.
+  turn. `idle_prompt` is left out too: probed on 2.1.287, it fires a few minutes after the last
+  event - even mid-turn during API retries - so it cannot replace the ✅ it would arrive on, and it
+  puts a 💬 up if you have already looked.
+- **Background agents outlive the turn.** A `run_in_background` Agent fires `SubagentStart`
+  with a stable `agent_id`, keeps firing its tool events under that ID, and ends with
+  `SubagentStop`; the parent's `Stop` can precede all of it, so the shipped mapping shows ✅ and
+  rings while the child still runs. Claude then submits an automatic wake turn that ends in
+  another `Stop`. Cancelling with `TaskStop` uses the same ID but emits no `SubagentStop`, and
+  killing a task from the UI re-runs its agent under the same `agent_id`. See
+  [Background work](README.md#background-work) for the full scenario matrix.
+- **`SessionStart` has a `compact` source too.** `/compact` emits `SessionStart` with
+  `source: "compact"` on the same session id; the matcher deliberately excludes it so a compact
+  does not `reset` the pane. `/clear` and `--resume` do match (`clear`, `resume`), and `/clear`
+  gets a fresh session id.
 - **`StopFailure` is a genuine error event.** Nearly every other surveyed agent leaves the `error`
   column empty and has to infer an abort, or cannot see one at all.
 - **The plugin hook runner accepts empty stdout.** The status commands write nothing to stdout, so

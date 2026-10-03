@@ -16,9 +16,10 @@ fmt-check:
 lint:
     cargo clippy --all-targets -- -D warnings
 
-# Lint the shell installer.
+# Lint the shell installer and the probe harness.
 lint-sh:
     shellcheck -s sh install.sh
+    shellcheck -s bash probe/probe-lifecycle.sh probe/log-hook.sh probe/worktree-hook.sh probe/hosts/*.sh
 
 # Run the test suite.
 test:
@@ -360,6 +361,12 @@ unlink:
 # Build the nix package from this checkout.
 nix-build:
     nix build .#tmux-agent-status
+
+# Probe one agent host's lifecycle events on a disposable tmux server and
+# scratch workspace; prints how to drive the scenarios. Results go to the
+# host's hook log in the scratch dir, never to your real config or server.
+probe-lifecycle host:
+    probe/probe-lifecycle.sh {{quote(host)}}
 
 # A throwaway tmux server showing all four states, for looking at.
 harness:

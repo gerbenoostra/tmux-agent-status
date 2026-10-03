@@ -40,5 +40,10 @@ cp /path/to/share/agents/mistral-vibe/hooks.toml ./.vibe/hooks.toml
   the turn is still running, so it maps to `working`. Mapping it to `error` would
   paint ❗ and ring the bell several times during a healthy turn. Vibe publishes
   no turn-abort event, so its `error` column stays empty.
-- **Subagents inherit hooks transitively.** There is no distinct subagent stop
-  event; the parent's own `post_agent` is the correct `done` signal.
+- **Subagents run asynchronously but are invisible to hooks.** The current
+  Unified Harness returns from `subagent.spawn` immediately, and the child turn
+  can still be running when the parent's `post_agent` fires - so `post_agent`
+  can mean "parent done, child still running". The hook payloads carry no child
+  ID (not even the `childSessionId` the UI shows), so a child completion cannot
+  be attributed to the spawn. Vibe stays scalar; see
+  [Background work](README.md#background-work).
