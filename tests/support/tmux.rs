@@ -6,10 +6,27 @@
 //! files add their own helpers in further `impl Server` blocks.
 
 use std::ffi::OsString;
+use std::io::Read;
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+
+/// How long one tmux call may take before the test fails naming it.
+///
+/// A call takes milliseconds, and the whole suite about three seconds on a
+/// laptop. A CI runner can be a lot slower and has been seen to stall for
+/// minutes, so this sits far above any plausible latency while still turning
+/// a hang into a failure that names the call that blocked.
+pub const TMUX_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// What an idle pane runs: until its server is killed.
+///
+/// Never a time-limited command such as `sleep 300`. `Server` users can be
+/// held up for a long time (a process-wide lock, a loaded CI runner), and a
+/// pane that exits takes the whole server with it, failing every test that is
+/// still waiting on one.
+pub const IDLE: &str = "tail -f /dev/null";
 
 /// A throwaway tmux server holding one session `t`.
 pub struct Server {
@@ -65,7 +82,13 @@ impl Server {
     }
 
     pub fn try_tmux(&self, args: &[&str]) -> Output {
-        Command::new("tmux")
+        output_within(self.tmux_command(args), TMUX_TIMEOUT)
+    }
+
+    /// The tmux invocation for `args` on this server, not yet run.
+    fn tmux_command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new("tmux");
+        command
             // -u: a client with no UTF-8 locale renders the glyphs as
             // underscores, and a build sandbox has no locale at all. The stored
             // option is unaffected; this is only about what a client sees.
@@ -80,9 +103,8 @@ impl Server {
             // zsh reads startup files (~/.zshenv) even then, which can rewrite
             // the PATH above. `/bin/sh -c` reads none.
             .env("SHELL", "/bin/sh")
-            .stdin(Stdio::null())
-            .output()
-            .expect("tmux is on PATH")
+            .stdin(Stdio::null());
+        command
     }
 
     pub fn socket_path(&self) -> String {
@@ -159,9 +181,71 @@ impl Drop for Server {
     fn drop(&mut self) {
         // Best effort: a server that already exited is not a failure. tmux
         // leaves the socket file behind, so the guard takes that too.
-        let _ = self.try_tmux(&["kill-server"]);
+        // Never panics: a panic in `drop` while a test is already unwinding
+        // aborts the whole test binary.
+        if let Err(stalled) = try_output_within(self.tmux_command(&["kill-server"]), TMUX_TIMEOUT) {
+            eprintln!("{stalled}");
+        }
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+/// Run `command` to completion and return its output, panicking with the
+/// command line if it is still running after `limit`.
+pub fn output_within(command: Command, limit: Duration) -> Output {
+    try_output_within(command, limit).unwrap_or_else(|message| panic!("{message}"))
+}
+
+/// Like [`output_within`], returning the failure instead of panicking.
+///
+/// A command that cannot be started is also an `Err`. On a timeout the child
+/// is killed, but its output readers are left behind: a grandchild that kept
+/// the pipes open (a tmux server starting up) must not block the report.
+pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output, String> {
+    let line = std::iter::once(command.get_program())
+        .chain(command.get_args())
+        .map(|part| part.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("cannot start `{line}`: {err}"))?;
+    let stdout = drain(child.stdout.take().expect("stdout is piped"));
+    let stderr = drain(child.stderr.take().expect("stderr is piped"));
+
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "`{line}` was still running after {limit:?} and was killed"
+                ));
+            }
+            Err(err) => return Err(format!("cannot wait for `{line}`: {err}")),
+        }
+    };
+    let collect = |reader: std::thread::JoinHandle<Vec<u8>>| reader.join().unwrap_or_default();
+    Ok(Output {
+        status,
+        stdout: collect(stdout),
+        stderr: collect(stderr),
+    })
+}
+
+fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = pipe.read_to_end(&mut bytes);
+        bytes
+    })
 }
 
 /// `PATH` with the binary under test in front.
