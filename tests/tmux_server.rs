@@ -10,7 +10,7 @@ use support::tmux::{Server, wait_for};
 
 /// What an idle pane runs. The tool resolves panes from `$TMUX_PANE` and never
 /// inspects processes, so a pane does not have to look like an agent.
-const IDLE: &str = "sleep 300";
+const IDLE: &str = support::tmux::IDLE;
 
 impl Server {
     fn start() -> Server {
