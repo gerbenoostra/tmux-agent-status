@@ -121,15 +121,8 @@ fn run_reset(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     reject_extra_with_prefix(pargs, "reset")?;
-    // The payload is drained before the hook runs - see `run_notify` for why.
-    // An unreadable, unknown-agent, incomplete or wrong-event payload degrades
-    // to the generic reset rather than to silence: the command is named
-    // `reset` either way.
-    let action = agent.and_then(|agent| {
-        session_payload().and_then(|payload| match notify::dispatch(&agent, &payload) {
-            Some(action @ NotifyAction::ResetSession { .. }) => Some(action),
-            _ => None,
-        })
+    let action = session_action(agent, |action| {
+        matches!(action, NotifyAction::ResetSession { .. })
     });
     let pane = pane.as_deref();
     Ok(run_hook(
@@ -146,11 +139,8 @@ fn run_finish(mut pargs: Arguments) -> Result<ExitCode, MainError> {
     let pane = pane_value(&mut pargs)?;
     let json = pargs.contains("--json");
     reject_extra_with_prefix(pargs, "finish")?;
-    let action = agent.and_then(|agent| {
-        session_payload().and_then(|payload| match notify::dispatch(&agent, &payload) {
-            Some(action @ NotifyAction::EndSession { .. }) => Some(action),
-            _ => None,
-        })
+    let action = session_action(agent, |action| {
+        matches!(action, NotifyAction::EndSession { .. })
     });
     let pane = pane.as_deref();
     Ok(run_hook(
@@ -160,6 +150,25 @@ fn run_finish(mut pargs: Arguments) -> Result<ExitCode, MainError> {
         },
         json,
     ))
+}
+
+/// The session-scoped action `agent`'s stdin payload maps to, when it is the
+/// one `wanted` accepts.
+///
+/// The payload is drained before the hook runs - see `run_notify` for why. An
+/// unreadable, unknown-agent, incomplete or wrong-event payload is `None`, which
+/// the caller degrades to its generic command rather than to silence: the
+/// command is named `reset` or `finish` either way.
+fn session_action(
+    agent: Option<String>,
+    wanted: impl Fn(&NotifyAction) -> bool,
+) -> Option<NotifyAction> {
+    let agent = agent?;
+    let Some(payload) = stdin_payload() else {
+        debug("--stdin on a terminal: no payload, running the generic command");
+        return None;
+    };
+    notify::dispatch(&agent, &payload).filter(|action| wanted(action))
 }
 
 /// The `--agent <name> --stdin` pair `reset` and `finish` accept for a
@@ -180,15 +189,15 @@ fn session_args(pargs: &mut Arguments) -> Result<Option<String>, MainError> {
     }
 }
 
-/// What `--stdin` carried, drained whatever it turns out to hold.
+/// What `--stdin` carried, drained whatever it turns out to hold, or `None`
+/// when stdin is a terminal.
 ///
-/// A terminal or unreadable stdin is no payload at all, which the caller turns
-/// into the generic command rather than a block: the agent writing into the
-/// pipe must never take an EPIPE, and a hand-typed `reset --stdin` must not
-/// hang waiting for EOF.
-fn session_payload() -> Option<String> {
+/// A hand-typed `--stdin` must not hang waiting for EOF, and the agent writing
+/// into the pipe must never take an EPIPE. A read failure is not a hook-config
+/// error either: stdin was promised but could not be consumed, so whatever was
+/// read stands as an unrecognised payload and the agent is not blocked.
+fn stdin_payload() -> Option<String> {
     if std::io::stdin().is_terminal() {
-        debug("--stdin on a terminal: no payload, running the generic command");
         return None;
     }
     let mut buf = String::new();
@@ -228,19 +237,14 @@ fn run_notify(mut pargs: Arguments) -> Result<ExitCode, MainError> {
         if !free.is_empty() {
             return Err(unexpected_arguments("notify", free));
         }
-        if std::io::stdin().is_terminal() {
+        let Some(payload) = stdin_payload() else {
             debug("notify: --stdin with a terminal is a no-op");
             if json {
                 let _ = writeln!(io::stdout(), "{{}}");
             }
             return Ok(ExitCode::SUCCESS);
-        }
-        let mut buf = String::new();
-        // A read failure here is not a hook-config error: stdin was promised
-        // but could not be consumed. Treat it as an empty, unrecognised payload
-        // and exit 0 so the agent is not blocked.
-        let _ = std::io::stdin().read_to_string(&mut buf);
-        buf
+        };
+        payload
     } else {
         match free.as_slice() {
             [] => return Err(MainError::from("notify requires a payload or --stdin")),
