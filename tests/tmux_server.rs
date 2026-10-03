@@ -345,7 +345,8 @@ fn every_state_reaches_the_window_as_its_own_glyph() {
         ("waiting", "💬"),
     ] {
         // Reported onto an empty pane: a pane that already holds a state can
-        // refuse a lower one, which `a_state_is_refused_if_it_ranks_lower` covers.
+        // refuse a lower one, which
+        // `a_reported_state_lands_according_to_the_layered_precedence` covers.
         assert_ok(&server.agent_status(&pane, &["reset"]));
         assert_ok(&server.agent_status(&pane, &["set", state]));
         assert_eq!(server.window_status(&pane), glyph, "state {state}");
