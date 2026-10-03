@@ -34,23 +34,6 @@ impl State {
         }
     }
 
-    /// The precedence within one pane: a state reported on a pane replaces the
-    /// one it holds only if it does not rank lower here.
-    ///
-    /// Not the rollup rank, because it answers a different question - which of
-    /// two events on the same pane you still need to see. `working` ranks lowest,
-    /// so a sibling tool call finishing cannot hide a prompt that is still open.
-    /// `waiting` ranks below `done`, so a nag after a finished turn cannot turn
-    /// ✅ into a 💬 with nothing behind it. `error` beats everything.
-    pub fn precedence(self) -> u8 {
-        match self {
-            State::Working => 1,
-            State::Waiting => 2,
-            State::Done => 3,
-            State::Error => 4,
-        }
-    }
-
     /// The name the hook passes on the command line, and the value stored in
     /// `@agent_pane_status`.
     pub fn name(self) -> &'static str {
@@ -82,14 +65,6 @@ impl State {
     /// bell per tool call is not a signal.
     pub fn rings_bell(self) -> bool {
         self != State::Working
-    }
-
-    /// Whether the state survives focusing the window.
-    ///
-    /// `working` is sticky, or an agent you glance at goes blank while it is
-    /// still running.
-    pub fn is_sticky(self) -> bool {
-        self == State::Working
     }
 }
 
@@ -161,16 +136,8 @@ mod tests {
     }
 
     #[test]
-    fn precedence_orders_working_lowest_and_error_highest() {
-        assert!(State::Working.precedence() < State::Waiting.precedence());
-        assert!(State::Waiting.precedence() < State::Done.precedence());
-        assert!(State::Done.precedence() < State::Error.precedence());
-    }
-
-    #[test]
-    fn only_working_is_sticky_and_silent() {
+    fn only_working_is_silent() {
         for state in State::ALL {
-            assert_eq!(state.is_sticky(), state == State::Working);
             assert_eq!(state.rings_bell(), state != State::Working);
         }
     }
