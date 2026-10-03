@@ -208,10 +208,10 @@ These apply to every agent page:
   background work. Agents that parse stdout still use `--json` so the
   parser sees valid JSON.
 - **A prompt event starts a turn.** The event that means the human typed maps to
-  `tmux-agent-status start`, not `set working`. It is the one write that replaces
-  whatever the pane already holds, because typing into a pane is seeing it; a
-  `set` deliberately will not, so a state the last turn left would otherwise
-  outrank every state of this one.
+  `tmux-agent-status start`, not `set working`. It is the one write that clears
+  whatever the last turn left, because typing into a pane is seeing it; a `set`
+  deliberately will not, so a state the last turn left would otherwise outrank
+  every state of this one. Tracked background work survives it.
 - **A missing binary is silent.** If `tmux-agent-status` is not on the `PATH` the
   hook inherits, the command exits 0 and no error is raised anywhere; the only
   symptom is that no glyph ever appears.

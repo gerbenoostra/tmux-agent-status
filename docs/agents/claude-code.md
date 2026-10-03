@@ -12,7 +12,7 @@ The minimum probed version is Claude Code 2.1.287; everything below is what a re
 | State | Claude Code event | Command | Notes |
 | --- | --- | --- | --- |
 | reset | `SessionStart` (`startup\|resume\|clear\|fork`) | `tmux-agent-status reset --agent claude-code --stdin` | accepts the session; an unreadable payload still clears the pane |
-| start | `UserPromptSubmit` | `tmux-agent-status start` | a turn begins; replaces whatever the last turn left |
+| start | `UserPromptSubmit` | `tmux-agent-status start` | a turn begins; clears what the last turn left, tracked work survives |
 | working | `PostToolUse` | `tmux-agent-status set working` |  |
 | work started | `SubagentStart` | `tmux-agent-status notify --agent claude-code --stdin` | opens a tracked background item under its `agent_id` |
 | work stopped | `SubagentStop`, `PostToolUse` (`TaskStop`) | `tmux-agent-status notify --agent claude-code --stdin` | `SubagentStop` for a finished agent; a successful `TaskStop` for a cancelled one |
