@@ -3,6 +3,7 @@
 //! Each test gets its own throwaway server from `support::tmux`.
 
 use std::process::{Command, Output, Stdio};
+use std::thread::JoinHandle;
 
 mod support;
 
@@ -28,15 +29,16 @@ impl Server {
         output_within(command, TMUX_TIMEOUT)
     }
 
-    /// Run the binary as a hook would, without waiting for it to finish.
-    fn spawn_agent_status(&self, pane: &str, args: &[&str]) -> std::process::Child {
-        Command::new(support::BIN)
+    /// Run the binary as a hook would, without waiting for it to finish. The
+    /// call is bounded on its own thread, so concurrent calls stay concurrent.
+    fn spawn_agent_status(&self, pane: &str, args: &[&str]) -> JoinHandle<Output> {
+        let mut command = Command::new(support::BIN);
+        command
             .args(args)
             .env("TMUX", format!("{},0,0", self.socket_path()))
             .env("TMUX_PANE", pane)
-            .stdin(Stdio::null())
-            .spawn()
-            .expect("the binary runs")
+            .stdin(Stdio::null());
+        std::thread::spawn(move || output_within(command, TMUX_TIMEOUT))
     }
 
     /// Put a value in a pane's status behind the tool's back, so a test can
@@ -1017,8 +1019,9 @@ fn a_sibling_report_cannot_lower_a_state_that_outranks_it() {
         .collect();
     running.push(server.spawn_agent_status(&pane, &["set", "waiting"]));
     running.extend((0..20).map(|_| server.spawn_agent_status(&pane, &["set", "working"])));
-    for mut child in running {
-        assert!(child.wait().expect("the binary exits").success());
+    for call in running {
+        // A stalled call panics its thread, naming the call.
+        assert_ok(&call.join().expect("the call finished in time"));
     }
 
     assert_eq!(server.pane_statuses(&pane), ["waiting"]);
