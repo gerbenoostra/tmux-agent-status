@@ -10,7 +10,6 @@
 //! claude-code --stdin` must map a readable session payload to `ResetSession` /
 //! `EndSession`, and anything else to the generic command.
 
-use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -19,7 +18,7 @@ use tmux_agent_status::notify::{HostSession, NotifyAction, WorkKey, dispatch};
 mod support;
 
 use support::lifecycle::read_record;
-use support::tmux::Server;
+use support::tmux::{Server, TMUX_TIMEOUT, output_within, output_within_feeding};
 
 const AGENT: &str = "claude-code";
 
@@ -360,30 +359,25 @@ fn binary(
     args: &[&str],
     payload: Option<&serde_json::Value>,
 ) -> Output {
-    let mut child = Command::new(support::BIN)
+    let mut command = Command::new(support::BIN);
+    command
         .args(args)
         .env("TMUX", format!("{},0,0", server.socket_path()))
         .env("TMUX_PANE", pane)
         .env_remove("TMUX_AGENT_STATUS_PANE")
         .env_remove("TMUX_AGENT_STATUS_DISABLED")
-        .env_remove("TMUX_AGENT_STATUS_DEBUG")
-        .stdin(match payload {
-            Some(_) => Stdio::piped(),
-            None => Stdio::null(),
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the binary spawns");
-    if let Some(payload) = payload {
-        child
-            .stdin
-            .as_mut()
-            .expect("stdin is piped")
-            .write_all(serde_json::to_string(payload).unwrap().as_bytes())
-            .expect("the payload is written");
+        .env_remove("TMUX_AGENT_STATUS_DEBUG");
+    match payload {
+        Some(payload) => output_within_feeding(
+            command,
+            serde_json::to_string(payload).unwrap().as_bytes(),
+            TMUX_TIMEOUT,
+        ),
+        None => {
+            command.stdin(Stdio::null());
+            output_within(command, TMUX_TIMEOUT)
+        }
     }
-    child.wait_with_output().expect("the binary runs")
 }
 
 /// One layer option of the pane, empty when unset.

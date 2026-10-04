@@ -6,7 +6,7 @@ use std::process::{Command, Output, Stdio};
 
 mod support;
 
-use support::tmux::{Server, wait_for};
+use support::tmux::{Server, TMUX_TIMEOUT, output_within, wait_for};
 
 /// What an idle pane runs. The tool resolves panes from `$TMUX_PANE` and never
 /// inspects processes, so a pane does not have to look like an agent.
@@ -19,13 +19,13 @@ impl Server {
 
     /// Run the binary as a hook would: inside this server, from this pane.
     fn agent_status(&self, pane: &str, args: &[&str]) -> Output {
-        Command::new(support::BIN)
+        let mut command = Command::new(support::BIN);
+        command
             .args(args)
             .env("TMUX", format!("{},0,0", self.socket_path()))
             .env("TMUX_PANE", pane)
-            .stdin(Stdio::null())
-            .output()
-            .expect("the binary runs")
+            .stdin(Stdio::null());
+        output_within(command, TMUX_TIMEOUT)
     }
 
     /// Run the binary as a hook would, without waiting for it to finish.
@@ -74,14 +74,14 @@ impl Server {
 
     /// Run the binary with no $TMUX_PANE, using $TMUX_AGENT_STATUS_PANE instead.
     fn agent_status_pane_env(&self, pane: &str, args: &[&str]) -> Output {
-        Command::new(support::BIN)
+        let mut command = Command::new(support::BIN);
+        command
             .args(args)
             .env("TMUX", format!("{},0,0", self.socket_path()))
             .env("TMUX_AGENT_STATUS_PANE", pane)
             .env_remove("TMUX_PANE")
-            .stdin(Stdio::null())
-            .output()
-            .expect("the binary runs")
+            .stdin(Stdio::null());
+        output_within(command, TMUX_TIMEOUT)
     }
 
     /// A new window with one idle pane, returning that pane's id.

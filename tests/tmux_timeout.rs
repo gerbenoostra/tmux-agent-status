@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 mod support;
 
-use support::tmux::{Failure, try_output_within};
+use support::tmux::{Failure, output_within_feeding, try_output_within};
 
 #[test]
 fn a_command_that_outlives_its_limit_is_killed_and_named() {
@@ -74,4 +74,23 @@ fn a_command_that_cannot_start_is_named() {
     assert!(matches!(err, Failure::NotStarted(_)), "{err:?}");
     let err = err.to_string();
     assert!(err.contains("tmux-agent-status-no-such-program"), "{err}");
+}
+
+#[test]
+fn fed_input_reaches_the_command_and_is_closed() {
+    // `cat` echoes its input and exits only once stdin is closed.
+    let out = output_within_feeding(Command::new("cat"), b"payload", Duration::from_secs(30));
+
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"payload");
+}
+
+#[test]
+#[should_panic(expected = "was still running after")]
+fn input_the_command_never_reads_cannot_block_the_limit() {
+    let mut command = Command::new("sleep");
+    command.arg("30");
+
+    // Far more than a pipe buffer holds, so a blocking write would hang.
+    output_within_feeding(command, &vec![b'x'; 4 << 20], Duration::from_millis(200));
 }

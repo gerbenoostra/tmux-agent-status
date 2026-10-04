@@ -6,7 +6,7 @@
 //! files add their own helpers in further `impl Server` blocks.
 
 use std::ffi::OsString;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
@@ -219,13 +219,30 @@ impl std::fmt::Display for Failure {
     }
 }
 
+/// Like [`output_within`], with `input` written to the command's stdin, which
+/// is then closed.
+pub fn output_within_feeding(command: Command, input: &[u8], limit: Duration) -> Output {
+    run_within(command, Some(input.to_vec()), limit).unwrap_or_else(|failure| panic!("{failure}"))
+}
+
 /// Like [`output_within`], returning the failure instead of panicking.
 ///
 /// A command that cannot be started is an [`Failure::NotStarted`]. The limit
 /// covers the whole call, output collection included: a grandchild that kept
 /// a pipe open (a tmux server starting up) must not block the report, whether
 /// its parent is still running or already exited.
-pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output, Failure> {
+pub fn try_output_within(command: Command, limit: Duration) -> Result<Output, Failure> {
+    run_within(command, None, limit)
+}
+
+/// The bounded call behind every `*_within` function. With `input`, stdin is
+/// piped and fed from a thread of its own, so a command that never reads it
+/// cannot block the call past `limit` either.
+fn run_within(
+    mut command: Command,
+    input: Option<Vec<u8>>,
+    limit: Duration,
+) -> Result<Output, Failure> {
     let line = std::iter::once(command.get_program())
         .chain(command.get_args())
         // Quote an argument that would smear into its neighbours - one that
@@ -244,6 +261,9 @@ pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output
         })
         .collect::<Vec<_>>()
         .join(" ");
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -251,6 +271,13 @@ pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output
         .map_err(|err| Failure::NotStarted(format!("cannot start `{line}`: {err}")))?;
     let stdout = drain(child.stdout.take().expect("stdout is piped"));
     let stderr = drain(child.stderr.take().expect("stderr is piped"));
+    if let Some(input) = input {
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        // Dropping `stdin` at the end closes it, ending the command's input.
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&input);
+        });
+    }
 
     let deadline = Instant::now() + limit;
     let status = loop {
