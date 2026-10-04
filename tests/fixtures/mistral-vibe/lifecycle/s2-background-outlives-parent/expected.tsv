@@ -1,0 +1,6 @@
+# file	event	command	pane	window	bell
+001-pre_tool	pre_tool	tmux-agent-status notify --agent mistral-vibe --stdin < 001-pre_tool	working	🤖	0
+002-post_tool	post_tool	tmux-agent-status notify --agent mistral-vibe --stdin < 002-post_tool	working	🤖	0
+003-pre_tool	pre_tool	tmux-agent-status notify --agent mistral-vibe --stdin < 003-pre_tool	working	🤖	0
+004-post_tool	post_tool	tmux-agent-status notify --agent mistral-vibe --stdin < 004-post_tool	working	🤖	0
+005-post_agent	post_agent	tmux-agent-status notify --agent mistral-vibe --stdin < 005-post_agent	done	✅	1

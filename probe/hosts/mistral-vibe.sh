@@ -41,9 +41,9 @@ probe_install_hooks() {
         {
             printf '[[hooks]]\nname = "tas-probe-%s"\ntype = "%s"\n' "$event" "$event"
             case "$event" in
-                pre_tool | post_tool) printf 'match = "*"\n' ;;
+                pre_tool | post_tool) printf 'match = "*"\nstrict = true\n' ;;
             esac
-            printf 'strict = true\ncommand = %s\n\n' "$json"
+            printf 'command = %s\n\n' "$json"
         } >>"$out"
     done
 }

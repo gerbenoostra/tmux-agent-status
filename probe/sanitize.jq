@@ -25,7 +25,8 @@ def san_payload:
         agent_id: (.agent_id // .subagentId),
         agent_type: (.agent_type // .subagentType),
         tool_name: (.tool_name // .toolName),
-        tool_use_id: (.tool_use_id // .toolUseId),
+        tool_use_id: (.tool_use_id // .toolUseId // .tool_call_id),
+        tool_status,
         background_tasks: (.background_tasks // .backgroundTasks)
     }
     | with_entries(select(.value != null))
@@ -42,6 +43,7 @@ def san_payload:
         "agent_type",
         "tool_name",
         "tool_use_id",
+        "tool_status",
         "trigger",
         "name",
         "error",
@@ -56,8 +58,15 @@ def san_payload:
     | (if .tool_input | type == "object"
        then .tool_input |= keep(["task_id", "run_in_background", "subagent_type", "isolation"])
        else . end)
+    | (if .tool_name == "run_subagent"
+          and (.tool_response | type) == "object"
+          and (.tool_response.output | type) == "string"
+       then .tool_response.agentId = (try (.tool_response.output | capture("(?<id>[0-9a-f]{8})").id) catch null)
+       else . end)
     | (if .tool_response | type == "object"
-       then .tool_response |= keep(["task_id", "task_type", "agentId", "status", "isAsync", "success"])
+       then .tool_response |= (
+           keep(["task_id", "task_type", "agentId", "status", "isAsync", "success"])
+           | with_entries(select(.value != null)))
        else . end)
     | (if .background_tasks | type == "array"
        then .background_tasks |= map(

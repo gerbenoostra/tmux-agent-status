@@ -31,6 +31,7 @@ const PAYLOAD_KEYS: &[&str] = &[
     "agent_type",
     "tool_name",
     "tool_use_id",
+    "tool_status",
     "trigger",
     "name",
     "error",
@@ -215,6 +216,28 @@ fn task_stop_cancels_by_the_subagent_start_id() {
     assert!(
         started[0].is_string() && cancelled.iter().all(|id| *id == started[0]),
         "TaskStop ids {cancelled:?} do not match SubagentStart {started:?}"
+    );
+}
+
+#[test]
+fn devin_background_spawn_keeps_only_its_extracted_agent_id() {
+    let scenario = lifecycle::scenarios_for("devin")
+        .into_iter()
+        .find(|scenario| scenario.name() == "s2-background-outlives-parent")
+        .expect("the Devin S2 capture is committed");
+    let spawn = scenario
+        .records
+        .iter()
+        .map(|path| read_record(path))
+        .find(|record| record["payload"]["tool_response"]["agentId"].is_string())
+        .expect("the background spawn is captured");
+    let response = spawn["payload"]["tool_response"].as_object().unwrap();
+    assert_eq!(response.len(), 2);
+    assert_eq!(response["success"], true);
+    assert!(
+        response["agentId"]
+            .as_str()
+            .is_some_and(|id| id.len() == 8 && id.chars().all(|c| c.is_ascii_hexdigit()))
     );
 }
 
