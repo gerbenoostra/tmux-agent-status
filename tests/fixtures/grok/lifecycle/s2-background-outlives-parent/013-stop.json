@@ -1,0 +1,1 @@
+{"event":"Stop","ts_enter":1791126077365,"ts_exit":1791126077372,"payload":{"reason":"end_turn","hook_event_name":"Stop","session_id":"01a1076e-8599-7ba2-9c43-c47790d8a5d0","permission_mode":"auto","prompt_id":"subagent-completed-01a1076e-d268-7583-8839-5279cc28f43d","stop_hook_active":false,"background_tasks":[]}}

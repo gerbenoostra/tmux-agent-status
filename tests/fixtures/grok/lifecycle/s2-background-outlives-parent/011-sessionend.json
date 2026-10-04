@@ -1,0 +1,1 @@
+{"event":"SessionEnd","ts_enter":1791126075888,"ts_exit":1791126075895,"payload":{"reason":"shutdown","hook_event_name":"SessionEnd","session_id":"01a1076e-d268-7583-8839-5279cc28f43d","permission_mode":"auto","agent_type":"general-purpose"}}

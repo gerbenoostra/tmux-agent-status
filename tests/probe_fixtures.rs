@@ -51,7 +51,7 @@ const TOOL_RESPONSE_KEYS: &[&str] = &[
 const BACKGROUND_TASK_KEYS: &[&str] = &["id", "type", "status", "agent_type"];
 
 fn fixture_files() -> Vec<PathBuf> {
-    lifecycle::scenarios()
+    lifecycle::all_scenarios()
         .into_iter()
         .flat_map(|scenario| scenario.records)
         .collect()
@@ -162,7 +162,7 @@ fn every_fixture_is_a_sanitized_probe_record() {
 /// the directory layout refuses to let one slip in untested.
 #[test]
 fn every_scenario_has_an_expected_replay() {
-    for scenario in lifecycle::scenarios() {
+    for scenario in lifecycle::all_scenarios() {
         let expected = scenario.expected_path();
         assert!(
             expected.exists(),
@@ -272,4 +272,46 @@ fn sanitizer_orders_records_by_hook_entry_time() {
         })
         .collect();
     assert_eq!(events, ["SubagentStart", "PostToolBatch"]);
+}
+
+#[test]
+fn sanitizer_canonicalizes_camel_case_lifecycle_identity() {
+    let dir = TempDir::new("sanitize-camel-case");
+    let raw = dir.write(
+        "raw.jsonl",
+        concat!(
+            r#"{"event":"SubagentStart","ts_enter":100,"ts_exit":110,"stdin":"{\"hookEventName\":\"SubagentStart\",\"sessionId\":\"root\",\"subagentId\":\"child\",\"subagentType\":\"worker\",\"backgroundTasks\":[{\"id\":\"child\",\"type\":\"subagent\",\"status\":\"running\",\"agentType\":\"worker\",\"description\":\"private\"}],\"workspaceRoot\":\"/private/path\"}"}"#,
+            "\n",
+        ),
+    );
+    let out = TempDir::new("sanitize-camel-case-out");
+
+    let ran = Command::new("bash")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("probe/sanitize-fixtures.sh"))
+        .arg(&raw)
+        .arg(out.path())
+        .output()
+        .expect("the sanitizer runs");
+    assert!(
+        ran.status.success(),
+        "sanitize-fixtures.sh failed: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+
+    let payload = read_record(&out.join("001-subagentstart.json"))["payload"].clone();
+    assert_eq!(
+        payload,
+        serde_json::json!({
+            "hook_event_name": "SubagentStart",
+            "session_id": "root",
+            "agent_id": "child",
+            "agent_type": "worker",
+            "background_tasks": [{
+                "id": "child",
+                "type": "subagent",
+                "status": "running",
+                "agent_type": "worker"
+            }]
+        })
+    );
 }

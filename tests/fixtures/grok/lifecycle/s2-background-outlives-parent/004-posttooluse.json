@@ -1,0 +1,1 @@
+{"event":"PostToolUse","ts_enter":1791126065788,"ts_exit":1791126065796,"payload":{"hook_event_name":"PostToolUse","session_id":"01a1076e-8599-7ba2-9c43-c47790d8a5d0","permission_mode":"auto","tool_name":"spawn_subagent","tool_input":{},"tool_response":{},"tool_use_id":"call-615b71a1-aecc-43a1-855c-7d13cb5b9278-0"}}

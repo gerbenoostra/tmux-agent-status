@@ -15,7 +15,21 @@
 def keep($keys): with_entries(select(.key as $k | $keys | index($k)));
 
 def san_payload:
-    keep([
+    . + {
+        hook_event_name: (.hook_event_name // .hookEventName),
+        session_id: (.session_id // .sessionId),
+        prompt_id: (.prompt_id // .promptId),
+        permission_mode: (.permission_mode // .permissionMode),
+        stop_hook_active: (.stop_hook_active // .stopHookActive),
+        notification_type: (.notification_type // .notificationType),
+        agent_id: (.agent_id // .subagentId),
+        agent_type: (.agent_type // .subagentType),
+        tool_name: (.tool_name // .toolName),
+        tool_use_id: (.tool_use_id // .toolUseId),
+        background_tasks: (.background_tasks // .backgroundTasks)
+    }
+    | with_entries(select(.value != null))
+    | keep([
         "hook_event_name",
         "session_id",
         "prompt_id",
@@ -46,7 +60,12 @@ def san_payload:
        then .tool_response |= keep(["task_id", "task_type", "agentId", "status", "isAsync", "success"])
        else . end)
     | (if .background_tasks | type == "array"
-       then .background_tasks |= map(if type == "object" then keep(["id", "type", "status", "agent_type"]) else . end)
+       then .background_tasks |= map(
+           if type == "object"
+           then . + {agent_type: (.agent_type // .agentType)}
+               | keep(["id", "type", "status", "agent_type"])
+           else .
+           end)
        else . end);
 
 {event, ts_enter, ts_exit, payload: (.stdin | fromjson | san_payload)}
