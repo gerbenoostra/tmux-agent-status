@@ -228,11 +228,17 @@ impl std::fmt::Display for Failure {
 pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output, Failure> {
     let line = std::iter::once(command.get_program())
         .chain(command.get_args())
-        // Quote an argument that would smear into its neighbours, so the
-        // message shows where one argument ends and the next begins.
+        // Quote an argument that would smear into its neighbours - one that
+        // is empty, holds whitespace, or holds a quote - so the message shows
+        // where one argument ends and the next begins. `{:?}` escapes rather
+        // than wraps, so a quote inside stays unambiguous.
         .map(|part| match part.to_string_lossy() {
-            part if part.is_empty() || part.chars().any(char::is_whitespace) => {
-                format!("'{part}'")
+            part if part.is_empty()
+                || part
+                    .chars()
+                    .any(|c| c.is_whitespace() || matches!(c, '\'' | '"')) =>
+            {
+                format!("{part:?}")
             }
             part => part.into_owned(),
         })
