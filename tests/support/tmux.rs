@@ -273,9 +273,6 @@ pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output
             }
         }
     };
-    // The limit covers the whole call, output included: a child that exited
-    // but left a pipe held open by a grandchild (a tmux server starting up)
-    // must not block the report either.
     let remaining = || deadline.saturating_duration_since(Instant::now());
     let (Ok(stdout), Ok(stderr)) = (
         stdout.recv_timeout(remaining()),
