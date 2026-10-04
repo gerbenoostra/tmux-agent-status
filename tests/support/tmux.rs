@@ -228,7 +228,14 @@ impl std::fmt::Display for Failure {
 pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output, Failure> {
     let line = std::iter::once(command.get_program())
         .chain(command.get_args())
-        .map(|part| part.to_string_lossy())
+        // Quote an argument that would smear into its neighbours, so the
+        // message shows where one argument ends and the next begins.
+        .map(|part| match part.to_string_lossy() {
+            part if part.is_empty() || part.chars().any(char::is_whitespace) => {
+                format!("'{part}'")
+            }
+            part => part.into_owned(),
+        })
         .collect::<Vec<_>>()
         .join(" ");
     let mut child = command

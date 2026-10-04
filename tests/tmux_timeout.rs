@@ -55,6 +55,17 @@ fn a_child_that_exits_but_leaves_its_output_open_is_reported() {
 }
 
 #[test]
+fn an_argument_with_spaces_is_quoted_in_the_command_line() {
+    let mut command = Command::new("sh");
+    command.args(["-c", "sleep 30"]);
+
+    let err = try_output_within(command, Duration::from_millis(200)).expect_err("sleep outlives");
+
+    let err = err.to_string();
+    assert!(err.contains("sh -c 'sleep 30'"), "{err}");
+}
+
+#[test]
 fn a_command_that_cannot_start_is_named() {
     let command = Command::new("tmux-agent-status-no-such-program");
 
