@@ -1,7 +1,7 @@
 # Cursor probe support for probe-lifecycle.sh.
 #
 # Cursor reads project-local hooks from <workspace>/.cursor/hooks.json in its
-# {hooks: {event: [{type: "command", command}]}} shape. The hook log lives at
+# {hooks: {event: [{command}]}} shape. The hook log lives at
 # $SCRATCH/hooks.jsonl.
 #
 # Cursor parses hook stdout as JSON, so every command logs the event and
@@ -37,7 +37,7 @@ probe_install_hooks() {
             command="TAS_HOOK_SLEEP=$(printf %q "$delay") $command"
         fi
         hooks=$(jq --arg e "$event" --arg c "$command" \
-            '. + {($e): [{type: "command", command: $c}]}' \
+            '. + {($e): [{command: $c}]}' \
             <<<"$hooks")
     done
     jq -n --argjson hooks "$hooks" '{hooks: $hooks}' >"$ws/.cursor/hooks.json"

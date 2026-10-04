@@ -81,8 +81,10 @@ adding a second one; JSON's last key silently wins.
   the root session and prompt IDs and carries only `last_assistant_message` -
   nothing identifies which subagent finished, and the automatic parent wake
   turn emits no `UserPromptSubmit`. So `done` can paint while a worker still
-  runs, and no stop event can attribute completion; Devin stays scalar. See
-  [Background work](README.md#background-work).
+  runs, and no stop event can attribute completion; Devin stays scalar.
+  Observed on Devin CLI 3000.11.3 (2026-10-04); the sanitized capture is in
+  [`tests/fixtures/devin/lifecycle/s2-background-outlives-parent/`](../../tests/fixtures/devin/lifecycle/s2-background-outlives-parent/).
+  See [Background work](README.md#background-work).
 - **Stdout is parsed as JSON** on `PreToolUse`, `PermissionRequest`,
   `UserPromptSubmit`, `SessionStart` and `Stop`, so every entry in the drop-in
   uses `--json`. The status commands write nothing to stdout themselves;

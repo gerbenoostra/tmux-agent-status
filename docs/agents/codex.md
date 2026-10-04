@@ -49,4 +49,5 @@ cp /path/to/share/agents/codex/hooks.json ~/.codex/hooks.json
   `TMUX_AGENT_STATUS_PANE` if the hook runner is not a child of the pane.
 - **Background work is unprobed here.** Codex documents `SubagentStart`/`SubagentStop`
   with a shared `agent_id`, but whether background children outlive the parent turn
-  in practice is untested - see [Background work](README.md#background-work).
+  in practice is untested; the T4 run did not probe it because the `codex`
+  binary is not installed - see [Background work](README.md#background-work).

@@ -146,6 +146,23 @@ fn vibe_hooks(root: &Path) -> serde_json::Value {
     serde_json::json!({"hooks": events})
 }
 
+fn kiro_hooks(root: &Path) -> serde_json::Value {
+    let config: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("share/agents/kiro/tmux-agent-status.json")).unwrap(),
+    )
+    .unwrap();
+    let mut events = serde_json::Map::new();
+    for hook in config["hooks"].as_array().unwrap() {
+        let event = hook["trigger"].as_str().unwrap();
+        let command = hook["action"]["command"].as_str().unwrap();
+        events.insert(
+            event.to_owned(),
+            serde_json::json!([{"hooks": [{"command": command}]}]),
+        );
+    }
+    serde_json::json!({"hooks": events})
+}
+
 fn check_or_write(scenario: &Scenario, rows: &[String]) {
     let expected_path = scenario.expected_path();
     if std::env::var_os("TAS_REPLAY_WRITE").is_some_and(|v| v == "1") {
@@ -252,6 +269,25 @@ fn vibe_scalar_replay_finishes_while_the_child_is_running() {
 
     let final_row = rows.last().expect("post_agent is captured");
     assert!(final_row.contains("\tpost_agent\t"));
+    let fields: Vec<&str> = final_row.split('\t').collect();
+    assert_eq!(&fields[3..], ["done", "✅", "1"]);
+}
+
+#[test]
+fn kiro_scalar_replay_finishes_a_normal_turn() {
+    if !support::tmux_or_skip() {
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let hooks = kiro_hooks(root);
+    let scenarios = lifecycle::scenarios_for("kiro");
+    assert_eq!(scenarios.len(), 1);
+    let scenario = &scenarios[0];
+    let rows = replay(scenario, &hooks, true);
+    check_or_write(scenario, &rows);
+
+    let final_row = rows.last().expect("stop is captured");
+    assert!(final_row.contains("\tstop\t"));
     let fields: Vec<&str> = final_row.split('\t').collect();
     assert_eq!(&fields[3..], ["done", "✅", "1"]);
 }

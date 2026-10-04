@@ -53,6 +53,15 @@ may well work here too.
 - **Project hook trust.** Project-scoped hooks require `/hooks-trust` the first
   time the project is opened.
 - **Stdout is lenient.** Non-JSON stdout is informational for passive events.
-- **Background work is unprobed here.** Grok's root `Stop` lists `backgroundTasks[]`
-  with stable IDs and its subagent events look promising, but no real run has
-  confirmed them yet - see [Background work](README.md#background-work).
+- **Background work outlives the parent turn (probed, 1.0.46).** A background
+  subagent produced, in order: the parent's `SessionStart`, a `SubagentStart`
+  carrying a `subagentId` that is also the child's own session ID, an early
+  parent `Stop` (`reason: end_turn`) while `backgroundTasks` still listed the
+  child active, a `SubagentStop` with the matching `subagentId`, the child's
+  own `SessionEnd` (`reason: shutdown`), then a wake `UserPromptSubmit` and
+  the final parent `Stop`. Grok is therefore eligible for a tracked aggregate
+  integration - but the shipped tier stays scalar until that separate work
+  lands, so today's config paints ✅ at the early parent `Stop` while a child
+  still runs. The sanitized capture is in
+  [`tests/fixtures/grok/lifecycle/s2-background-outlives-parent/`](../../tests/fixtures/grok/lifecycle/s2-background-outlives-parent/);
+  see [Background work](README.md#background-work).

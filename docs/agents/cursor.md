@@ -49,6 +49,10 @@ cp /path/to/share/agents/cursor/hooks.json ~/.cursor/hooks.json
   turn is still running, so it maps to `working`. Mapping it to `error` would
   paint ❗ and ring the bell several times during a healthy turn. Cursor
   publishes no turn-abort event, so its `error` column stays empty.
-- **Background work is unprobed here.** Whether Cursor's `subagentStop` fires for
-  background children at all is disputed; until a probe settles it the pane stays
-  scalar - see [Background work](README.md#background-work).
+- **Background work was not reproducible.** Cursor Agent 2026.10.01 launched
+  a background child on 2026-10-04, but emitted no project-hook events after
+  workspace trust, restart, the current documented command-only JSON shape,
+  and committing the hook file in the disposable worktree. The
+  `subagentStop` dispute therefore remains unresolved and the pane stays
+  scalar - see
+  [Background work](README.md#background-work).

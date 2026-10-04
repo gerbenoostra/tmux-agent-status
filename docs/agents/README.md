@@ -133,14 +133,32 @@ while a child is still running.
 | --- | --- | --- | --- | --- |
 | [Claude Code](claude-code.md) | 2.1.287 | 2026-10-01 | tracked aggregate | tracked aggregate |
 | [Codex CLI](codex.md) | - | - | not probed - binary not installed; `agent_id` is documented on both subagent events | scalar |
-| [GitHub Copilot CLI](copilot.md) | - | - | not probed - an organization policy blocked the probe; `agentId` is documented on both subagent events | scalar |
-| [Cursor](cursor.md) | - | - | not probed - `subagent_id` is documented, but background `subagentStop` reportedly never fires | scalar |
-| [Devin CLI](devin.md) | 3000.11.3 | 2026-10 | scalar - the worker's stop carries no ID | scalar |
-| [Droid](droid.md) | - | - | not probed - documented `SubagentStop` carries no task ID and there is no start event | scalar |
-| [Gemini CLI](gemini.md) | - | - | not probed - no subagent start/end hooks are documented | scalar |
-| [Grok CLI](grok.md) | - | - | not probed - needs an authenticated run; subagent IDs are documented inconsistently | scalar |
-| [Kiro](kiro.md) | - | - | not probed - documented synchronous native children: the parent waits for them | scalar |
-| [Mistral Vibe](mistral-vibe.md) | 2.25.8 | 2026-10 | scalar - spawn carries no hook-visible child ID | scalar |
+| [GitHub Copilot CLI](copilot.md) | 1.0.83 | 2026-10-04 | not probed - authenticated organization account exposed Premium Requests but no free allowance; an earlier model request was denied by organization policy | scalar |
+| [Cursor](cursor.md) | 2026.10.01 | 2026-10-04 | not reproducible - a background child launched, but project hooks emitted no events after trust, restart and a committed current-format config | scalar |
+| [Devin CLI](devin.md) | 3000.11.3 | 2026-10-04 | scalar - observed background spawn ID, but worker `Stop` carries no ID | scalar |
+| [Droid](droid.md) | 0.233.0 | 2026-10-04 | not probed - authenticated account has no Factory subscription and BYOK paid usage was not authorized; documented `SubagentStop` has no ID or start pair | scalar |
+| [Gemini CLI](gemini.md) | - | - | not probed - binary not installed and no subagent start/end hooks are documented | scalar |
+| [Grok CLI](grok.md) | 1.0.46 | 2026-10-04 | tracked aggregate - observed paired `subagentId` and a post-completion parent `Stop` | scalar |
+| [Kiro](kiro.md) | 2.21.2 | 2026-10-04 | scalar - S1 turn events observed; S2 could not create native background work and no child lifecycle hooks exist | scalar |
+| [Mistral Vibe](mistral-vibe.md) | 2.25.8 | 2026-10-04 | scalar - observed spawn with no hook-visible child ID or completion event | scalar |
+
+### Other hosts: lifecycle scenario coverage
+
+The T1 scenario list S1-S12 was driven against each host whose probe could run.
+"Not probed" rows name the blocker rather than inferring a result from
+documentation.
+
+| Host | S1-S12 result | Scalar replay |
+| --- | --- | --- |
+| [Codex CLI](codex.md) | not probed - binary absent | no replay |
+| [GitHub Copilot CLI](copilot.md) | not probed - the authenticated organization route exposed Premium Requests but no free allowance, and an earlier model request was denied by organization policy | no replay |
+| [Cursor](cursor.md) | S2 not reproducible - the child launched, but the authenticated CLI emitted no project-hook events; S1 and S3-S12 not probed after hook delivery failed | no replay |
+| [Devin CLI](devin.md) | S2 observed - [fixtures](../../tests/fixtures/devin/lifecycle/s2-background-outlives-parent/); S1 and S3-S11 not probed after the ID-less completion made aggregate ineligible; S12 not reproducible - no child hooks | early false ✅, no 🤖 after the `Stop`s |
+| [Droid](droid.md) | not probed - managed inference needs a subscription and BYOK is paid | no replay |
+| [Gemini CLI](gemini.md) | not probed - binary absent | no replay |
+| [Grok CLI](grok.md) | S2 observed - [fixtures](../../tests/fixtures/grok/lifecycle/s2-background-outlives-parent/); S1 and S3-S12 not probed - the free account showed no numeric remaining allowance and the decisive eligibility result was already captured | false early ✅; child activity cannot replace it, the parent wake returns 🤖, the final `Stop` is ✅ |
+| [Kiro](kiro.md) | S1 observed - [fixtures](../../tests/fixtures/kiro/lifecycle/s1-normal-turn/); S2 not reproducible - the 2.x agent did not create background child work; S3-S8 and S12 are not expressible without child hooks; S9-S11 not probed | normal turn reaches ✅ on `stop` |
+| [Mistral Vibe](mistral-vibe.md) | S2 observed - [fixtures](../../tests/fixtures/mistral-vibe/lifecycle/s2-background-outlives-parent/); S1 and S3-S11 not probed after no completion identity made aggregate ineligible; S12 not reproducible - no child hooks | `post_agent` painted a false ✅ while the child remained active |
 
 ### Claude Code: observed lifecycle scenarios
 

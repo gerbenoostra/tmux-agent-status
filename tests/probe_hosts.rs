@@ -48,7 +48,7 @@ const HOSTS: &[(&str, &str, &str, bool)] = &[
     (
         "kiro",
         "kiro-cli",
-        "kiro-home/.kiro/hooks/tas-probe.json",
+        "workspace/.kiro/agents/tas-probe.json",
         false,
     ),
     ("mistral-vibe", "vibe", "workspace/.vibe/hooks.toml", false),

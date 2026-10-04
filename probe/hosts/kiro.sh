@@ -1,11 +1,8 @@
 # Kiro probe support for probe-lifecycle.sh.
 #
-# Project-local hook discovery is not documented for the CLI, so the probe
-# keeps every byte of Kiro state under the scratch directory: it writes
-# $SCRATCH/kiro-home/.kiro/hooks/tas-probe.json in the v1 shape
-# {version: "v1", hooks: [{name, trigger, action: {type, command}}]} and
-# launches Kiro with HOME pointed there. The hook log lives at
-# $SCRATCH/hooks.jsonl.
+# Kiro 2.x embeds hooks in project-local agent configuration. The probe writes
+# $SCRATCH/workspace/.kiro/agents/tas-probe.json and launches that agent. The
+# hook log lives at $SCRATCH/hooks.jsonl.
 #
 # Kiro judges hooks by exit code and feeds stdout to the agent as text, so
 # the commands only log. To slow one trigger's hook - for the ordering
@@ -18,13 +15,14 @@ probe_binary() {
 
 probe_install_hooks() {
     scratch=$1
+    ws="$scratch/workspace"
     log="$scratch/hooks.jsonl"
     logger="$PROBE_DIR/log-hook.sh"
-    mkdir -p "$scratch/kiro-home/.kiro/hooks"
+    mkdir -p "$ws/.kiro/agents"
 
     events="agentSpawn userPromptSubmit preToolUse postToolUse stop"
 
-    hooks='[]'
+    hooks='{}'
     for event in $events; do
         var="TAS_PROBE_HOOK_SLEEP_$(printf '%s' "$event" | tr '[:lower:]' '[:upper:]')"
         delay=0
@@ -34,19 +32,29 @@ probe_install_hooks() {
         if [ "$delay" != "0" ]; then
             command="TAS_HOOK_SLEEP=$(printf %q "$delay") $command"
         fi
-        hooks=$(jq --arg e "$event" --arg n "tas-probe-$event" --arg c "$command" \
-            '. + [{name: $n, trigger: $e, action: {type: "command", command: $c}}]' \
+        hooks=$(jq --arg e "$event" --arg c "$command" \
+            '. + {($e): [
+                if ($e == "preToolUse" or $e == "postToolUse")
+                then {command: $c, matcher: ".*"}
+                else {command: $c}
+                end
+            ]}' \
             <<<"$hooks")
     done
-    jq -n --argjson hooks "$hooks" '{version: "v1", hooks: $hooks}' \
-        >"$scratch/kiro-home/.kiro/hooks/tas-probe.json"
+    jq -n --argjson hooks "$hooks" '{
+        name: "tas-probe",
+        description: "Disposable lifecycle probe",
+        prompt: "You are running a disposable lifecycle probe.",
+        tools: ["execute_bash"],
+        hooks: $hooks
+    }' >"$ws/.kiro/agents/tas-probe.json"
 }
 
 probe_launch_command() {
     # The pane falls back to a shell when the host exits, so the probe server
     # survives session end and a resumed session can be driven by hand.
-    printf 'cd %q && env HOME=%q kiro-cli; exec bash' \
-        "$1/workspace" "$1/kiro-home"
+    printf 'cd %q && kiro-cli chat --agent tas-probe --model qwen3-coder-next; exec bash' \
+        "$1/workspace"
 }
 
 probe_scenarios() {
@@ -54,9 +62,8 @@ probe_scenarios() {
 
 Kiro scenarios (one fresh probe each unless the log is enough).
 
-The scratch HOME means a fresh login may be needed first. Kiro's native
-subagents are synchronous - the parent waits for all children - and the
-trigger table has no per-child pair, so the outliving-parent scenarios
+Kiro's native subagents are synchronous - the parent waits for all children -
+and the trigger table has no per-child pair, so the outliving-parent scenarios
 S2-S6, S8 and the ordering scenario S12 have nothing to observe. The
 turn-level scenarios still apply.
 
