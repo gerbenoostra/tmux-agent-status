@@ -46,11 +46,15 @@ pub fn stderr_of(out: &std::process::Output) -> String {
 /// before running the tests; a machine without one skips rather than fails,
 /// which is the same promise the tool itself makes.
 pub fn tmux_or_skip() -> bool {
-    let found = std::process::Command::new("tmux")
-        .arg("-V")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .is_ok_and(|out| out.status.success());
+    let mut command = std::process::Command::new("tmux");
+    command.arg("-V").stdin(std::process::Stdio::null());
+    let found = match tmux::try_output_within(command, tmux::TMUX_TIMEOUT) {
+        Ok(out) => out.status.success(),
+        // Only a tmux that cannot be started counts as absent; one that
+        // starts and then stalls is the failure the bound exists to report.
+        Err(tmux::Failure::NotStarted(_)) => false,
+        Err(stalled) => panic!("{stalled}"),
+    };
     if !found {
         eprintln!("no tmux on PATH: skipping");
     }
