@@ -28,14 +28,29 @@ const HOSTS: &[(&str, &str, &str, bool)] = &[
         "claude-config/settings.json",
         false,
     ),
+    ("codex", "codex", "workspace/.codex/hooks.json", true),
     (
         "copilot",
         "copilot",
         "workspace/.github/hooks/tas-probe.json",
         true,
     ),
+    (
+        "cursor",
+        "cursor-agent",
+        "workspace/.cursor/hooks.json",
+        true,
+    ),
     ("devin", "devin", "workspace/.devin/hooks.v1.json", false),
+    ("droid", "droid", "workspace/.factory/hooks.json", false),
+    ("gemini", "gemini", "workspace/.gemini/settings.json", false),
     ("grok", "grok", "workspace/.grok/hooks/tas-probe.json", true),
+    (
+        "kiro",
+        "kiro-cli",
+        "kiro-home/.kiro/hooks/tas-probe.json",
+        false,
+    ),
     ("mistral-vibe", "vibe", "workspace/.vibe/hooks.toml", false),
 ];
 
@@ -84,6 +99,13 @@ fn every_probe_host_is_a_registered_agent_with_an_installer() {
             host_file(host).is_file(),
             "registered probe host `{host}` has no installer at {}",
             host_file(host).display()
+        );
+    }
+    for name in agents::names() {
+        assert_eq!(
+            HOSTS.iter().filter(|(host, ..)| *host == name).count(),
+            1,
+            "registered agent `{name}` must appear exactly once in HOSTS"
         );
     }
 }
