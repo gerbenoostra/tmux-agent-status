@@ -9,6 +9,7 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -198,9 +199,10 @@ pub fn output_within(command: Command, limit: Duration) -> Output {
 
 /// Like [`output_within`], returning the failure instead of panicking.
 ///
-/// A command that cannot be started is also an `Err`. On a timeout the child
-/// is killed, but its output readers are left behind: a grandchild that kept
-/// the pipes open (a tmux server starting up) must not block the report.
+/// A command that cannot be started is also an `Err`. The limit covers the
+/// whole call, output collection included: a grandchild that kept a pipe open
+/// (a tmux server starting up) must not block the report, whether its parent
+/// is still running or already exited.
 pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output, String> {
     let line = std::iter::once(command.get_program())
         .chain(command.get_args())
@@ -232,20 +234,33 @@ pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output
             Err(err) => return Err(format!("cannot wait for `{line}`: {err}")),
         }
     };
-    let collect = |reader: std::thread::JoinHandle<Vec<u8>>| reader.join().unwrap_or_default();
+    // The limit covers the whole call, output included: a child that exited
+    // but left a pipe held open by a grandchild (a tmux server starting up)
+    // must not block the report either.
+    let remaining = || deadline.saturating_duration_since(Instant::now());
+    let (Ok(stdout), Ok(stderr)) = (
+        stdout.recv_timeout(remaining()),
+        stderr.recv_timeout(remaining()),
+    ) else {
+        return Err(format!(
+            "`{line}` exited, but its output was still open after {limit:?}"
+        ));
+    };
     Ok(Output {
         status,
-        stdout: collect(stdout),
-        stderr: collect(stderr),
+        stdout,
+        stderr,
     })
 }
 
-fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+fn drain(mut pipe: impl Read + Send + 'static) -> Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = pipe.read_to_end(&mut bytes);
-        bytes
-    })
+        let _ = tx.send(bytes);
+    });
+    rx
 }
 
 /// `PATH` with the binary under test in front.
