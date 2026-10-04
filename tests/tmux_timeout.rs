@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 mod support;
 
-use support::tmux::try_output_within;
+use support::tmux::{Failure, try_output_within};
 
 #[test]
 fn a_command_that_outlives_its_limit_is_killed_and_named() {
@@ -16,6 +16,10 @@ fn a_command_that_outlives_its_limit_is_killed_and_named() {
     let err = try_output_within(command, Duration::from_millis(200)).expect_err("sleep outlives");
 
     assert!(started.elapsed() < Duration::from_secs(10), "not killed");
+    // A stall is `NotFinished`, not `NotStarted`: a probe may skip on an
+    // absent program but never on a wedged one.
+    assert!(matches!(err, Failure::NotFinished(_)), "{err:?}");
+    let err = err.to_string();
     assert!(err.contains("`sleep 30`"), "{err}");
     assert!(err.contains("200ms"), "{err}");
 }
@@ -44,6 +48,7 @@ fn a_child_that_exits_but_leaves_its_output_open_is_reported() {
         try_output_within(command, Duration::from_millis(200)).expect_err("output stays open");
 
     assert!(started.elapsed() < Duration::from_secs(10), "not abandoned");
+    assert!(matches!(err, Failure::NotFinished(_)), "{err:?}");
     let err = err.to_string();
     assert!(err.contains("sh -c"), "{err}");
     assert!(err.contains("still open"), "{err}");
@@ -55,5 +60,7 @@ fn a_command_that_cannot_start_is_named() {
 
     let err = try_output_within(command, Duration::from_secs(1)).expect_err("no such program");
 
+    assert!(matches!(err, Failure::NotStarted(_)), "{err:?}");
+    let err = err.to_string();
     assert!(err.contains("tmux-agent-status-no-such-program"), "{err}");
 }

@@ -194,16 +194,38 @@ impl Drop for Server {
 /// Run `command` to completion and return its output, panicking with the
 /// command line if it is still running after `limit`.
 pub fn output_within(command: Command, limit: Duration) -> Output {
-    try_output_within(command, limit).unwrap_or_else(|message| panic!("{message}"))
+    try_output_within(command, limit).unwrap_or_else(|failure| panic!("{failure}"))
+}
+
+/// Why a call run under [`try_output_within`] failed.
+///
+/// The split is between "the program is not there" and "the program is
+/// wedged": a probe such as [`super::tmux_or_skip`] may skip on the first but
+/// must not on the second - a stalled call is the failure the bound exists to
+/// name, and skipping on it would hide it behind a green suite.
+#[derive(Debug)]
+pub enum Failure {
+    /// The program could not be spawned at all.
+    NotStarted(String),
+    /// It ran, but the call did not complete: it outlived its limit, exited
+    /// while a spawned child kept its output open, or waiting on it errored.
+    NotFinished(String),
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Self::NotStarted(message) | Self::NotFinished(message)) = self;
+        f.write_str(message)
+    }
 }
 
 /// Like [`output_within`], returning the failure instead of panicking.
 ///
-/// A command that cannot be started is also an `Err`. The limit covers the
-/// whole call, output collection included: a grandchild that kept a pipe open
-/// (a tmux server starting up) must not block the report, whether its parent
-/// is still running or already exited.
-pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output, String> {
+/// A command that cannot be started is an [`Failure::NotStarted`]. The limit
+/// covers the whole call, output collection included: a grandchild that kept
+/// a pipe open (a tmux server starting up) must not block the report, whether
+/// its parent is still running or already exited.
+pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output, Failure> {
     let line = std::iter::once(command.get_program())
         .chain(command.get_args())
         .map(|part| part.to_string_lossy())
@@ -213,7 +235,7 @@ pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|err| format!("cannot start `{line}`: {err}"))?;
+        .map_err(|err| Failure::NotStarted(format!("cannot start `{line}`: {err}")))?;
     let stdout = drain(child.stdout.take().expect("stdout is piped"));
     let stderr = drain(child.stderr.take().expect("stderr is piped"));
 
@@ -227,11 +249,15 @@ pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!(
+                return Err(Failure::NotFinished(format!(
                     "`{line}` was still running after {limit:?} and was killed"
-                ));
+                )));
             }
-            Err(err) => return Err(format!("cannot wait for `{line}`: {err}")),
+            Err(err) => {
+                return Err(Failure::NotFinished(format!(
+                    "cannot wait for `{line}`: {err}"
+                )));
+            }
         }
     };
     // The limit covers the whole call, output included: a child that exited
@@ -242,9 +268,9 @@ pub fn try_output_within(mut command: Command, limit: Duration) -> Result<Output
         stdout.recv_timeout(remaining()),
         stderr.recv_timeout(remaining()),
     ) else {
-        return Err(format!(
+        return Err(Failure::NotFinished(format!(
             "`{line}` exited, but its output was still open after {limit:?}"
-        ));
+        )));
     };
     Ok(Output {
         status,
