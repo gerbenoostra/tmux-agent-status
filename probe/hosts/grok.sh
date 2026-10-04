@@ -20,6 +20,8 @@ probe_install_hooks() {
     ws="$scratch/workspace"
     log="$scratch/hooks.jsonl"
     logger="$PROBE_DIR/log-hook.sh"
+    # Grok only discovers repo-scoped hooks from a Git worktree root.
+    git -C "$ws" init --quiet
     mkdir -p "$ws/.grok/hooks"
 
     events="SessionStart UserPromptSubmit PreToolUse PostToolUse

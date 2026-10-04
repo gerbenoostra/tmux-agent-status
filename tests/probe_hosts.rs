@@ -19,17 +19,24 @@ mod support;
 
 use support::tempdir::TempDir;
 
-/// (host, binary, generated config path relative to the scratch directory).
-const HOSTS: &[(&str, &str, &str)] = &[
-    ("claude-code", "claude", "claude-config/settings.json"),
+/// (host, binary, generated config path relative to the scratch directory,
+/// whether the host only discovers repo-scoped hooks from a Git worktree).
+const HOSTS: &[(&str, &str, &str, bool)] = &[
+    (
+        "claude-code",
+        "claude",
+        "claude-config/settings.json",
+        false,
+    ),
     (
         "copilot",
         "copilot",
         "workspace/.github/hooks/tas-probe.json",
+        true,
     ),
-    ("devin", "devin", "workspace/.devin/hooks.v1.json"),
-    ("grok", "grok", "workspace/.grok/hooks/tas-probe.json"),
-    ("mistral-vibe", "vibe", "workspace/.vibe/hooks.toml"),
+    ("devin", "devin", "workspace/.devin/hooks.v1.json", false),
+    ("grok", "grok", "workspace/.grok/hooks/tas-probe.json", true),
+    ("mistral-vibe", "vibe", "workspace/.vibe/hooks.toml", false),
 ];
 
 fn probe_dir() -> PathBuf {
@@ -83,7 +90,7 @@ fn every_probe_host_is_a_registered_agent_with_an_installer() {
 
 #[test]
 fn the_four_function_interface_produces_a_scratch_local_config() {
-    for (host, binary, config) in HOSTS {
+    for (host, binary, config, needs_git) in HOSTS {
         let scratch = TempDir::new(&format!("probe-{host}"));
         fs::create_dir_all(scratch.join("workspace")).unwrap();
 
@@ -97,6 +104,11 @@ fn the_four_function_interface_produces_a_scratch_local_config() {
             config_path.is_file(),
             "{host}: probe_install_hooks did not write {}",
             config_path.display()
+        );
+        assert_eq!(
+            scratch.join("workspace/.git").is_dir(),
+            *needs_git,
+            "{host}: workspace worktree does not match its hook discovery"
         );
 
         let out = call(host, "probe_launch_command \"$2\"", scratch.path());

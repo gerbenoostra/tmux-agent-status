@@ -21,6 +21,8 @@ probe_install_hooks() {
     ws="$scratch/workspace"
     log="$scratch/hooks.jsonl"
     logger="$PROBE_DIR/log-hook.sh"
+    # Copilot only discovers repo-scoped hooks from a Git worktree root.
+    git -C "$ws" init --quiet
     mkdir -p "$ws/.github/hooks"
 
     events="sessionStart sessionEnd userPromptSubmitted notification agentStop
