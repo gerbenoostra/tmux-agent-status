@@ -8,21 +8,103 @@ mod support;
 use support::lifecycle;
 use support::replay::{self, check_or_write};
 
+/// How a host applies a hook entry's `matcher` to one record: `(event,
+/// matcher, payload)`. A host rule panics on a matcher it cannot evaluate
+/// rather than guessing, so a drop-in change cannot silently replay wrong.
+type Matches = fn(&str, &str, &serde_json::Value) -> bool;
+
 /// The commands `hooks` runs for one record. `wrapped` drop-ins nest their
 /// events under a top-level `hooks` key.
 fn commands_for(
     record: &serde_json::Value,
     hooks: &serde_json::Value,
     wrapped: bool,
+    matches: Matches,
 ) -> Vec<String> {
+    let event = record["event"].as_str().unwrap();
     let events = if wrapped { &hooks["hooks"] } else { hooks };
-    replay::commands(&events[record["event"].as_str().unwrap()], |_| true)
+    replay::commands(&events[event], |matcher| {
+        matches(event, matcher, &record["payload"])
+    })
 }
 
-fn run(scenario: &lifecycle::Scenario, hooks: &serde_json::Value, wrapped: bool) -> Vec<String> {
-    replay::replay(scenario, |record| commands_for(record, hooks, wrapped))
+fn run(
+    scenario: &lifecycle::Scenario,
+    hooks: &serde_json::Value,
+    wrapped: bool,
+    matches: Matches,
+) -> Vec<String> {
+    replay::replay(scenario, |record| {
+        commands_for(record, hooks, wrapped, matches)
+    })
 }
 
+/// For a drop-in that ships no matchers.
+fn no_matchers(event: &str, matcher: &str, _: &serde_json::Value) -> bool {
+    panic!("replay has no matcher rule for `{matcher}` on {event}")
+}
+
+/// Vibe's `match` field: the shipped drop-in only uses `*`.
+fn vibe_matches(event: &str, matcher: &str, payload: &serde_json::Value) -> bool {
+    matcher == "*" || no_matchers(event, matcher, payload)
+}
+
+/// Devin's matcher is a regex over the tool event's `tool_name`
+/// (docs/agents/devin.md). This replay has no regex engine: it evaluates an
+/// anchored list of literal names, `^name$` or `^(a|b)$`, which is the only
+/// form the drop-in ships, and fails on anything else.
+fn devin_matches(event: &str, matcher: &str, payload: &serde_json::Value) -> bool {
+    assert!(
+        matches!(event, "PreToolUse" | "PostToolUse" | "PermissionRequest"),
+        "replay does not know how Devin matches {event}"
+    );
+    let subject = payload["tool_name"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{event} payload has no string `tool_name`: {payload}"));
+    let inner = matcher
+        .strip_prefix('^')
+        .and_then(|m| m.strip_suffix('$'))
+        .map(|m| {
+            m.strip_prefix('(')
+                .and_then(|m| m.strip_suffix(')'))
+                .unwrap_or(m)
+        })
+        .filter(|names| {
+            names
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '|')
+        })
+        .unwrap_or_else(|| panic!("replay cannot evaluate Devin matcher `{matcher}`"));
+    inner.split('|').any(|name| name == subject)
+}
+
+#[test]
+fn devin_matchers_are_anchored_name_lists() {
+    let tool = |name| serde_json::json!({ "tool_name": name });
+    let shipped = "^(ask_user_question|exit_plan_mode)$";
+    assert!(devin_matches(
+        "PreToolUse",
+        shipped,
+        &tool("exit_plan_mode")
+    ));
+    assert!(!devin_matches("PreToolUse", shipped, &tool("run_subagent")));
+    assert!(!devin_matches("PreToolUse", shipped, &tool("exec")));
+    assert!(devin_matches("PreToolUse", "^exec$", &tool("exec")));
+    assert!(!devin_matches("PreToolUse", "^exec$", &tool("exec_bg")));
+}
+
+#[test]
+#[should_panic(expected = "cannot evaluate Devin matcher")]
+fn an_unanchored_devin_matcher_fails_the_replay() {
+    devin_matches(
+        "PreToolUse",
+        "exec",
+        &serde_json::json!({ "tool_name": "exec" }),
+    );
+}
+
+/// The shipped TOML as `{hooks: {type: [{matcher?, hooks: [{command}]}]}}`.
+/// Each `[[hooks]]` block holds only flat `key = "string"` lines.
 fn vibe_hooks(root: &Path) -> serde_json::Value {
     let text = fs::read_to_string(root.join("share/agents/mistral-vibe/hooks.toml")).unwrap();
     let mut events = serde_json::Map::new();
@@ -36,15 +118,19 @@ fn vibe_hooks(root: &Path) -> serde_json::Value {
             })
         };
         let event = value("type").expect("a Vibe hook type");
-        let command = value("command").expect("a Vibe hook command");
-        events.insert(
-            event,
-            serde_json::json!([{"hooks": [{"command": command}]}]),
-        );
+        let mut entry = serde_json::json!({
+            "hooks": [{"command": value("command").expect("a Vibe hook command")}]
+        });
+        if let Some(matcher) = value("match") {
+            entry["matcher"] = matcher.into();
+        }
+        push(&mut events, event, entry);
     }
     serde_json::json!({"hooks": events})
 }
 
+/// The shipped standalone file as `{hooks: {trigger: [{matcher?, hooks:
+/// [{command}]}]}}`.
 fn kiro_hooks(root: &Path) -> serde_json::Value {
     let config: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(root.join("share/agents/kiro/tmux-agent-status.json")).unwrap(),
@@ -52,14 +138,31 @@ fn kiro_hooks(root: &Path) -> serde_json::Value {
     .unwrap();
     let mut events = serde_json::Map::new();
     for hook in config["hooks"].as_array().unwrap() {
-        let event = hook["trigger"].as_str().unwrap();
-        let command = hook["action"]["command"].as_str().unwrap();
-        events.insert(
-            event.to_owned(),
-            serde_json::json!([{"hooks": [{"command": command}]}]),
+        let mut entry = serde_json::json!({"hooks": [{"command": hook["action"]["command"]}]});
+        if let Some(matcher) = hook.get("matcher") {
+            entry["matcher"] = matcher.clone();
+        }
+        push(
+            &mut events,
+            hook["trigger"].as_str().unwrap().to_owned(),
+            entry,
         );
     }
     serde_json::json!({"hooks": events})
+}
+
+/// Append `entry` to `event`'s entries: several hooks may share an event.
+fn push(
+    events: &mut serde_json::Map<String, serde_json::Value>,
+    event: String,
+    entry: serde_json::Value,
+) {
+    events
+        .entry(event)
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .unwrap()
+        .push(entry);
 }
 
 #[test]
@@ -75,7 +178,7 @@ fn grok_scalar_replay_records_the_early_false_completion() {
     let scenarios = lifecycle::scenarios_for("grok");
     assert_eq!(scenarios.len(), 1);
     let scenario = &scenarios[0];
-    let rows = run(scenario, &hooks, true);
+    let rows = run(scenario, &hooks, true, no_matchers);
     check_or_write(scenario, &rows);
 
     let early_stop = rows
@@ -113,7 +216,7 @@ fn devin_scalar_replay_records_unattributed_worker_completion() {
     let scenarios = lifecycle::scenarios_for("devin");
     assert_eq!(scenarios.len(), 1);
     let scenario = &scenarios[0];
-    let rows = run(scenario, &hooks, false);
+    let rows = run(scenario, &hooks, false, devin_matches);
     check_or_write(scenario, &rows);
 
     let early_stop = rows
@@ -146,7 +249,7 @@ fn vibe_scalar_replay_finishes_while_the_child_is_running() {
     let scenarios = lifecycle::scenarios_for("mistral-vibe");
     assert_eq!(scenarios.len(), 1);
     let scenario = &scenarios[0];
-    let rows = run(scenario, &hooks, true);
+    let rows = run(scenario, &hooks, true, vibe_matches);
     check_or_write(scenario, &rows);
 
     let final_row = rows.last().expect("post_agent is captured");
@@ -165,7 +268,7 @@ fn kiro_scalar_replay_finishes_a_normal_turn() {
     let scenarios = lifecycle::scenarios_for("kiro");
     assert_eq!(scenarios.len(), 1);
     let scenario = &scenarios[0];
-    let rows = run(scenario, &hooks, true);
+    let rows = run(scenario, &hooks, true, no_matchers);
     check_or_write(scenario, &rows);
 
     let final_row = rows.last().expect("stop is captured");
