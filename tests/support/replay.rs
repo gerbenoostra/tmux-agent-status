@@ -39,9 +39,10 @@ impl Server {
     /// width, and a wrapped piece of the typed input can read exactly like a
     /// marker the command has not printed yet. tmux remembers a signal sent
     /// before anyone waits, and the call is bounded like every test-side
-    /// tmux call. The hook's bell is written to the pty before the signalling
-    /// `tmux` process even starts, and tmux reads the pane before it serves
-    /// that client: 1500 rounds on eight loaded servers never saw the flag
+    /// tmux call. The hook's bell is already readable on the pane's pty
+    /// before the signalling `tmux` client is spawned, so tmux has drained
+    /// it by the time that client connects. tmux documents no such ordering;
+    /// measured, 1500 rounds on eight loaded servers never saw the bell flag
     /// lag the signal.
     fn run_hook(&self, pane: &str, command: &str, seq: usize) {
         let channel = format!("tas_replay_{seq}");
