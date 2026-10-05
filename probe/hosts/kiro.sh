@@ -9,6 +9,9 @@
 # scenarios - set TAS_PROBE_HOOK_SLEEP_<TRIGGER>=<seconds> in the harness
 # environment, where <TRIGGER> is the trigger name upper-cased.
 
+# shellcheck source=/dev/null
+. "$PROBE_DIR/hook-command.sh"
+
 probe_binary() {
     printf 'kiro-cli\n'
 }
@@ -17,21 +20,13 @@ probe_install_hooks() {
     scratch=$1
     ws="$scratch/workspace"
     log="$scratch/hooks.jsonl"
-    logger="$PROBE_DIR/log-hook.sh"
     mkdir -p "$ws/.kiro/agents"
 
     events="agentSpawn userPromptSubmit preToolUse postToolUse stop"
 
     hooks='{}'
     for event in $events; do
-        var="TAS_PROBE_HOOK_SLEEP_$(printf '%s' "$event" | tr '[:lower:]' '[:upper:]')"
-        delay=0
-        eval "delay=\${$var:-0}"
-        # Hook commands run through a shell, so paths are quoted for one.
-        command=$(printf '%q %q %q' "$logger" "$event" "$log")
-        if [ "$delay" != "0" ]; then
-            command="TAS_HOOK_SLEEP=$(printf %q "$delay") $command"
-        fi
+        command=$(probe_hook_command "$event" "$log")
         hooks=$(jq --arg e "$event" --arg c "$command" \
             '. + {($e): [
                 if ($e == "preToolUse" or $e == "postToolUse")

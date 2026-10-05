@@ -14,6 +14,8 @@
 #   probe_install_hooks DIR - write the host's hook configuration under DIR
 #   probe_launch_command DIR - print the shell command to run in the pane
 #   probe_scenarios         - print the scenario prompts to drive
+# An installer builds each hook's logging command with probe_hook_command
+# from probe/hook-command.sh.
 #
 # The probe server and workspace stay up after this script exits; drive the
 # scenarios by hand or with `tmux send-keys`, then kill the server and remove

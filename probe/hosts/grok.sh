@@ -11,6 +11,9 @@
 # TAS_PROBE_HOOK_SLEEP_<EVENT>=<seconds> in the harness environment, where
 # <EVENT> is the event name upper-cased.
 
+# shellcheck source=/dev/null
+. "$PROBE_DIR/hook-command.sh"
+
 probe_binary() {
     printf 'grok\n'
 }
@@ -19,7 +22,6 @@ probe_install_hooks() {
     scratch=$1
     ws="$scratch/workspace"
     log="$scratch/hooks.jsonl"
-    logger="$PROBE_DIR/log-hook.sh"
     # Grok only discovers repo-scoped hooks from a Git worktree root.
     git -C "$ws" init --quiet
     mkdir -p "$ws/.grok/hooks"
@@ -30,14 +32,7 @@ probe_install_hooks() {
 
     hooks='{}'
     for event in $events; do
-        var="TAS_PROBE_HOOK_SLEEP_$(printf '%s' "$event" | tr '[:lower:]' '[:upper:]')"
-        delay=0
-        eval "delay=\${$var:-0}"
-        # Hook commands run through a shell, so paths are quoted for one.
-        command=$(printf '%q %q %q' "$logger" "$event" "$log")
-        if [ "$delay" != "0" ]; then
-            command="TAS_HOOK_SLEEP=$(printf %q "$delay") $command"
-        fi
+        command=$(probe_hook_command "$event" "$log")
         hooks=$(jq --arg e "$event" --arg c "$command" \
             '. + {($e): [{hooks: [{type: "command", command: $c}]}]}' \
             <<<"$hooks")

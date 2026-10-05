@@ -13,6 +13,9 @@
 # <TYPE> is the type name upper-cased (for example
 # TAS_PROBE_HOOK_SLEEP_POST_TOOL=3).
 
+# shellcheck source=/dev/null
+. "$PROBE_DIR/hook-command.sh"
+
 probe_binary() {
     printf 'vibe\n'
 }
@@ -21,22 +24,14 @@ probe_install_hooks() {
     scratch=$1
     ws="$scratch/workspace"
     log="$scratch/hooks.jsonl"
-    logger="$PROBE_DIR/log-hook.sh"
     out="$ws/.vibe/hooks.toml"
     mkdir -p "$ws/.vibe"
     : >"$out"
 
     for event in pre_tool post_tool post_agent; do
-        var="TAS_PROBE_HOOK_SLEEP_$(printf '%s' "$event" | tr '[:lower:]' '[:upper:]')"
-        delay=0
-        eval "delay=\${$var:-0}"
-        # Hook commands run through a shell, so paths are quoted for one. A
-        # TOML basic string takes JSON's escaping for every character a path
-        # can carry, so the command is quoted through jq.
-        command=$(printf '%q %q %q' "$logger" "$event" "$log")
-        if [ "$delay" != "0" ]; then
-            command="TAS_HOOK_SLEEP=$(printf %q "$delay") $command"
-        fi
+        command=$(probe_hook_command "$event" "$log")
+        # A TOML basic string takes JSON's escaping for every character a
+        # path can carry, so the command is quoted through jq.
         json=$(printf '%s' "$command" | jq -R .)
         {
             printf '[[hooks]]\nname = "tas-probe-%s"\ntype = "%s"\n' "$event" "$event"

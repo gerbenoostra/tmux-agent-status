@@ -19,7 +19,7 @@ lint:
 # Lint the shell installer and the probe harness.
 lint-sh:
     shellcheck -s sh install.sh
-    shellcheck -s bash probe/probe-lifecycle.sh probe/log-hook.sh probe/worktree-hook.sh probe/hosts/*.sh
+    shellcheck -s bash probe/probe-lifecycle.sh probe/log-hook.sh probe/worktree-hook.sh probe/hook-command.sh probe/hosts/*.sh
 
 # Run the test suite.
 test:
