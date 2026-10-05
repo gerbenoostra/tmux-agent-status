@@ -11,25 +11,33 @@
 # content-bearing or path-bearing is dropped: prompts, messages, command
 # lines, transcripts, working directories, output files, tool input text,
 # tool response bodies and tool failure messages.
+#
+# Hosts that name fields in camelCase (Grok's sessionId, subagentId,
+# backgroundTasks) get them renamed to the snake_case names above, so every
+# host's fixtures share one vocabulary. Devin reports a spawned subagent's ID
+# only inside run_subagent's free-text output; that eight-character hex ID is
+# lifted into tool_response.agentId and the text itself is dropped.
 
 def keep($keys): with_entries(select(.key as $k | $keys | index($k)));
 
+# Rename $from to $to unless $to is already there. Decided by key presence,
+# not `//`, which would treat a false or null value as missing.
+def alias($to; $from):
+    if has($to) or (has($from) | not) then . else .[$to] = .[$from] end;
+
 def san_payload:
-    . + {
-        hook_event_name: (.hook_event_name // .hookEventName),
-        session_id: (.session_id // .sessionId),
-        prompt_id: (.prompt_id // .promptId),
-        permission_mode: (.permission_mode // .permissionMode),
-        stop_hook_active: (.stop_hook_active // .stopHookActive),
-        notification_type: (.notification_type // .notificationType),
-        agent_id: (.agent_id // .subagentId),
-        agent_type: (.agent_type // .subagentType),
-        tool_name: (.tool_name // .toolName),
-        tool_use_id: (.tool_use_id // .toolUseId // .tool_call_id),
-        tool_status,
-        background_tasks: (.background_tasks // .backgroundTasks)
-    }
-    | with_entries(select(.value != null))
+    alias("hook_event_name"; "hookEventName")
+    | alias("session_id"; "sessionId")
+    | alias("prompt_id"; "promptId")
+    | alias("permission_mode"; "permissionMode")
+    | alias("stop_hook_active"; "stopHookActive")
+    | alias("notification_type"; "notificationType")
+    | alias("agent_id"; "subagentId")
+    | alias("agent_type"; "subagentType")
+    | alias("tool_name"; "toolName")
+    | alias("tool_use_id"; "toolUseId")
+    | alias("tool_use_id"; "tool_call_id")
+    | alias("background_tasks"; "backgroundTasks")
     | keep([
         "hook_event_name",
         "session_id",
@@ -61,18 +69,16 @@ def san_payload:
     | (if .tool_name == "run_subagent"
           and (.tool_response | type) == "object"
           and (.tool_response.output | type) == "string"
-       then .tool_response.agentId = (try (.tool_response.output | capture("(?<id>[0-9a-f]{8})").id) catch null)
+       then ([.tool_response.output | match("\\b[0-9a-f]{8}\\b").string][0]) as $id
+           | if $id then .tool_response.agentId = $id else . end
        else . end)
     | (if .tool_response | type == "object"
-       then .tool_response |= (
-           keep(["task_id", "task_type", "agentId", "status", "isAsync", "success"])
-           | with_entries(select(.value != null)))
+       then .tool_response |= keep(["task_id", "task_type", "agentId", "status", "isAsync", "success"])
        else . end)
     | (if .background_tasks | type == "array"
        then .background_tasks |= map(
            if type == "object"
-           then . + {agent_type: (.agent_type // .agentType)}
-               | keep(["id", "type", "status", "agent_type"])
+           then alias("agent_type"; "agentType") | keep(["id", "type", "status", "agent_type"])
            else .
            end)
        else . end);
