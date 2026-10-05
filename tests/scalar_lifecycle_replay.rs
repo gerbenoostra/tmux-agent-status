@@ -64,16 +64,20 @@ fn devin_matches(event: &str, matcher: &str, payload: &serde_json::Value) -> boo
     let inner = matcher
         .strip_prefix('^')
         .and_then(|m| m.strip_suffix('$'))
-        .map(|m| {
-            m.strip_prefix('(')
-                .and_then(|m| m.strip_suffix(')'))
-                .unwrap_or(m)
-        })
-        .filter(|names| {
+        // Only a group makes `|` a list of names: ungrouped, `^a|b$` is
+        // `(^a)|(b$)`.
+        .map(
+            |m| match m.strip_prefix('(').and_then(|m| m.strip_suffix(')')) {
+                Some(names) => (names, true),
+                None => (m, false),
+            },
+        )
+        .filter(|(names, grouped)| {
             names
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '|')
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || (*grouped && c == '|'))
         })
+        .map(|(names, _)| names)
         .unwrap_or_else(|| panic!("replay cannot evaluate Devin matcher `{matcher}`"));
     inner.split('|').any(|name| name == subject)
 }
@@ -99,6 +103,17 @@ fn an_unanchored_devin_matcher_fails_the_replay() {
     devin_matches(
         "PreToolUse",
         "exec",
+        &serde_json::json!({ "tool_name": "exec" }),
+    );
+}
+
+/// `^a|b$` is the regex `(^a)|(b$)`, a prefix-or-suffix test, not a list.
+#[test]
+#[should_panic(expected = "cannot evaluate Devin matcher")]
+fn an_ungrouped_devin_alternation_fails_the_replay() {
+    devin_matches(
+        "PreToolUse",
+        "^exec|read$",
         &serde_json::json!({ "tool_name": "exec" }),
     );
 }
