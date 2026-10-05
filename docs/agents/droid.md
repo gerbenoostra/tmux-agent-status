@@ -52,5 +52,7 @@ cp /path/to/share/agents/droid/hooks.json ~/.factory/hooks.json
   [shared opt-out and debug settings](README.md#opt-out-and-debug).
 - **Background work carries no stop ID.** `SubagentStop` publishes result fields
   (`task_name`, `task_result`, `task_error`) but no task ID, and there is no
-  `SubagentStart`; a name is not a unique work ID - see
+  `SubagentStart`; a name is not a unique work ID. The 2026-10-04 lifecycle probe did not run:
+  the authenticated account has no Factory subscription and BYOK paid usage
+  was not authorized (0.233.0, 2026-10-04) - see
   [Background work](README.md#background-work).

@@ -31,6 +31,7 @@ const PAYLOAD_KEYS: &[&str] = &[
     "agent_type",
     "tool_name",
     "tool_use_id",
+    "tool_status",
     "trigger",
     "name",
     "error",
@@ -51,7 +52,7 @@ const TOOL_RESPONSE_KEYS: &[&str] = &[
 const BACKGROUND_TASK_KEYS: &[&str] = &["id", "type", "status", "agent_type"];
 
 fn fixture_files() -> Vec<PathBuf> {
-    lifecycle::scenarios()
+    lifecycle::all_scenarios()
         .into_iter()
         .flat_map(|scenario| scenario.records)
         .collect()
@@ -162,7 +163,7 @@ fn every_fixture_is_a_sanitized_probe_record() {
 /// the directory layout refuses to let one slip in untested.
 #[test]
 fn every_scenario_has_an_expected_replay() {
-    for scenario in lifecycle::scenarios() {
+    for scenario in lifecycle::all_scenarios() {
         let expected = scenario.expected_path();
         assert!(
             expected.exists(),
@@ -215,6 +216,28 @@ fn task_stop_cancels_by_the_subagent_start_id() {
     assert!(
         started[0].is_string() && cancelled.iter().all(|id| *id == started[0]),
         "TaskStop ids {cancelled:?} do not match SubagentStart {started:?}"
+    );
+}
+
+#[test]
+fn devin_background_spawn_keeps_only_its_extracted_agent_id() {
+    let scenario = lifecycle::scenarios_for("devin")
+        .into_iter()
+        .find(|scenario| scenario.name() == "s2-background-outlives-parent")
+        .expect("the Devin S2 capture is committed");
+    let spawn = scenario
+        .records
+        .iter()
+        .map(|path| read_record(path))
+        .find(|record| record["payload"]["tool_response"]["agentId"].is_string())
+        .expect("the background spawn is captured");
+    let response = spawn["payload"]["tool_response"].as_object().unwrap();
+    assert_eq!(response.len(), 2);
+    assert_eq!(response["success"], true);
+    assert!(
+        response["agentId"]
+            .as_str()
+            .is_some_and(|id| id.len() == 8 && id.chars().all(|c| c.is_ascii_hexdigit()))
     );
 }
 
@@ -272,4 +295,136 @@ fn sanitizer_orders_records_by_hook_entry_time() {
         })
         .collect();
     assert_eq!(events, ["SubagentStart", "PostToolBatch"]);
+}
+
+#[test]
+fn sanitizer_canonicalizes_camel_case_lifecycle_identity() {
+    let dir = TempDir::new("sanitize-camel-case");
+    let raw = dir.write(
+        "raw.jsonl",
+        concat!(
+            r#"{"event":"SubagentStart","ts_enter":100,"ts_exit":110,"stdin":"{\"hookEventName\":\"SubagentStart\",\"sessionId\":\"root\",\"subagentId\":\"child\",\"subagentType\":\"worker\",\"backgroundTasks\":[{\"id\":\"child\",\"type\":\"subagent\",\"status\":\"running\",\"agentType\":\"worker\",\"description\":\"private\"}],\"workspaceRoot\":\"/private/path\"}"}"#,
+            "\n",
+        ),
+    );
+    let out = TempDir::new("sanitize-camel-case-out");
+
+    let ran = Command::new("bash")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("probe/sanitize-fixtures.sh"))
+        .arg(&raw)
+        .arg(out.path())
+        .output()
+        .expect("the sanitizer runs");
+    assert!(
+        ran.status.success(),
+        "sanitize-fixtures.sh failed: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+
+    let payload = read_record(&out.join("001-subagentstart.json"))["payload"].clone();
+    assert_eq!(
+        payload,
+        serde_json::json!({
+            "hook_event_name": "SubagentStart",
+            "session_id": "root",
+            "agent_id": "child",
+            "agent_type": "worker",
+            "background_tasks": [{
+                "id": "child",
+                "type": "subagent",
+                "status": "running",
+                "agent_type": "worker"
+            }]
+        })
+    );
+}
+
+/// Run the sanitizer over one raw probe record and return the fixture files
+/// it wrote, by name.
+fn sanitize_one(name: &str, raw_record: &str) -> Vec<(String, String)> {
+    let dir = TempDir::new(name);
+    let raw = dir.write("raw.jsonl", &format!("{raw_record}\n"));
+    let out = TempDir::new(&format!("{name}-out"));
+    let ran = Command::new("bash")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("probe/sanitize-fixtures.sh"))
+        .arg(&raw)
+        .arg(out.path())
+        .output()
+        .expect("the sanitizer runs");
+    assert!(
+        ran.status.success(),
+        "sanitize-fixtures.sh failed: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let mut files: Vec<(String, String)> = fs::read_dir(out.path())
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            (name, fs::read_to_string(&path).unwrap())
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// Canonicalizing camelCase names must not touch a snake_case `false` or
+/// `null`: a `//` fallback would read both as missing and drop the field.
+#[test]
+fn sanitizer_keeps_snake_case_false_and_null_values() {
+    let files = sanitize_one(
+        "sanitize-false",
+        r#"{"event":"Stop","ts_enter":1,"ts_exit":2,"stdin":"{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"stop_hook_active\":false,\"background_tasks\":[{\"id\":\"t\",\"type\":\"shell\",\"status\":\"running\"}],\"agent_type\":null}"}"#,
+    );
+    assert_eq!(files.len(), 1);
+    let record: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
+    assert_eq!(
+        record["payload"],
+        serde_json::json!({
+            "hook_event_name": "Stop",
+            "session_id": "s",
+            "stop_hook_active": false,
+            "agent_type": null,
+            "background_tasks": [{"id": "t", "type": "shell", "status": "running"}]
+        })
+    );
+}
+
+/// A Devin spawn whose output carries no agent ID keeps its record; only the
+/// ID is missing. Hex inside a longer run is not an ID.
+#[test]
+fn sanitizer_keeps_a_devin_spawn_without_an_agent_id() {
+    for output in ["spawned", "spawned deadbeefcafe"] {
+        let stdin = serde_json::json!({
+            "hook_event_name": "PostToolUse",
+            "session_id": "s",
+            "tool_name": "run_subagent",
+            "tool_response": {"success": true, "output": output}
+        });
+        let raw = serde_json::json!({
+            "event": "PostToolUse", "ts_enter": 1, "ts_exit": 2, "stdin": stdin.to_string()
+        });
+        let files = sanitize_one("sanitize-devin-no-id", &raw.to_string());
+        assert_eq!(files.len(), 1, "{output}: {files:?}");
+        assert_eq!(files[0].0, "001-posttooluse.json", "{output}");
+        let record: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
+        assert_eq!(
+            record["payload"]["tool_response"],
+            serde_json::json!({"success": true}),
+            "{output}"
+        );
+    }
+}
+
+#[test]
+fn sanitizer_extracts_a_devin_agent_id() {
+    let files = sanitize_one(
+        "sanitize-devin-id",
+        r#"{"event":"PostToolUse","ts_enter":1,"ts_exit":2,"stdin":"{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"s\",\"tool_name\":\"run_subagent\",\"tool_response\":{\"success\":true,\"output\":\"started agent_id=9d950dea in /work/0123456789abcdef\"}}"}"#,
+    );
+    let record: serde_json::Value = serde_json::from_str(&files[0].1).unwrap();
+    assert_eq!(
+        record["payload"]["tool_response"],
+        serde_json::json!({"success": true, "agentId": "9d950dea"})
+    );
 }

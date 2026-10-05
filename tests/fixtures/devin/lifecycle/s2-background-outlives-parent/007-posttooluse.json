@@ -1,0 +1,1 @@
+{"event":"PostToolUse","ts_enter":1791126514092,"ts_exit":1791126514105,"payload":{"hook_event_name":"PostToolUse","tool_name":"exec","tool_input":{},"tool_use_id":"exec_0_76a630b8#a691787f79bc489aa5fa5807b444eac8","tool_response":{"success":true},"session_id":"confusion-text","prompt_id":"52adf38a-c349-4b5e-ac82-643f54fad236"}}

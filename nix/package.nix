@@ -2,6 +2,7 @@
   lib,
   rustPlatform,
   bash,
+  git,
   jq,
   tmux,
   unixtools,
@@ -32,6 +33,7 @@ rustPlatform.buildRustPackage {
   # script through `bash`, so the check sandbox needs bash and jq on PATH.
   nativeCheckInputs = [
     bash
+    git
     jq
     tmux
     unixtools.hostname

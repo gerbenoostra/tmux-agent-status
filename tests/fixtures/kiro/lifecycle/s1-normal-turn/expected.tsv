@@ -1,0 +1,4 @@
+# file	event	command	pane	window	bell
+001-agentspawn	agentSpawn	tmux-agent-status reset			0
+002-userpromptsubmit	userPromptSubmit	tmux-agent-status start	working	🤖	0
+003-stop	stop	tmux-agent-status set done	done	✅	1

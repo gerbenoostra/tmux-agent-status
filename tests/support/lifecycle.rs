@@ -7,8 +7,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const FIXTURES: &str = "tests/fixtures/claude-code/lifecycle";
-
 /// One probed scenario directory.
 pub struct Scenario {
     pub dir: PathBuf,
@@ -32,7 +30,12 @@ impl Scenario {
 
 /// Every scenario, sorted by name; fails when there is none.
 pub fn scenarios() -> Vec<Scenario> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
+    scenarios_for("claude-code")
+}
+
+pub fn scenarios_for(host: &str) -> Vec<Scenario> {
+    let fixtures = format!("tests/fixtures/{host}/lifecycle");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(&fixtures);
     let mut scenarios: Vec<Scenario> = fs::read_dir(&root)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", root.display()))
         .map(|entry| entry.expect("a readable directory entry").path())
@@ -45,8 +48,33 @@ pub fn scenarios() -> Vec<Scenario> {
     scenarios.sort_by(|a, b| a.dir.cmp(&b.dir));
     assert!(
         !scenarios.is_empty(),
-        "no lifecycle scenarios under {FIXTURES}"
+        "no lifecycle scenarios under {fixtures}"
     );
+    scenarios
+}
+
+pub fn all_scenarios() -> Vec<Scenario> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut scenarios = Vec::new();
+    for entry in
+        fs::read_dir(&root).unwrap_or_else(|e| panic!("cannot read {}: {e}", root.display()))
+    {
+        let lifecycle = entry
+            .expect("a readable fixture host")
+            .path()
+            .join("lifecycle");
+        if !lifecycle.is_dir() {
+            continue;
+        }
+        let host = lifecycle
+            .parent()
+            .and_then(Path::file_name)
+            .expect("a lifecycle directory has a host")
+            .to_string_lossy();
+        scenarios.extend(scenarios_for(&host));
+    }
+    scenarios.sort_by(|a, b| a.dir.cmp(&b.dir));
+    assert!(!scenarios.is_empty(), "no lifecycle scenarios");
     scenarios
 }
 

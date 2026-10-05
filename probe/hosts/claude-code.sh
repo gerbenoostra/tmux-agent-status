@@ -10,6 +10,9 @@
 # <EVENT> is the event name upper-cased (for example
 # TAS_PROBE_HOOK_SLEEP_SUBAGENTSTART=3).
 
+# shellcheck source=/dev/null
+. "$PROBE_DIR/hook-command.sh"
+
 probe_binary() {
     printf 'claude\n'
 }
@@ -19,7 +22,6 @@ probe_install_hooks() {
     cfg="$scratch/claude-config"
     ws="$scratch/workspace"
     log="$scratch/hooks.jsonl"
-    logger="$PROBE_DIR/log-hook.sh"
     mkdir -p "$cfg"
 
     # Every hook event the host documents, command form.
@@ -34,14 +36,7 @@ probe_install_hooks() {
 
     hooks='{}'
     for event in $events; do
-        var="TAS_PROBE_HOOK_SLEEP_$(printf '%s' "$event" | tr '[:lower:]' '[:upper:]')"
-        delay=0
-        eval "delay=\${$var:-0}"
-        # Hook commands run through a shell, so paths are quoted for one.
-        command=$(printf '%q %q %q' "$logger" "$event" "$log")
-        if [ "$delay" != "0" ]; then
-            command="TAS_HOOK_SLEEP=$(printf %q "$delay") $command"
-        fi
+        command=$(probe_hook_command "$event" "$log")
         # FileChanged's matcher is a `|`-list of literal basenames to watch,
         # not a pattern, and the file must exist at session start; the
         # workspace's `probe_file_changed` is created below - modify it to

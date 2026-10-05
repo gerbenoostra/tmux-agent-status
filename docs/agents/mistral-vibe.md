@@ -45,5 +45,7 @@ cp /path/to/share/agents/mistral-vibe/hooks.toml ./.vibe/hooks.toml
   can still be running when the parent's `post_agent` fires - so `post_agent`
   can mean "parent done, child still running". The hook payloads carry no child
   ID (not even the `childSessionId` the UI shows), so a child completion cannot
-  be attributed to the spawn. Vibe stays scalar; see
-  [Background work](README.md#background-work).
+  be attributed to the spawn. Vibe stays scalar. Observed on Mistral Vibe
+  2.25.8 (2026-10-04); the sanitized capture is in
+  [`tests/fixtures/mistral-vibe/lifecycle/s2-background-outlives-parent/`](../../tests/fixtures/mistral-vibe/lifecycle/s2-background-outlives-parent/).
+  See [Background work](README.md#background-work).

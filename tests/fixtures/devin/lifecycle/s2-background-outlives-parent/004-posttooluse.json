@@ -1,0 +1,1 @@
+{"event":"PostToolUse","ts_enter":1791126508115,"ts_exit":1791126508122,"payload":{"hook_event_name":"PostToolUse","tool_name":"run_subagent","tool_input":{},"tool_use_id":"call_b9d45c7000c84725bbe7bb5b#b311de5afa984f6489e7b4b5f337d776","tool_response":{"success":true,"agentId":"cac273d9"},"session_id":"confusion-text","prompt_id":"52adf38a-c349-4b5e-ac82-643f54fad236"}}
