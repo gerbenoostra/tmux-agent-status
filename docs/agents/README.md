@@ -144,7 +144,8 @@ while a child is still running.
 
 ### Other hosts: lifecycle scenario coverage
 
-The T1 scenario list S1-S12 was driven against each host whose probe could run.
+The scenarios S1-S12 [listed for Claude Code](#claude-code-observed-lifecycle-scenarios)
+were driven against each host whose probe could run.
 "Not probed" rows name the blocker rather than inferring a result from
 documentation.
 

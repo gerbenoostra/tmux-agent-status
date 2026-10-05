@@ -21,8 +21,8 @@ strings (`startup`, `resume`, `clear`), tool matchers are regular expressions.
 The payload schema is not verified, so the current binary mapping drops every
 payload for `--agent gemini` and exits 0. This keeps the hook config valid while
 the upstream API stabilises. There is no subagent start/end pair, so Gemini
-stays scalar; the T4 run did not probe it because the `gemini` binary is not
-installed - see [Background work](README.md#background-work).
+stays scalar; the 2026-10-04 lifecycle probe could not run because the `gemini`
+binary was not installed - see [Background work](README.md#background-work).
 
 ## Manual settings.json step
 
