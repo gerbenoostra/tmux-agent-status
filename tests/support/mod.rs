@@ -8,6 +8,7 @@
 pub mod command;
 pub mod lifecycle;
 pub mod markdown;
+pub mod replay;
 pub mod tempdir;
 pub mod tmux;
 
