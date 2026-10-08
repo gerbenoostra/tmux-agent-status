@@ -2,16 +2,24 @@
 //!
 //! Each test gets its own throwaway server from `support::tmux`.
 
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 mod support;
 
+use support::lifecycle::read_record;
+use support::tempdir::TempDir;
 use support::tmux::{Server, TMUX_TIMEOUT, output_within, wait_for};
 
 /// What an idle pane runs. The tool resolves panes from `$TMUX_PANE` and never
 /// inspects processes, so a pane does not have to look like an agent.
 const IDLE: &str = support::tmux::IDLE;
+
+/// The pane's shell for the bell tests; see `claude_lifecycle_replay.rs` for
+/// why the startup files are skipped.
+const SHELL: &str = "env HISTFILE=/dev/null bash --noprofile --norc";
 
 impl Server {
     fn start() -> Server {
@@ -174,6 +182,102 @@ impl Server {
         ])
         .trim_end()
         .to_owned()
+    }
+
+    /// `pane_active window_active session_attached` for `target`; `1 1 1` is
+    /// the pane an attached client is displaying.
+    fn displayed(&self, target: &str) -> String {
+        self.tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{pane_active} #{window_active} #{?session_attached,1,0}",
+        ])
+        .trim_end()
+        .to_owned()
+    }
+
+    /// One internal layer option of the pane, empty when unset.
+    fn layer(&self, pane: &str, option: &str) -> String {
+        self.tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            pane,
+            &format!("#{{{option}}}"),
+        ])
+        .trim_end()
+        .to_owned()
+    }
+
+    /// `1` while a bell is pending on the pane's window.
+    fn bell_flag(&self, pane: &str) -> String {
+        self.tmux(&["display-message", "-p", "-t", pane, "#{window_bell_flag}"])
+            .trim_end()
+            .to_owned()
+    }
+
+    /// Selecting a window acknowledges its bell; away and back clears the flag
+    /// so the next assertion sees only bells that came after.
+    fn clear_bell(&self, pane: &str) {
+        self.tmux(&["select-window", "-t", "t:dummy"]);
+        self.tmux(&[
+            "select-window",
+            "-t",
+            &format!("t:{}", self.window_id(pane)),
+        ]);
+    }
+
+    fn window_id(&self, pane: &str) -> String {
+        self.tmux(&["display-message", "-p", "-t", pane, "#{window_id}"])
+            .trim_end()
+            .to_owned()
+    }
+
+    /// A second idle window used to clear the bell flag between assertions.
+    fn add_dummy_window(&self) {
+        self.tmux(&[
+            "new-window",
+            "-d",
+            "-a",
+            "-t",
+            "t:{end}",
+            "-n",
+            "dummy",
+            IDLE,
+        ]);
+    }
+
+    /// Run `command` inside the pane's shell, the way an agent hook does:
+    /// `$TMUX`/`$TMUX_PANE` come from tmux and a bell lands on the pane's tty.
+    fn run_in_pane(&self, pane: &str, command: &str, seq: usize) {
+        let marker = format!("__tas_done_{seq}__");
+        self.tmux(&[
+            "send-keys",
+            "-t",
+            pane,
+            "-l",
+            &format!("{command}; echo {marker}"),
+        ]);
+        self.tmux(&["send-keys", "-t", pane, "Enter"]);
+        wait_for(
+            || self.tmux(&["capture-pane", "-t", pane, "-p"]),
+            |screen| screen.lines().any(|line| line.trim() == marker),
+        );
+    }
+
+    /// The pane's shell is answering; keys sent before it is ready can drop.
+    fn handshake(&self, pane: &str) {
+        wait_for(
+            || {
+                self.tmux(&["send-keys", "-t", pane, "-l", "echo __tas_ready__"]);
+                self.tmux(&["send-keys", "-t", pane, "Enter"]);
+                std::thread::sleep(Duration::from_millis(50));
+                self.tmux(&["capture-pane", "-t", pane, "-p"])
+            },
+            |screen| screen.lines().any(|line| line.trim() == "__tas_ready__"),
+        );
     }
 
     /// Source the shipped snippet, the way a user's `tmux.conf` does. The path is
@@ -544,27 +648,99 @@ fn finish_recomputes_a_window_with_a_higher_ranked_sibling() {
 }
 
 #[test]
-fn finish_on_an_attached_window_still_paints_its_glyph() {
-    // What `/clear` does to a stranded `working`: the session ends and the
-    // pane is resolved to `done`, which stays until the pane is acknowledged.
+fn finish_on_the_displayed_pane_is_already_seen() {
+    // What `/clear` does to a stranded `working`, watched live: the session
+    // ends on the pane the client is displaying, so the stop is already seen
+    // and leaves no pending completion, no projection and no glyph.
     let server = Server::start();
     let pane = server.first_pane();
     assert_ok(&server.agent_status(&pane, &["set", "working"]));
     let _client = server.attach();
-    wait_for(
-        || server.window_active_and_attached(&pane),
-        |seen| seen == "1 1",
-    );
+    wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
 
     assert_ok(&server.agent_status(&pane, &["finish"]));
 
-    assert_eq!(server.pane_statuses(&pane), ["done"]);
-    assert_eq!(server.window_status(&pane), "\u{2705}");
-
-    // The `SessionStart` of the successor session then clears it.
-    assert_ok(&server.agent_status(&pane, &["reset"]));
+    assert_eq!(server.layer(&pane, "@agent_pane_root"), "stopped");
     assert_eq!(server.pane_statuses(&pane), [""]);
     assert_eq!(server.window_status(&pane), "");
+    let options = server.pane_options(&pane);
+    for option in [
+        "@agent_pane_completion",
+        "@agent_pane_attention",
+        "@agent_pane_status",
+    ] {
+        assert!(!options.contains(option), "{option} left behind: {options}");
+    }
+}
+
+#[test]
+fn finish_on_the_displayed_pane_clears_waiting_and_pending_but_keeps_error() {
+    let server = Server::start();
+    let pane = server.first_pane();
+    let _client = server.attach();
+    wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
+
+    for initial in ["working", "waiting", "done"] {
+        assert_ok(&server.agent_status(&pane, &["reset"]));
+        assert_ok(&server.agent_status(&pane, &["set", initial]));
+
+        assert_ok(&server.agent_status(&pane, &["finish"]));
+
+        assert_eq!(server.pane_statuses(&pane), [""], "initial {initial}");
+        assert_eq!(
+            server.layer(&pane, "@agent_pane_root"),
+            "stopped",
+            "{initial}"
+        );
+        let options = server.pane_options(&pane);
+        for option in ["@agent_pane_completion", "@agent_pane_attention"] {
+            assert!(
+                !options.contains(option),
+                "{initial}: {option} in {options}"
+            );
+        }
+        assert_eq!(server.window_status(&pane), "", "initial {initial}");
+    }
+
+    assert_ok(&server.agent_status(&pane, &["set", "error"]));
+    assert_ok(&server.agent_status(&pane, &["finish"]));
+    assert_eq!(server.layer(&pane, "@agent_pane_attention"), "error");
+    assert_eq!(server.pane_statuses(&pane), ["error"]);
+    assert_eq!(server.window_status(&pane), "❗");
+}
+
+#[test]
+fn finish_on_a_pane_the_client_is_not_showing_keeps_the_pending_done() {
+    // An attached client on another pane or window was not watching the stop;
+    // the pending completion survives, exactly as on a detached session.
+    let server = Server::start();
+    let selected = server.first_pane();
+    let sibling = server.split(&selected);
+    let background = server.new_window("elsewhere");
+    let _client = server.attach();
+    wait_for(|| server.displayed(&selected), |seen| seen == "1 1 1");
+
+    // The sibling shares the screen; only `pane_active` tells it apart.
+    assert_ok(&server.agent_status(&sibling, &["finish"]));
+    assert_eq!(server.pane_status(&sibling), "done");
+    assert_eq!(server.layer(&sibling, "@agent_pane_completion"), "pending");
+    assert_eq!(server.window_status(&sibling), "✅");
+
+    // The selected pane of a background window: `pane_active` holds there
+    // too, so `window_active` is the term that keeps the completion.
+    assert_ok(&server.agent_status(&background, &["finish"]));
+    assert_eq!(server.pane_status(&background), "done");
+    assert_eq!(
+        server.layer(&background, "@agent_pane_completion"),
+        "pending"
+    );
+    assert_eq!(server.window_status(&background), "✅");
+
+    let detached = Server::start();
+    let pane = detached.first_pane();
+    assert_ok(&detached.agent_status(&pane, &["finish"]));
+    assert_eq!(detached.pane_status(&pane), "done");
+    assert_eq!(detached.layer(&pane, "@agent_pane_completion"), "pending");
 }
 
 #[test]
@@ -906,6 +1082,119 @@ fn finish_does_not_ring() {
         "#{window_bell_flag}",
     ]);
     assert_eq!(flag.trim(), "0");
+}
+
+/// The `payload` field of one captured claude-code lifecycle record.
+fn fixture_payload(scenario: &str, stem: &str) -> serde_json::Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/claude-code/lifecycle")
+        .join(scenario)
+        .join(format!("{stem}.json"));
+    read_record(&path)["payload"].clone()
+}
+
+#[test]
+fn a_session_end_on_the_displayed_pane_never_rings() {
+    // Generic `finish` and a matching `SessionEnd` through the adapter are
+    // both silent on the pane the client is watching - and stay silent, with
+    // the pending done, on a pane it is not.
+    //
+    // A bell on the displayed window raises no flag on its own server - tmux
+    // does not flag what the client is already looking at. The bell is read
+    // on the attached client's own pane instead: that pane is a window on the
+    // host server, where it flags like any other.
+    let server = Server::start_running(SHELL);
+    server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
+    server.tmux(&["set-option", "-g", "bell-action", "any"]);
+    let pane = server.first_pane();
+    server.handshake(&pane);
+    let host = server.attach();
+    host.tmux(&["set-option", "-g", "monitor-bell", "on"]);
+    host.tmux(&["set-option", "-g", "bell-action", "any"]);
+    let host_pane = host.first_pane();
+    wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
+
+    server.run_in_pane(&pane, "tmux-agent-status set working", 0);
+    server.run_in_pane(&pane, "tmux-agent-status finish", 1);
+    assert_eq!(server.pane_status(&pane), "");
+    assert_eq!(host.bell_flag(&host_pane), "0", "a displayed finish rings");
+
+    // A matching SessionEnd through `finish --agent claude-code --stdin`:
+    // the sessionstart payload accepts the session, the sessionend ends it.
+    let dir = TempDir::new("session-end-payloads");
+    let start_payload = fixture_payload("s1-permission-clean-finish", "001-sessionstart");
+    let mut end_payload = fixture_payload("s8-host-exit", "019-sessionend");
+    end_payload["session_id"] = start_payload["session_id"].clone();
+    let start_file = dir.write(
+        "start.json",
+        &serde_json::to_string(&start_payload).unwrap(),
+    );
+    let end_file = dir.write("end.json", &serde_json::to_string(&end_payload).unwrap());
+
+    server.run_in_pane(
+        &pane,
+        &format!(
+            "tmux-agent-status reset --agent claude-code --stdin < \"{}\"",
+            start_file.display()
+        ),
+        2,
+    );
+    server.run_in_pane(&pane, "tmux-agent-status set working", 3);
+    server.run_in_pane(
+        &pane,
+        &format!(
+            "tmux-agent-status finish --agent claude-code --stdin < \"{}\"",
+            end_file.display()
+        ),
+        4,
+    );
+    assert_eq!(server.pane_status(&pane), "");
+    assert_eq!(
+        host.bell_flag(&host_pane),
+        "0",
+        "a displayed SessionEnd rings"
+    );
+
+    // A session end nobody watches still keeps its glyph and stays silent.
+    let quiet = server.new_window_running_command("quiet-end", "finish");
+    wait_for(|| server.window_status(&quiet), |status| status == "✅");
+    assert_eq!(
+        server
+            .tmux(&["display-message", "-p", "-t", &quiet, "#{window_bell_flag}"])
+            .trim(),
+        "0"
+    );
+    assert_eq!(host.bell_flag(&host_pane), "0", "a session end rang late");
+}
+
+#[test]
+fn a_turn_end_on_the_displayed_pane_still_paints_and_rings() {
+    // Focus suppression belongs to session end only: `set done`, `waiting`
+    // and `error` on the pane being watched keep their glyph and their bell.
+    // As above, the bell is read on the attached client's host pane.
+    let server = Server::start_running(SHELL);
+    server.tmux(&["set-option", "-g", "monitor-bell", "on"]);
+    server.tmux(&["set-option", "-g", "bell-action", "any"]);
+    let pane = server.first_pane();
+    server.handshake(&pane);
+    let host = server.attach();
+    host.tmux(&["set-option", "-g", "monitor-bell", "on"]);
+    host.tmux(&["set-option", "-g", "bell-action", "any"]);
+    host.add_dummy_window();
+    let host_pane = host.first_pane();
+    wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
+
+    let mut seq = 0;
+    for (state, glyph) in [("done", "✅"), ("waiting", "💬"), ("error", "❗")] {
+        server.run_in_pane(&pane, "tmux-agent-status reset", seq);
+        seq += 1;
+        server.run_in_pane(&pane, &format!("tmux-agent-status set {state}"), seq);
+        seq += 1;
+        assert_eq!(server.pane_status(&pane), state, "{state}");
+        assert_eq!(server.window_status(&pane), glyph, "{state}");
+        wait_for(|| host.bell_flag(&host_pane), |flag| flag == "1");
+        host.clear_bell(&host_pane);
+    }
 }
 
 #[test]

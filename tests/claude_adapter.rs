@@ -18,7 +18,34 @@ use tmux_agent_status::notify::{HostSession, NotifyAction, WorkKey, dispatch};
 mod support;
 
 use support::lifecycle::read_record;
-use support::tmux::{Server, TMUX_TIMEOUT, output_within, output_within_feeding};
+use support::tmux::{Server, TMUX_TIMEOUT, output_within, output_within_feeding, wait_for};
+
+impl Server {
+    /// A second server whose only pane is a client attached to this one; the
+    /// displayed-pane tests need a real client for `session_attached`.
+    fn attach(&self) -> Server {
+        let host = Server::start_running(&format!("tmux -L {} attach -t t", self.socket()));
+        wait_for(
+            || self.tmux(&["list-clients", "-F", "#{client_name}"]),
+            |clients| !clients.trim().is_empty(),
+        );
+        host
+    }
+
+    /// `pane_active window_active session_attached` for `target`; `1 1 1` is
+    /// the pane an attached client is displaying.
+    fn displayed(&self, target: &str) -> String {
+        self.tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{pane_active} #{window_active} #{?session_attached,1,0}",
+        ])
+        .trim_end()
+        .to_owned()
+    }
+}
 
 const AGENT: &str = "claude-code";
 
@@ -460,4 +487,70 @@ fn session_commands_dispatch_the_payload_or_run_generic() {
     run(&["reset", "--agent", AGENT, "--stdin"], None);
     assert_eq!(server.pane_status(&pane), "");
     assert!(layer(&server, &pane, "@agent_pane_host_session").is_empty());
+}
+
+#[test]
+fn a_session_end_on_the_displayed_pane_is_already_seen() {
+    // The same dispatch, watched live: an accepted SessionEnd on the pane the
+    // client displays is already seen, so it leaves no completion glyph - a
+    // foreign session is still a no-op, and an unmapped payload still falls
+    // back to the generic finish, which is seen too.
+    if !support::tmux_or_skip() {
+        return;
+    }
+    let server = Server::start_running(support::tmux::IDLE);
+    let pane = server
+        .tmux(&["list-panes", "-t", "t", "-F", "#{pane_id}"])
+        .lines()
+        .next()
+        .expect("the session has a pane")
+        .to_owned();
+
+    let start = payload("s1-permission-clean-finish", "001-sessionstart");
+    let mut work = payload("s7-child-tool-events", "004-subagentstart");
+    work["session_id"] = start["session_id"].clone();
+    let foreign_end = payload("s8-host-exit", "019-sessionend");
+    let mut end_here = foreign_end.clone();
+    end_here["session_id"] = start["session_id"].clone();
+
+    let run = |args: &[&str], payload: Option<&serde_json::Value>| {
+        let out = binary(&server, &pane, args, payload);
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            support::stderr_of(&out)
+        );
+    };
+
+    let _client = server.attach();
+    wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
+
+    run(&["reset", "--agent", AGENT, "--stdin"], Some(&start));
+    run(&["notify", "--agent", AGENT, "--stdin"], Some(&work));
+    assert_eq!(server.pane_status(&pane), "working");
+
+    // A SessionEnd for another session changes nothing, even on screen.
+    run(&["notify", "--agent", AGENT, "--stdin"], Some(&foreign_end));
+    assert!(!layer(&server, &pane, "@agent_pane_work").is_empty());
+    assert_eq!(server.pane_status(&pane), "working");
+    assert_eq!(layer(&server, &pane, "@agent_pane_completion"), "");
+
+    // The matching SessionEnd through `notify` ends the session, its work -
+    // and, on the displayed pane, leaves no pending completion.
+    run(&["notify", "--agent", AGENT, "--stdin"], Some(&end_here));
+    assert_eq!(layer(&server, &pane, "@agent_pane_work"), "");
+    assert_eq!(server.pane_status(&pane), "");
+
+    // The same through `finish --agent --stdin`, and the generic fallback for
+    // a payload that maps to no EndSession: both are already seen here.
+    run(&["reset", "--agent", AGENT, "--stdin"], Some(&start));
+    run(&["notify", "--agent", AGENT, "--stdin"], Some(&work));
+    run(&["finish", "--agent", AGENT, "--stdin"], Some(&end_here));
+    assert_eq!(server.pane_status(&pane), "");
+    assert_eq!(layer(&server, &pane, "@agent_pane_completion"), "");
+
+    run(&["reset", "--agent", AGENT, "--stdin"], Some(&start));
+    run(&["finish", "--agent", AGENT, "--stdin"], Some(&start));
+    assert_eq!(server.pane_status(&pane), "");
+    assert_eq!(layer(&server, &pane, "@agent_pane_root"), "stopped");
 }

@@ -151,6 +151,49 @@ impl Server {
             .to_owned()
     }
 
+    /// A second server whose only pane is a client attached to this one; the
+    /// attached-state tests need a real client for `session_attached`.
+    fn attach(&self) -> Server {
+        let host = Server::start_running(&format!("tmux -L {} attach -t t", self.socket()));
+        wait_for(
+            || self.tmux(&["list-clients", "-F", "#{client_name}"]),
+            |clients| !clients.trim().is_empty(),
+        );
+        host
+    }
+
+    /// `pane_active window_active session_attached` for `target`; `1 1 1` is
+    /// the pane an attached client is displaying.
+    fn displayed(&self, target: &str) -> String {
+        self.tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{pane_active} #{window_active} #{?session_attached,1,0}",
+        ])
+        .trim_end()
+        .to_owned()
+    }
+
+    /// A new detached window with one idle pane, returning its id.
+    fn new_window(&self, name: &str) -> String {
+        self.tmux(&[
+            "new-window",
+            "-d",
+            "-a",
+            "-t",
+            "t:{end}",
+            "-n",
+            name,
+            "-P",
+            "-F",
+            "#{pane_id}",
+        ])
+        .trim_end()
+        .to_owned()
+    }
+
     /// A new pane in the same window.
     fn split(&self, pane: &str) -> String {
         self.tmux(&[
@@ -475,6 +518,182 @@ fn end_session_of_the_accepted_session_finishes_and_clears_the_ledger() {
         server.layer(&pane, "@agent_pane_work"),
         format!(",{},", key("s2", "a").encoded())
     );
+}
+
+#[test]
+fn an_accepted_end_session_on_the_displayed_pane_is_seen_and_clears_work() {
+    // The session ends on the pane a client is showing: the ledger is still
+    // dropped and the root still stops, but the completion is already seen -
+    // empty, not pending - so the pane projects nothing.
+    let server = Server::start();
+    let pane = server.first_pane();
+    server.apply(&pane, &reset_session("s1"));
+    server.apply(&pane, &work_started("s1", "a"));
+    server.apply(&pane, &NotifyAction::Report(State::Working));
+    let _client = server.attach();
+    wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
+
+    server.apply(&pane, &end_session("s1"));
+
+    assert_eq!(server.layer(&pane, "@agent_pane_work"), "");
+    assert_eq!(server.layer(&pane, "@agent_pane_root"), "stopped");
+    assert_eq!(server.layer(&pane, "@agent_pane_completion"), "");
+    assert_eq!(server.pane_status(&pane), "");
+    assert_eq!(server.window_status(&pane), "");
+}
+
+#[test]
+fn an_accepted_end_session_on_the_displayed_pane_clears_waiting_keeps_error() {
+    for (state, expected, attention) in [(State::Waiting, "", ""), (State::Error, "error", "error")]
+    {
+        let server = Server::start();
+        let pane = server.first_pane();
+        server.apply(&pane, &reset_session("s1"));
+        server.apply(&pane, &NotifyAction::Report(state));
+        let _client = server.attach();
+        wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
+
+        server.apply(&pane, &end_session("s1"));
+
+        assert_eq!(
+            server.layer(&pane, "@agent_pane_attention"),
+            attention,
+            "{state}"
+        );
+        assert_eq!(server.layer(&pane, "@agent_pane_completion"), "", "{state}");
+        assert_eq!(server.pane_status(&pane), expected, "{state}");
+    }
+}
+
+#[test]
+fn a_foreign_end_session_on_the_displayed_pane_is_a_no_op() {
+    // The displayed-pane completion choice sits inside the session gate: an
+    // end naming another session changes nothing, however it arrives.
+    let server = Server::start();
+    let pane = server.first_pane();
+    server.apply(&pane, &reset_session("s1"));
+    server.apply(&pane, &work_started("s1", "a"));
+    server.apply(&pane, &NotifyAction::Report(State::Waiting));
+    let _client = server.attach();
+    wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
+
+    let ledger = format!(",{},", key("s1", "a").encoded());
+    for (option, expected) in [
+        ("@agent_pane_root", "stopped".to_owned()),
+        ("@agent_pane_attention", "waiting".to_owned()),
+        ("@agent_pane_work", ledger.clone()),
+        (
+            "@agent_pane_host_session",
+            session("s1").encoded().to_owned(),
+        ),
+    ] {
+        server.apply(&pane, &end_session("s2"));
+        assert_eq!(server.layer(&pane, option), expected, "{option}");
+    }
+    assert_eq!(server.pane_status(&pane), "waiting");
+    assert_eq!(server.window_status(&pane), "💬");
+
+    // And after a new session was accepted, the old one's end is a no-op on
+    // the displayed pane too.
+    server.apply(&pane, &reset_session("s2"));
+    server.apply(&pane, &work_started("s2", "a"));
+    server.apply(&pane, &end_session("s1"));
+    assert_eq!(server.pane_status(&pane), "working");
+    assert_eq!(
+        server.layer(&pane, "@agent_pane_work"),
+        format!(",{},", key("s2", "a").encoded())
+    );
+    assert_eq!(server.layer(&pane, "@agent_pane_completion"), "");
+    assert_eq!(
+        server.layer(&pane, "@agent_pane_host_session"),
+        session("s2").encoded()
+    );
+
+    // With a pending completion on the displayed pane, a foreign end is a
+    // complete no-op: every layer, the projection and the glyph stand.
+    server.apply(&pane, &done());
+    let snapshot: Vec<(String, String)> = [
+        "@agent_pane_root",
+        "@agent_pane_attention",
+        "@agent_pane_completion",
+        "@agent_pane_work",
+        "@agent_pane_host_session",
+        "@agent_pane_model",
+    ]
+    .into_iter()
+    .map(|option| (option.to_owned(), server.layer(&pane, option)))
+    .collect();
+    let status = server.pane_status(&pane);
+    let window = server.window_status(&pane);
+    assert_eq!(status, "working");
+
+    server.apply(&pane, &end_session("s1"));
+
+    for (option, value) in &snapshot {
+        assert_eq!(&server.layer(&pane, option), value, "{option}");
+    }
+    assert_eq!(server.layer(&pane, "@agent_pane_completion"), "pending");
+    assert_eq!(server.pane_status(&pane), status);
+    assert_eq!(server.window_status(&pane), window);
+}
+
+#[test]
+fn an_end_session_off_screen_still_leaves_a_pending_done() {
+    // The same accepted clean stop, unobserved: the ledger still clears but
+    // the pending completion remains, whatever term of the displayed
+    // condition fails - an unselected sibling pane, a background window's
+    // selected pane, or no attached client at all.
+    for layout in ["inactive-pane", "background-window", "detached"] {
+        let server = Server::start();
+        let selected = server.first_pane();
+        let pane = match layout {
+            "inactive-pane" => server.split(&selected),
+            "background-window" => server.new_window("elsewhere"),
+            _ => selected.clone(),
+        };
+        server.apply(&pane, &reset_session("s1"));
+        server.apply(&pane, &work_started("s1", "a"));
+        let client = (layout != "detached").then(|| server.attach());
+        if client.is_some() {
+            wait_for(|| server.displayed(&selected), |seen| seen == "1 1 1");
+        }
+
+        server.apply(&pane, &end_session("s1"));
+
+        assert_eq!(server.layer(&pane, "@agent_pane_work"), "", "{layout}");
+        assert_eq!(
+            server.layer(&pane, "@agent_pane_completion"),
+            "pending",
+            "{layout}"
+        );
+        assert_eq!(server.pane_status(&pane), "done", "{layout}");
+        assert_eq!(server.window_status(&pane), "✅", "{layout}");
+        drop(client);
+    }
+}
+
+#[test]
+fn a_generic_finish_on_the_displayed_pane_preserves_tracked_work() {
+    // `finish` cannot end work it does not track: the ledger survives and
+    // keeps the pane on `working`; only the pending completion is suppressed
+    // on the pane being watched.
+    let server = Server::start();
+    let pane = server.first_pane();
+    server.apply(&pane, &reset_session("s1"));
+    server.apply(&pane, &work_started("s1", "a"));
+    let _client = server.attach();
+    wait_for(|| server.displayed(&pane), |seen| seen == "1 1 1");
+
+    server.run_command(&pane, command::finish);
+
+    assert_eq!(server.layer(&pane, "@agent_pane_root"), "stopped");
+    assert_eq!(
+        server.layer(&pane, "@agent_pane_work"),
+        format!(",{},", key("s1", "a").encoded())
+    );
+    assert_eq!(server.layer(&pane, "@agent_pane_completion"), "");
+    assert_eq!(server.pane_status(&pane), "working");
+    assert_eq!(server.window_status(&pane), "🤖");
 }
 
 #[test]

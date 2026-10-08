@@ -114,13 +114,15 @@ pub fn start(pane: Option<&str>) -> io::Result<()> {
     transition(pane, formats::start(), true)
 }
 
-/// `tmux-agent-status finish`: silently resolve this pane's session to done.
+/// `tmux-agent-status finish`: silently stop this pane's session.
 ///
 /// `set done` without the bell. A pane holding `error` keeps it, because
 /// `error` outranks a clean stop. Work the pane is still tracking keeps the
-/// pane on `working` until it ends.
+/// pane on `working` until it ends. On the pane a client is already
+/// displaying the stop counts as seen - no pending completion is left -
+/// because the end happened on screen.
 pub fn finish(pane: Option<&str>) -> io::Result<()> {
-    transition(pane, formats::finish(), true)
+    transition(pane, formats::finish_session(), true)
 }
 
 /// `tmux-agent-status reset`: unconditionally drop this pane's whole aggregate
@@ -254,6 +256,7 @@ mod tests {
             queue(&pane, formats::work_started(&key), true),
             queue(&pane, formats::work_stopped(&key), true),
             queue(&pane, formats::end_session(&session), true),
+            queue(&pane, formats::finish_session(), true),
         ]
         .into_iter()
         .chain(
@@ -275,6 +278,7 @@ mod tests {
         for (layers, migrate) in [
             (formats::start(), true),
             (formats::finish(), true),
+            (formats::finish_session(), true),
             (formats::seen(), true),
             (formats::reset(), false),
             (formats::reset_session(&session), false),

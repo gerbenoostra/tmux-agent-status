@@ -133,15 +133,24 @@ subject of a bug. Read this section before changing behaviour.
   which pane wants you most. `start` is the only write that does not defer to
   what the pane holds - typing a prompt is seeing the pane, so that event
   clears what the last turn left; tracked work survives it.
-- **Acknowledgement is a focus event on one pane, never an inference.** A
-  state is always written and always shown, whatever tmux thinks about the
+- **Later acknowledgement is a focus event on one pane.** Turn-end states
+  are always written and always shown, whatever tmux thinks about the
   window being current or the session being attached - there is no
-  "watched window" rule to refine. Only `pane-focus-in` firing for a pane (or
-  its `focus-events off` fallbacks, `session-window-changed` and
-  `window-pane-changed`) acknowledges that pane; a sibling that is merely on
-  screen, or a window tmux calls current on a detached session, is left
-  alone. The other clears are explicit events, not acknowledgement: `start`
-  and `reset`.
+  "watched window" rule deciding whether to report them. Only
+  `pane-focus-in` firing for a pane (or its `focus-events off` fallbacks,
+  `session-window-changed` and `window-pane-changed`) acknowledges that
+  pane; a sibling that is merely on screen, or a window tmux calls current
+  on a detached session, is left alone. The other clears are explicit
+  events, not acknowledgement: `start` and `reset`.
+  - One exception is built into the transition itself: a session-end -
+    `finish`, or an `EndSession` from the accepted host session - is decided
+    by the same queue with `pane_active && window_active &&
+    session_attached`. When all three hold, an attached client is displaying
+    exactly that pane and the stop was watched as it happened, so the
+    completion is written empty instead of `pending`. `pane_active` alone
+    also holds for the selected pane of a background window, so all three
+    terms are required. Turn-end `set done`/`waiting`/`error` never consult
+    this.
 - **`#W` does not expand inside a format modifier** such as
   `#{=/25/…:#W}` (observed on tmux 3.6); use `#{window_name}` there.
 - **tmux expands `$NAME`/`${NAME}` in `source-file` arguments outside single
