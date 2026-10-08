@@ -279,6 +279,14 @@ which expands to an empty value when no pane is available.
 For manual calls the pane resolves in this order: an explicit argument (`--pane` or the positional),
 `$TMUX_AGENT_STATUS_PANE`, `$TMUX_PANE`.
 
+### Testing with an attached client
+
+Bell assertions on a pane that has a client attached to its session must read
+`window_bell_flag` from the attached client's pane, not from the pane under test.
+tmux does not flag the window an attached client is already looking at, so the
+test setup attaches a second tmux server (`Server::attach`) and reads the flag
+from its pane.
+
 ## Debugging dropped events
 
 Set `TMUX_AGENT_STATUS_DEBUG=1` to log diagnostic messages to stderr. When the `notify`
