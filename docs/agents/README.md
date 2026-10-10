@@ -60,6 +60,14 @@ the previous agent left in the pane; `finish` goes on session end and resolves t
 leaving an `error` alone. Neither of those two rings the bell. The CLI accepts `--json` when the
 agent expects a JSON response.
 
+A session end on the pane the user is already looking at - the selected pane of the current window
+of an attached session - counts as already seen: `finish` then records the stop with no pending
+`done` glyph and still no bell. A session-end event that carries the accepted session's id also
+clears that session's tracked-work ledger; a generic `finish` preserves it, so work the host never
+ended keeps the pane on `working`. On any other pane the pending `done` stands as usual. `set done`,
+`waiting` and `error` never suppress by focus, and the focus hooks remain the acknowledgement for
+everything that did leave a state.
+
 The following table shows how lifecycle events map for common agents. Blank cells link to the
 upstream documentation or issue that says the event does not exist.
 

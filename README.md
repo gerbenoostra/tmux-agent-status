@@ -78,7 +78,11 @@ The flow is:
    that arrives while tracked work is still running stays silent - the clean stop after the last
    item is the one that rings.
 5. A state is always written and always shown, whatever tmux thinks about the window being current
-   or the session being attached.
+   or the session being attached - with one exception. A session-ending `finish` (including a
+   matching session-end payload through `--agent <name> --stdin`) on the pane a client is
+   displaying - the selected pane of the current window of an attached session - is already seen:
+   it writes no pending outcome and rings no bell. On any other pane it behaves like every clean
+   stop.
 6. When a pane gains focus, its unacknowledged attention and pending outcome are reset (a running
    turn and tracked work stay), and the window glyph is recomputed from what its other panes still
    hold.
@@ -108,7 +112,10 @@ gained focus - a sibling pane keeps its state, whether it is on screen in a spli
 a zoomed pane.
 
 A turn that ends on the pane you are **already** focused on still paints its glyph and rings the
-bell: it stays until you type the next prompt, or move focus away and back. A turn that ends while
+bell: it stays until you type the next prompt, or move focus away and back. Only the session-ending
+`finish` (or an accepted session-end event) is different: watched live it needs no glyph or bell at
+all, while off the pane you are on - another pane, another window, or a detached session - it leaves
+the same pending `done` as any clean stop. A turn that ends while
 you are **detached**, or while your terminal is showing another tab, keeps its glyph until you focus
 that pane again, which makes the glyph the signal that survives a reconnect - except for the pane
 you land on: the first client attach to a session fires focus for that one pane, clearing it too (a

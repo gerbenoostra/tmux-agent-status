@@ -207,7 +207,7 @@ pub fn start() -> Vec<Layer> {
     ]
 }
 
-/// The layer writes of a clean stop: `set done`, `Report(done)` and `finish`.
+/// The layer writes of a clean stop: `set done` and `Report(done)`.
 ///
 /// `error` keeps standing - it outranks a clean stop - while `waiting` is
 /// replaced: the turn could only end once the input was given.
@@ -219,6 +219,37 @@ pub fn finish() -> Vec<Layer> {
             gate(eq(attention(), "error"), "error", String::new()),
         ),
         layer(PANE_COMPLETION, "pending"),
+    ]
+}
+
+/// `1` while a client displays this pane: the pane is selected in its
+/// window, that window is its session's current one, and a client is
+/// attached to that session. `pane_active` alone also holds for the selected
+/// pane of a background window, and an attached client shares its session's
+/// current window, so only all three terms mean "on screen".
+fn displayed() -> String {
+    all(&[
+        "#{pane_active}".to_owned(),
+        "#{window_active}".to_owned(),
+        "#{session_attached}".to_owned(),
+    ])
+}
+
+/// The layer writes of a session-ending clean stop: `finish`, and a
+/// `finish --agent <name> --stdin` whose payload maps to nothing.
+///
+/// The same clean stop as the turn-end `finish` formatter, except on the
+/// pane a client is already displaying: that stop was seen as it happened,
+/// so the completion stays empty instead of `pending` and nothing remains to
+/// acknowledge.
+pub fn finish_session() -> Vec<Layer> {
+    vec![
+        layer(PANE_ROOT, "stopped"),
+        layer(
+            PANE_ATTENTION,
+            gate(eq(attention(), "error"), "error", String::new()),
+        ),
+        layer(PANE_COMPLETION, gate(displayed(), "", "pending".to_owned())),
     ]
 }
 
@@ -311,7 +342,9 @@ pub fn work_gone() -> String {
 
 /// The layer writes for `EndSession` of the accepted session: the silent clean
 /// stop, plus the ledger cleared - a host whose lifecycle ends has no work to
-/// keep tracking. An `EndSession` from any other session is a no-op.
+/// keep tracking. An `EndSession` from any other session is a no-op. On the
+/// pane a client is already displaying the stop was seen as it happened, so
+/// the completion stays empty instead of `pending`.
 pub fn end_session(session: &HostSession) -> Vec<Layer> {
     let matches = accepted(session);
     vec![
@@ -326,7 +359,11 @@ pub fn end_session(session: &HostSession) -> Vec<Layer> {
         ),
         layer(
             PANE_COMPLETION,
-            gate(matches.clone(), "pending", completion()),
+            gate(
+                matches.clone(),
+                &gate(displayed(), "", "pending".to_owned()),
+                completion(),
+            ),
         ),
         layer(PANE_WORK, gate(matches, "", work())),
     ]
@@ -450,11 +487,67 @@ mod tests {
         assert_eq!(writes[3].format, "1");
     }
 
+    /// `pane_active`, `window_active` and `session_attached` together mean a
+    /// client is displaying the pane; only the session-end formats may use
+    /// them, to write the already-seen stop.
     #[test]
-    fn no_format_consults_whether_the_window_is_on_screen() {
+    fn only_the_completion_layer_of_a_session_end_consults_the_display() {
+        let session = HostSession::new("s").unwrap();
+        for writes in [finish_session(), end_session(&session)] {
+            for write in &writes {
+                for term in ["pane_active", "window_active", "session_attached"] {
+                    if write.option == PANE_COMPLETION {
+                        assert!(write.format.contains(term), "{term}: {write:?}");
+                    } else {
+                        assert!(!write.format.contains(term), "{term}: {write:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_session_end_writes_pending_completion_only_off_screen() {
+        assert_eq!(
+            displayed(),
+            "#{&&:#{pane_active},#{&&:#{window_active},#{session_attached}}}"
+        );
+        let seen = gate(displayed(), "", "pending".to_owned());
+        let writes = finish_session();
+        assert_eq!(writes[0].option, PANE_ROOT);
+        assert_eq!(writes[0].format, "stopped");
+        assert_eq!(writes[1].option, PANE_ATTENTION);
+        assert_eq!(
+            writes[1].format,
+            gate(eq(attention(), "error"), "error", String::new())
+        );
+        assert_eq!(writes[2].option, PANE_COMPLETION);
+        assert_eq!(writes[2].format, seen);
+
+        // EndSession makes the same choice, inside its session gate.
+        let session = HostSession::new("s").unwrap();
+        let write = end_session(&session)
+            .into_iter()
+            .find(|write| write.option == PANE_COMPLETION)
+            .expect("end_session writes a completion");
+        assert!(
+            write
+                .format
+                .starts_with(&format!("#{{?{},", accepted(&session))),
+            "{write:?}"
+        );
+        assert!(write.format.contains(&seen), "{write:?}");
+        assert!(
+            write.format.ends_with(&format!("{}}}", completion())),
+            "{write:?}"
+        );
+    }
+
+    #[test]
+    fn no_other_format_consults_whether_the_pane_is_displayed() {
         let key = WorkKey::new("s", "w").unwrap();
         let session = HostSession::new("s").unwrap();
-        let mut formats = vec![project()];
+        let mut formats = vec![project(), glyph(), work_gone()];
         for writes in [
             start(),
             seen(),
@@ -462,8 +555,8 @@ mod tests {
             reset_session(&session),
             work_started(&key),
             work_stopped(&key),
-            end_session(&session),
             migrate(),
+            finish(),
         ] {
             formats.extend(writes.into_iter().map(|write| write.format));
         }
@@ -473,8 +566,9 @@ mod tests {
                 .flat_map(|s| report(*s).into_iter().map(|write| write.format)),
         );
         for format in formats {
-            assert!(!format.contains("window_active"), "{format}");
-            assert!(!format.contains("session_attached"), "{format}");
+            for term in ["pane_active", "window_active", "session_attached"] {
+                assert!(!format.contains(term), "{term}: {format}");
+            }
         }
     }
 
