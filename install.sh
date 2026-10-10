@@ -4,7 +4,7 @@
 #
 # x-release-please-start-version
 # Environment variables:
-#   TMUX_AGENT_STATUS_VERSION       - pin a specific release (e.g. v0.1.2)
+#   TMUX_AGENT_STATUS_VERSION       - pin a specific release (e.g. v0.2.0)
 #   TMUX_AGENT_STATUS_INSTALL_DIR   - override install directory (default: $HOME/.local/bin)
 #   TMUX_AGENT_STATUS_SKIP_CHECKSUM - set to 1 to skip checksum verification (not recommended)
 # x-release-please-end
@@ -23,7 +23,7 @@ INSTALL_DIR="${TMUX_AGENT_STATUS_INSTALL_DIR:-$HOME/.local/bin}"
 # The release this script ships with. Once published, the latest release is
 # never older, so an older answer from GitHub means its "latest" pointer has
 # not caught up or this release is still a draft.
-MIN_VERSION="0.1.2"
+MIN_VERSION="0.2.0"
 # x-release-please-end
 BUILD_FROM_SOURCE_URL="https://github.com/${REPO}/blob/main/docs/install.md#build-from-source"
 
@@ -49,7 +49,7 @@ tmux-agent-status installer
 Usage: curl -fsSL https://raw.githubusercontent.com/gerbenoostra/tmux-agent-status/main/install.sh | sh
 
 Environment variables:
-  TMUX_AGENT_STATUS_VERSION       pin a release (e.g. v0.1.2)
+  TMUX_AGENT_STATUS_VERSION       pin a release (e.g. v0.2.0)
   TMUX_AGENT_STATUS_INSTALL_DIR   install directory (default: $HOME/.local/bin)
   TMUX_AGENT_STATUS_SKIP_CHECKSUM set to 1 to skip checksum verification
 EOF
